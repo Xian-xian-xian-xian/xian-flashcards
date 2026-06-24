@@ -1,5 +1,15 @@
 import type { Card, Deck, ReviewRating, Settings, Stats } from "./types";
 
+export type CardPayload = {
+  card_type?: Card["card_type"];
+  front: string;
+  back: string;
+  phonetic?: string;
+  example?: string;
+  mnemonic?: string;
+  note?: string;
+};
+
 async function request<T>(url: string, options?: RequestInit): Promise<T> {
   const response = await fetch(url, {
     headers: options?.body instanceof FormData ? undefined : { "Content-Type": "application/json" },
@@ -20,7 +30,7 @@ export const api = {
     request<{ ok: true }>(`/api/decks/${id}`, { method: "PATCH", body: JSON.stringify(payload) }),
   deleteDeck: (id: number) => request<{ ok: true }>(`/api/decks/${id}`, { method: "DELETE" }),
   cards: (deckId: number) => request<Card[]>(`/api/decks/${deckId}/cards`),
-  createCard: (deckId: number, payload: { front: string; back: string; example?: string; note?: string }) =>
+  createCard: (deckId: number, payload: CardPayload) =>
     request<{ id: number }>(`/api/decks/${deckId}/cards`, { method: "POST", body: JSON.stringify(payload) }),
   updateCard: (id: number, payload: Partial<Card>) =>
     request<{ ok: true }>(`/api/cards/${id}`, { method: "PATCH", body: JSON.stringify(payload) }),

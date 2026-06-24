@@ -20,9 +20,12 @@ app.use(cors());
 app.use(express.json({ limit: "10mb" }));
 
 type CardInput = {
+  card_type?: "basic" | "word";
   front: string;
   back: string;
+  phonetic?: string;
   example?: string;
+  mnemonic?: string;
   note?: string;
 };
 
@@ -93,14 +96,18 @@ function descendantDeckIds(deckId: number): number[] {
 
 function createCard(deckId: number, input: CardInput) {
   const createdAt = nowIso();
+  const cardType = input.card_type === "word" ? "word" : "basic";
   run(
-    `INSERT INTO cards (deck_id, front, back, example, note, created_at, updated_at)
-     VALUES (?, ?, ?, ?, ?, ?, ?)`,
+    `INSERT INTO cards (deck_id, card_type, front, back, phonetic, example, mnemonic, note, created_at, updated_at)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     [
       deckId,
+      cardType,
       requireText(input.front, "front"),
       requireText(input.back, "back"),
+      input.phonetic?.trim() ?? "",
       input.example?.trim() ?? "",
+      input.mnemonic?.trim() ?? "",
       input.note?.trim() ?? "",
       createdAt,
       createdAt
@@ -231,17 +238,23 @@ app.post("/api/decks/:id/cards", (req, res) => {
 app.patch("/api/cards/:id", (req, res) => {
   run(
     `UPDATE cards
-     SET front = COALESCE(?, front),
+     SET card_type = COALESCE(?, card_type),
+         front = COALESCE(?, front),
          back = COALESCE(?, back),
+         phonetic = COALESCE(?, phonetic),
          example = COALESCE(?, example),
+         mnemonic = COALESCE(?, mnemonic),
          note = COALESCE(?, note),
          favorite = COALESCE(?, favorite),
          updated_at = ?
      WHERE id = ?`,
     [
+      req.body.card_type === "word" || req.body.card_type === "basic" ? req.body.card_type : null,
       req.body.front?.trim() || null,
       req.body.back?.trim() || null,
+      req.body.phonetic?.trim() ?? null,
       req.body.example?.trim() ?? null,
+      req.body.mnemonic?.trim() ?? null,
       req.body.note?.trim() ?? null,
       typeof req.body.favorite === "boolean" || typeof req.body.favorite === "number"
         ? Number(req.body.favorite)
@@ -263,11 +276,16 @@ function normalizeImportRows(rows: Record<string, unknown>[]) {
   return rows
     .map((row) => {
       const values = Object.values(row).map((value) => String(value ?? "").trim());
+      const hasPhonetic = "phonetic" in row || "音标" in row;
+      const cardType: "basic" | "word" = String(row.card_type ?? row.type ?? row["类型"] ?? "").trim() === "word" || String(row["卡片类型"] ?? "").trim() === "单词卡" ? "word" : "basic";
       return {
+        card_type: cardType,
         front: String(row.front ?? row.word ?? row["单词"] ?? values[0] ?? "").trim(),
         back: String(row.back ?? row.meaning ?? row["释义"] ?? values[1] ?? "").trim(),
+        phonetic: String(row.phonetic ?? row["音标"] ?? "").trim(),
         example: String(row.example ?? row["例句"] ?? values[2] ?? "").trim(),
-        note: String(row.note ?? row["备注"] ?? values[3] ?? "").trim()
+        mnemonic: String(row.mnemonic ?? row["助记"] ?? (hasPhonetic ? values[4] : values[3]) ?? "").trim(),
+        note: String(row.note ?? row["备注"] ?? (hasPhonetic ? values[5] : values[4]) ?? "").trim()
       };
     })
     .filter((row) => row.front && row.back);

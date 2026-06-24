@@ -552,13 +552,13 @@ textarea:focus {
 
 .card-form {
   display: grid;
-  grid-template-columns: 1fr 1fr 1fr auto;
+  grid-template-columns: repeat(3, minmax(150px, 1fr)) auto;
   gap: 10px;
   margin: 14px 0;
 }
 
 .edit-card-form {
-  grid-template-columns: 1fr 1fr 1fr auto auto;
+  grid-template-columns: repeat(3, minmax(150px, 1fr)) auto auto;
   padding: 12px;
   border: 1px solid var(--border);
   border-radius: 8px;
@@ -571,6 +571,11 @@ textarea:focus {
 
 .word-title strong {
   font-size: 22px;
+}
+
+.phonetic {
+  color: var(--muted);
+  font-weight: 800;
 }
 
 .word-card p {
@@ -607,6 +612,7 @@ textarea:focus {
 }
 
 .study-panel {
+  position: relative;
   padding: 22px;
 }
 
@@ -631,6 +637,25 @@ textarea:focus {
   background: linear-gradient(90deg, var(--primary), var(--blue), var(--primary));
   background-size: 180% 100%;
   animation: progress-shine 1.8s linear infinite;
+}
+
+.study-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  margin: -6px 0 12px;
+}
+
+.study-edit-form {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(150px, 1fr)) auto auto;
+  gap: 10px;
+  margin-bottom: 14px;
+  padding: 12px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--primary-soft);
+  animation: slide-up 180ms ease both;
 }
 
 .flip-card,
@@ -666,6 +691,40 @@ textarea:focus {
 .flip-card span {
   font-size: clamp(32px, 8vw, 72px);
   font-weight: 950;
+}
+
+.flip-card .word-face,
+.flip-card .word-back {
+  display: grid;
+  gap: 10px;
+  justify-items: center;
+  width: min(720px, 100%);
+  font-size: inherit;
+}
+
+.flip-card .word-face strong,
+.flip-card .word-back strong {
+  font-size: clamp(38px, 8vw, 72px);
+  line-height: 1;
+}
+
+.flip-card .word-face em,
+.flip-card .word-back em {
+  color: var(--primary-strong);
+  font-size: clamp(18px, 3vw, 28px);
+  font-style: normal;
+  font-weight: 900;
+}
+
+.flip-card .word-back b {
+  font-size: clamp(22px, 4vw, 34px);
+}
+
+.flip-card .word-back small {
+  max-width: 60ch;
+  margin-top: 0;
+  font-size: 16px;
+  line-height: 1.55;
 }
 
 .flip-card small {
@@ -912,7 +971,8 @@ textarea {
   .metric-grid,
   .deck-grid,
   .two-column,
-  .card-form {
+  .card-form,
+  .study-edit-form {
     grid-template-columns: 1fr;
   }
 

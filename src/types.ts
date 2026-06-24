@@ -1,5 +1,6 @@
 export type ReviewRating = "known" | "fuzzy" | "unknown";
 export type ThemeMode = "system" | "light" | "dark";
+export type CardType = "basic" | "word";
 
 export type Deck = {
   id: number;
@@ -19,9 +20,12 @@ export type Deck = {
 export type Card = {
   id: number;
   deck_id: number;
+  card_type: CardType;
   front: string;
   back: string;
+  phonetic: string;
   example: string;
+  mnemonic: string;
   note: string;
   favorite: number;
   stage: number;

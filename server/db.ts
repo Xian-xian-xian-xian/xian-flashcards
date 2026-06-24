@@ -35,9 +35,12 @@ export async function initDb() {
     CREATE TABLE IF NOT EXISTS cards (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
       deck_id INTEGER NOT NULL,
+      card_type TEXT DEFAULT 'basic',
       front TEXT NOT NULL,
       back TEXT NOT NULL,
+      phonetic TEXT DEFAULT '',
       example TEXT DEFAULT '',
+      mnemonic TEXT DEFAULT '',
       note TEXT DEFAULT '',
       favorite INTEGER DEFAULT 0,
       created_at TEXT NOT NULL,
@@ -77,6 +80,16 @@ export async function initDb() {
   const deckColumns = all<{ name: string }>("PRAGMA table_info(decks)").map((column) => column.name);
   if (!deckColumns.includes("parent_id")) {
     exec("ALTER TABLE decks ADD COLUMN parent_id INTEGER");
+  }
+  const cardColumns = all<{ name: string }>("PRAGMA table_info(cards)").map((column) => column.name);
+  if (!cardColumns.includes("card_type")) {
+    exec("ALTER TABLE cards ADD COLUMN card_type TEXT DEFAULT 'basic'");
+  }
+  if (!cardColumns.includes("phonetic")) {
+    exec("ALTER TABLE cards ADD COLUMN phonetic TEXT DEFAULT ''");
+  }
+  if (!cardColumns.includes("mnemonic")) {
+    exec("ALTER TABLE cards ADD COLUMN mnemonic TEXT DEFAULT ''");
   }
   persist();
 }

@@ -23,7 +23,7 @@ import {
   XCircle
 } from "lucide-react";
 import { FormEvent, useEffect, useMemo, useState } from "react";
-import { api } from "./api";
+import { api, type CardPayload } from "./api";
 import type { Card, Deck, ReviewRating, Settings, Stats, ThemeMode } from "./types";
 
 type View = "home" | "deck" | "study" | "import" | "settings";
@@ -46,6 +46,10 @@ const ratingLabels: Record<ReviewRating, string> = {
 
 function normalizeAnswer(value: string) {
   return value.trim().toLowerCase().replace(/\s+/g, " ");
+}
+
+function isWordCard(card: Card) {
+  return card.card_type === "word";
 }
 
 function dueText(value: string) {
@@ -86,7 +90,7 @@ export default function App() {
     const query = normalizeAnswer(search);
     return cards.filter((card) => {
       if (!query) return true;
-      return normalizeAnswer(`${card.front} ${card.back} ${card.example} ${card.note}`).includes(query);
+      return normalizeAnswer(`${card.front} ${card.phonetic} ${card.back} ${card.example} ${card.mnemonic} ${card.note}`).includes(query);
     });
   }, [cards, search]);
 
@@ -248,6 +252,10 @@ export default function App() {
             cards={dueCards.length ? dueCards : cards}
             selectedDeck={selectedDeck}
             onAnswer={handleAnswer}
+            onUpdateCard={async (id, payload) => {
+              await api.updateCard(id, payload);
+              await Promise.all([selectedDeckId ? loadCards(selectedDeckId) : Promise.resolve(), refresh()]);
+            }}
             onSpeak={speak}
           />
         )}
@@ -398,8 +406,8 @@ function DeckView(props: {
   onCreateDeck: (name: string, parentId?: number | null) => Promise<void>;
   onUpdateDeck: (id: number, name: string) => Promise<void>;
   onDeleteDeck: (id: number) => Promise<void>;
-  onCreateCard: (payload: { front: string; back: string; example?: string; note?: string }) => Promise<void>;
-  onUpdateCard: (id: number, payload: { front: string; back: string; example?: string; note?: string }) => Promise<void>;
+  onCreateCard: (payload: CardPayload) => Promise<void>;
+  onUpdateCard: (id: number, payload: CardPayload) => Promise<void>;
   onDeleteCard: (id: number) => Promise<void>;
   onToggleFavorite: (card: Card) => Promise<void>;
   onSpeak: (text: string, language?: string) => void;
@@ -409,9 +417,12 @@ function DeckView(props: {
   const [editingDeckId, setEditingDeckId] = useState<number | null>(null);
   const [editingDeckName, setEditingDeckName] = useState("");
   const [openDeckMenuId, setOpenDeckMenuId] = useState<number | null>(null);
+  const [cardType, setCardType] = useState<Card["card_type"]>("word");
   const [front, setFront] = useState("");
+  const [phonetic, setPhonetic] = useState("");
   const [back, setBack] = useState("");
   const [example, setExample] = useState("");
+  const [mnemonic, setMnemonic] = useState("");
   const [editingCard, setEditingCard] = useState<Card | null>(null);
 
   async function addDeck(event: FormEvent) {
@@ -425,10 +436,12 @@ function DeckView(props: {
   async function addCard(event: FormEvent) {
     event.preventDefault();
     if (!front.trim() || !back.trim()) return;
-    await props.onCreateCard({ front, back, example });
+    await props.onCreateCard({ card_type: cardType, front, back, phonetic, example, mnemonic });
     setFront("");
+    setPhonetic("");
     setBack("");
     setExample("");
+    setMnemonic("");
   }
 
   async function saveDeck(id: number) {
@@ -444,7 +457,10 @@ function DeckView(props: {
     await props.onUpdateCard(editingCard.id, {
       front: editingCard.front,
       back: editingCard.back,
+      card_type: editingCard.card_type,
+      phonetic: editingCard.phonetic,
       example: editingCard.example,
+      mnemonic: editingCard.mnemonic,
       note: editingCard.note
     });
     setEditingCard(null);
@@ -536,16 +552,28 @@ function DeckView(props: {
           </div>
         </div>
         <form className="card-form" onSubmit={addCard}>
+          <select value={cardType} onChange={(event) => setCardType(event.target.value as Card["card_type"])} title="卡片类型">
+            <option value="word">单词卡</option>
+            <option value="basic">普通卡</option>
+          </select>
           <input value={front} onChange={(event) => setFront(event.target.value)} placeholder="单词 / 短语" />
+          {cardType === "word" && <input value={phonetic} onChange={(event) => setPhonetic(event.target.value)} placeholder="音标（可选）" />}
           <input value={back} onChange={(event) => setBack(event.target.value)} placeholder="释义" />
           <input value={example} onChange={(event) => setExample(event.target.value)} placeholder="例句（可选）" />
+          {cardType === "word" && <input value={mnemonic} onChange={(event) => setMnemonic(event.target.value)} placeholder="助记（可选）" />}
           <button className="primary-button"><Plus /> 添加</button>
         </form>
         {editingCard && (
           <form className="card-form edit-card-form" onSubmit={saveCard}>
+            <select value={editingCard.card_type} onChange={(event) => setEditingCard({ ...editingCard, card_type: event.target.value as Card["card_type"] })}>
+              <option value="word">单词卡</option>
+              <option value="basic">普通卡</option>
+            </select>
             <input value={editingCard.front} onChange={(event) => setEditingCard({ ...editingCard, front: event.target.value })} placeholder="单词 / 短语" />
+            {isWordCard(editingCard) && <input value={editingCard.phonetic} onChange={(event) => setEditingCard({ ...editingCard, phonetic: event.target.value })} placeholder="音标（可选）" />}
             <input value={editingCard.back} onChange={(event) => setEditingCard({ ...editingCard, back: event.target.value })} placeholder="释义" />
             <input value={editingCard.example} onChange={(event) => setEditingCard({ ...editingCard, example: event.target.value })} placeholder="例句（可选）" />
+            {isWordCard(editingCard) && <input value={editingCard.mnemonic} onChange={(event) => setEditingCard({ ...editingCard, mnemonic: event.target.value })} placeholder="助记（可选）" />}
             <button className="primary-button"><Save /> 保存</button>
             <button className="primary-button secondary-button" type="button" onClick={() => setEditingCard(null)}><XCircle /> 取消</button>
           </form>
@@ -556,6 +584,7 @@ function DeckView(props: {
               <div>
                 <div className="word-title">
                   <strong>{card.front}</strong>
+                  {isWordCard(card) && card.phonetic && <span className="phonetic">{card.phonetic}</span>}
                   <button className="mini-button" title="发音" onClick={() => props.onSpeak(card.front)}>
                     <Volume2 />
                   </button>
@@ -568,6 +597,7 @@ function DeckView(props: {
                 </div>
                 <p>{card.back}</p>
                 {card.example && <small>{card.example}</small>}
+                {isWordCard(card) && card.mnemonic && <small>助记：{card.mnemonic}</small>}
               </div>
               <div className="card-meta">
                 <span>阶段 {card.stage}/10</span>
@@ -591,12 +621,14 @@ function StudyView(props: {
   cards: Card[];
   selectedDeck?: Deck;
   onAnswer: (card: Card, rating: ReviewRating) => Promise<void>;
+  onUpdateCard: (id: number, payload: CardPayload) => Promise<void>;
   onSpeak: (text: string, language?: string) => void;
 }) {
   const [index, setIndex] = useState(0);
   const [flipped, setFlipped] = useState(false);
   const [answer, setAnswer] = useState("");
   const [checked, setChecked] = useState<"right" | "wrong" | "partial" | null>(null);
+  const [editingStudyCard, setEditingStudyCard] = useState<Card | null>(null);
   const card = props.cards[index % Math.max(props.cards.length, 1)];
 
   useEffect(() => {
@@ -604,7 +636,16 @@ function StudyView(props: {
     setFlipped(false);
     setAnswer("");
     setChecked(null);
+    setEditingStudyCard(null);
   }, [props.mode, props.cards.length]);
+
+  useEffect(() => {
+    setFlipped(false);
+    setAnswer("");
+    setChecked(null);
+    setEditingStudyCard(null);
+    if (card && isWordCard(card)) props.onSpeak(card.front, card.language ?? props.selectedDeck?.language);
+  }, [card?.id]);
 
   if (!card) return <EmptyState text="暂无可学习卡片。先创建或导入卡片。" />;
 
@@ -628,6 +669,21 @@ function StudyView(props: {
     setChecked(result ? "right" : "wrong");
   }
 
+  async function saveStudyCard(event: FormEvent) {
+    event.preventDefault();
+    if (!editingStudyCard || !editingStudyCard.front.trim() || !editingStudyCard.back.trim()) return;
+    await props.onUpdateCard(editingStudyCard.id, {
+      card_type: editingStudyCard.card_type,
+      front: editingStudyCard.front,
+      back: editingStudyCard.back,
+      phonetic: editingStudyCard.phonetic,
+      example: editingStudyCard.example,
+      mnemonic: editingStudyCard.mnemonic,
+      note: editingStudyCard.note
+    });
+    setEditingStudyCard(null);
+  }
+
   return (
     <section className="stack">
       <div className="mode-tabs">
@@ -645,10 +701,34 @@ function StudyView(props: {
           <span>{props.cards.length}</span>
         </div>
 
+        <div className="study-actions">
+          <button className="mini-button" title="编辑当前卡片" onClick={() => setEditingStudyCard(card)}>
+            <Edit3 />
+          </button>
+          <button className="mini-button" title="发音" onClick={() => props.onSpeak(card.front, card.language ?? props.selectedDeck?.language)}>
+            <Volume2 />
+          </button>
+        </div>
+
+        {editingStudyCard && (
+          <form className="study-edit-form" onSubmit={saveStudyCard}>
+            <select value={editingStudyCard.card_type} onChange={(event) => setEditingStudyCard({ ...editingStudyCard, card_type: event.target.value as Card["card_type"] })}>
+              <option value="word">单词卡</option>
+              <option value="basic">普通卡</option>
+            </select>
+            <input value={editingStudyCard.front} onChange={(event) => setEditingStudyCard({ ...editingStudyCard, front: event.target.value })} placeholder="单词 / 正面" />
+            {isWordCard(editingStudyCard) && <input value={editingStudyCard.phonetic} onChange={(event) => setEditingStudyCard({ ...editingStudyCard, phonetic: event.target.value })} placeholder="音标" />}
+            <input value={editingStudyCard.back} onChange={(event) => setEditingStudyCard({ ...editingStudyCard, back: event.target.value })} placeholder="中文释义 / 背面" />
+            <input value={editingStudyCard.example} onChange={(event) => setEditingStudyCard({ ...editingStudyCard, example: event.target.value })} placeholder="例句" />
+            {isWordCard(editingStudyCard) && <input value={editingStudyCard.mnemonic} onChange={(event) => setEditingStudyCard({ ...editingStudyCard, mnemonic: event.target.value })} placeholder="助记" />}
+            <button className="primary-button"><Save /> 保存</button>
+            <button className="primary-button secondary-button" type="button" onClick={() => setEditingStudyCard(null)}><XCircle /> 取消</button>
+          </form>
+        )}
+
         {props.mode === "flashcards" && (
           <button className={`flip-card ${flipped ? "flipped" : ""}`} onClick={() => setFlipped((value) => !value)}>
-            <span>{flipped ? card.back : card.front}</span>
-            {flipped && card.example && <small>{card.example}</small>}
+            {flipped ? <CardBack card={card} /> : <CardFront card={card} />}
           </button>
         )}
 
@@ -704,6 +784,36 @@ function StudyView(props: {
         </div>
       </div>
     </section>
+  );
+}
+
+function CardFront(props: { card: Card }) {
+  if (!isWordCard(props.card)) return <span>{props.card.front}</span>;
+  return (
+    <span className="word-face">
+      <strong>{props.card.front}</strong>
+      {props.card.phonetic && <em>{props.card.phonetic}</em>}
+    </span>
+  );
+}
+
+function CardBack(props: { card: Card }) {
+  if (!isWordCard(props.card)) {
+    return (
+      <>
+        <span>{props.card.back}</span>
+        {props.card.example && <small>{props.card.example}</small>}
+      </>
+    );
+  }
+  return (
+    <span className="word-back">
+      <strong>{props.card.front}</strong>
+      {props.card.phonetic && <em>{props.card.phonetic}</em>}
+      <b>{props.card.back}</b>
+      {props.card.example && <small>{props.card.example}</small>}
+      {props.card.mnemonic && <small>助记：{props.card.mnemonic}</small>}
+    </span>
   );
 }
 
