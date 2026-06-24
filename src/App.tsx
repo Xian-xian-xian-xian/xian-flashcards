@@ -8,6 +8,7 @@ import {
   FolderPlus,
   Headphones,
   Home,
+  MoreHorizontal,
   Moon,
   Plus,
   RotateCcw,
@@ -407,6 +408,7 @@ function DeckView(props: {
   const [parentDeckId, setParentDeckId] = useState<number | null>(null);
   const [editingDeckId, setEditingDeckId] = useState<number | null>(null);
   const [editingDeckName, setEditingDeckName] = useState("");
+  const [openDeckMenuId, setOpenDeckMenuId] = useState<number | null>(null);
   const [front, setFront] = useState("");
   const [back, setBack] = useState("");
   const [example, setExample] = useState("");
@@ -477,26 +479,39 @@ function DeckView(props: {
                   {deck.depth > 1 && <i />}
                   <strong>{deck.name}</strong>
                 </span>
-                <span>{deck.total_card_count || deck.card_count || 0} 张</span>
+                <span className="deck-count">{deck.total_card_count || deck.card_count || 0} 张</span>
               </button>
-              <div className="row-actions">
-                <button className="mini-button" title="添加子卡组" disabled={deck.depth >= 5} onClick={() => {
-                  setParentDeckId(deck.id);
-                  setDeckName(`${deck.name} / `);
-                }}>
-                  <FolderPlus />
+              <div className="deck-menu">
+                <button className="mini-button" title="更多操作" onClick={() => setOpenDeckMenuId((current) => current === deck.id ? null : deck.id)}>
+                  <MoreHorizontal />
                 </button>
-                <button className="mini-button" title="编辑卡组" onClick={() => {
-                  setEditingDeckId(deck.id);
-                  setEditingDeckName(deck.name);
-                }}>
-                  <Edit3 />
-                </button>
-                <button className="mini-button danger" title="删除卡组" onClick={() => {
-                  if (window.confirm(`删除「${deck.name}」及其子卡组和卡片？`)) props.onDeleteDeck(deck.id);
-                }}>
-                  <Trash2 />
-                </button>
+                {openDeckMenuId === deck.id && (
+                  <div className="deck-menu-popover">
+                    <button disabled={deck.depth >= 5} onClick={() => {
+                      setParentDeckId(deck.id);
+                      setDeckName(`${deck.name} / `);
+                      setOpenDeckMenuId(null);
+                    }}>
+                      <FolderPlus />
+                      <span>子卡组</span>
+                    </button>
+                    <button onClick={() => {
+                      setEditingDeckId(deck.id);
+                      setEditingDeckName(deck.name);
+                      setOpenDeckMenuId(null);
+                    }}>
+                      <Edit3 />
+                      <span>编辑</span>
+                    </button>
+                    <button className="danger" onClick={() => {
+                      setOpenDeckMenuId(null);
+                      if (window.confirm(`删除「${deck.name}」及其子卡组和卡片？`)) props.onDeleteDeck(deck.id);
+                    }}>
+                      <Trash2 />
+                      <span>删除</span>
+                    </button>
+                  </div>
+                )}
               </div>
               {editingDeckId === deck.id && (
                 <form className="edit-row" onSubmit={(event) => {

@@ -131,7 +131,8 @@ button:disabled {
 .mini-button svg,
 .primary-button svg,
 .rating svg,
-.listen-button svg {
+.listen-button svg,
+.deck-menu-popover svg {
   width: 20px;
   height: 20px;
 }
@@ -368,11 +369,12 @@ button:disabled {
 
 .two-column {
   display: grid;
-  grid-template-columns: 300px minmax(0, 1fr);
+  grid-template-columns: minmax(360px, 420px) minmax(0, 1fr);
   gap: 18px;
 }
 
 .panel {
+  min-width: 0;
   padding: 18px;
 }
 
@@ -406,31 +408,37 @@ textarea:focus {
 }
 
 .deck-list-row {
+  position: relative;
   display: grid;
-  grid-template-columns: minmax(0, 1fr) auto;
+  grid-template-columns: minmax(0, 1fr) 42px;
   gap: 8px;
   align-items: center;
   animation: slide-up 220ms ease both;
 }
 
 .deck-list-row.depth-2 {
-  padding-left: 16px;
+  padding-left: 14px;
 }
 
 .deck-list-row.depth-3 {
-  padding-left: 32px;
+  padding-left: 28px;
 }
 
 .deck-list-row.depth-4 {
-  padding-left: 48px;
+  padding-left: 42px;
 }
 
 .deck-list-row.depth-5 {
-  padding-left: 64px;
+  padding-left: 56px;
 }
 
 .deck-list-item {
-  justify-content: space-between;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 58px;
+  gap: 10px;
+  min-width: 0;
+  overflow: hidden;
+  justify-content: stretch;
 }
 
 .deck-name {
@@ -438,20 +446,85 @@ textarea:focus {
   align-items: center;
   gap: 8px;
   min-width: 0;
+  overflow: hidden;
 }
 
 .deck-name i {
+  flex: 0 0 auto;
   width: 10px;
   height: 10px;
   border-left: 2px solid var(--blue);
   border-bottom: 2px solid var(--blue);
 }
 
-.row-actions,
+.deck-name strong {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.deck-count {
+  justify-self: end;
+  min-width: 44px;
+  color: var(--muted);
+  font-variant-numeric: tabular-nums;
+  text-align: right;
+  white-space: nowrap;
+}
+
 .edit-row {
   display: flex;
   align-items: center;
   gap: 6px;
+}
+
+.deck-menu {
+  position: relative;
+  display: flex;
+  justify-content: flex-end;
+}
+
+.deck-menu-popover {
+  position: absolute;
+  top: calc(100% + 6px);
+  right: 0;
+  z-index: 4;
+  display: grid;
+  min-width: 138px;
+  overflow: hidden;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--surface);
+  box-shadow: var(--shadow);
+  animation: pop-in 160ms cubic-bezier(0.22, 1.35, 0.36, 1) both;
+}
+
+.deck-menu-popover button {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 42px;
+  padding: 0 12px;
+  border: 0;
+  border-bottom: 1px solid var(--border);
+  background: var(--surface);
+  color: var(--text);
+  font-weight: 900;
+  text-align: left;
+}
+
+.deck-menu-popover button:last-child {
+  border-bottom: 0;
+}
+
+.deck-menu-popover button:hover {
+  background: var(--primary-soft);
+  color: var(--primary-strong);
+}
+
+.deck-menu-popover button.danger {
+  color: var(--red);
 }
 
 .edit-row {
