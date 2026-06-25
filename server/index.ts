@@ -38,7 +38,7 @@ type CardType = "basic" | "word" | "choice" | "blank";
 const maxDeckDepth = 5;
 const sessionCookieName = "flashcards_session";
 const sessionDays = 30;
-const appVersion = "0.2.0";
+const appVersion = "0.2.1";
 const timeZone = "Asia/Shanghai";
 
 function requireText(value: unknown, name: string) {
@@ -593,6 +593,47 @@ app.delete("/api/cards/:id", (req, res) => {
   res.json({ ok: true });
 });
 
+app.post("/api/cards/batch", (req, res) => {
+  try {
+    const userId = currentUserId(res);
+    const cardIds: number[] = Array.isArray(req.body.cardIds)
+      ? Array.from(new Set(req.body.cardIds.map(Number).filter((id: number) => Number.isFinite(id))))
+      : [];
+    const action = String(req.body.action ?? "");
+    if (cardIds.length === 0) throw new Error("请选择卡片");
+    const placeholders = cardIds.map(() => "?").join(",");
+    const ownedCards = all<{ id: number }>(
+      `SELECT id FROM cards WHERE user_id = ? AND id IN (${placeholders})`,
+      [userId, ...cardIds]
+    ).map((row) => Number(row.id));
+    if (ownedCards.length === 0) throw new Error("没有可操作的卡片");
+    const ownedPlaceholders = ownedCards.map(() => "?").join(",");
+
+    if (action === "delete") {
+      run(`DELETE FROM reviews WHERE card_id IN (${ownedPlaceholders})`, ownedCards);
+      run(`DELETE FROM cards WHERE user_id = ? AND id IN (${ownedPlaceholders})`, [userId, ...ownedCards]);
+      res.json({ ok: true, affected: ownedCards.length });
+      return;
+    }
+
+    if (action === "move") {
+      const deckId = Number(req.body.deckId);
+      const deck = get<{ id: number }>("SELECT id FROM decks WHERE id = ? AND user_id = ?", [deckId, userId]);
+      if (!deck) throw new Error("目标卡组不存在");
+      run(
+        `UPDATE cards SET deck_id = ?, updated_at = ? WHERE user_id = ? AND id IN (${ownedPlaceholders})`,
+        [deckId, nowIso(), userId, ...ownedCards]
+      );
+      res.json({ ok: true, affected: ownedCards.length });
+      return;
+    }
+
+    throw new Error("未知批量操作");
+  } catch (error) {
+    res.status(400).json({ error: (error as Error).message });
+  }
+});
+
 function normalizeImportRows(rows: Record<string, unknown>[]) {
   return rows
     .map((row) => {
@@ -666,18 +707,20 @@ app.get("/api/reviews/due", (req, res) => {
   const userId = currentUserId(res);
   const deckId = req.query.deckId ? Number(req.query.deckId) : undefined;
   const limit = Number(req.query.limit ?? 50);
+  const kind = String(req.query.kind ?? "all");
   const now = nowIso();
   const deckIds = deckId ? descendantDeckIds(userId, deckId) : [];
   if (deckId && deckIds.length === 0) {
     res.json([]);
     return;
   }
+  const stageFilter = kind === "review" ? "AND r.stage > 0" : kind === "new" ? "AND r.stage = 0" : "";
   const where = deckId && deckIds.length
-    ? `WHERE c.user_id = ? AND c.deck_id IN (${deckIds.map(() => "?").join(",")}) AND r.due_at <= ?`
-    : "WHERE c.user_id = ? AND r.due_at <= ?";
+    ? `WHERE c.user_id = ? AND c.deck_id IN (${deckIds.map(() => "?").join(",")}) AND r.due_at <= ? ${stageFilter}`
+    : `WHERE c.user_id = ? AND r.due_at <= ? ${stageFilter}`;
   const params = deckId && deckIds.length ? [userId, ...deckIds, now, limit] : [userId, now, limit];
   const cards = all(
-    `SELECT c.*, d.language, r.stage, r.due_at, r.last_rating
+    `SELECT c.*, d.language, r.stage, r.due_at, r.last_rating, r.known_count, r.fuzzy_count, r.unknown_count
      FROM cards c
      JOIN decks d ON d.id = c.deck_id
      JOIN reviews r ON r.card_id = c.id
@@ -697,8 +740,8 @@ app.post("/api/reviews/:cardId/answer", (req, res) => {
     return;
   }
 
-  const current = get<{ stage: number }>(
-    `SELECT r.stage
+  const current = get<{ stage: number; due_at: string; last_rating: string; known_count: number; fuzzy_count: number; unknown_count: number; updated_at: string }>(
+    `SELECT r.stage, r.due_at, r.last_rating, r.known_count, r.fuzzy_count, r.unknown_count, r.updated_at
      FROM reviews r
      JOIN cards c ON c.id = r.card_id
      WHERE r.card_id = ? AND c.user_id = ?`,
@@ -734,7 +777,40 @@ app.post("/api/reviews/:cardId/answer", (req, res) => {
   );
 
   dailyTaskSummary(userId);
-  res.json(next);
+  res.json({ ...next, previous: current });
+});
+
+app.post("/api/reviews/:cardId/restore", (req, res) => {
+  const userId = currentUserId(res);
+  const cardId = Number(req.params.cardId);
+  const card = get<{ id: number }>("SELECT id FROM cards WHERE id = ? AND user_id = ?", [cardId, userId]);
+  if (!card) {
+    res.status(404).json({ error: "review not found" });
+    return;
+  }
+  run(
+    `UPDATE reviews
+     SET stage = ?,
+         due_at = ?,
+         last_rating = ?,
+         known_count = ?,
+         fuzzy_count = ?,
+         unknown_count = ?,
+         updated_at = ?
+     WHERE card_id = ?`,
+    [
+      Math.max(0, Number(req.body.stage ?? 0)),
+      String(req.body.due_at ?? nowIso()),
+      String(req.body.last_rating ?? ""),
+      Math.max(0, Number(req.body.known_count ?? 0)),
+      Math.max(0, Number(req.body.fuzzy_count ?? 0)),
+      Math.max(0, Number(req.body.unknown_count ?? 0)),
+      String(req.body.updated_at ?? nowIso()),
+      cardId
+    ]
+  );
+  dailyTaskSummary(userId);
+  res.json({ ok: true });
 });
 
 app.get("/api/daily-task", (_req, res) => {

@@ -279,6 +279,10 @@ button:disabled {
   background: var(--blue);
 }
 
+.danger-button {
+  background: var(--red);
+}
+
 .sync-button {
   min-height: 42px;
   border: 1px solid var(--border);
@@ -570,16 +574,17 @@ textarea:focus {
 .deck-menu {
   position: relative;
   display: flex;
+  flex-direction: column;
+  align-items: flex-end;
   justify-content: flex-end;
 }
 
 .deck-menu-popover {
-  position: absolute;
-  top: calc(100% + 6px);
-  right: 0;
+  position: static;
   z-index: 4;
   display: grid;
   min-width: 138px;
+  margin-top: 6px;
   overflow: hidden;
   border: 1px solid var(--border);
   border-radius: 8px;
@@ -618,6 +623,24 @@ textarea:focus {
 .edit-row {
   grid-column: 1 / -1;
   padding-left: 10px;
+}
+
+.batch-toolbar,
+.study-session-controls {
+  display: grid;
+  grid-template-columns: auto minmax(120px, 1fr) minmax(160px, 220px) auto auto;
+  gap: 10px;
+  align-items: center;
+  margin: 12px 0;
+  padding: 12px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--primary-soft);
+}
+
+.batch-toolbar strong {
+  min-width: 0;
+  color: var(--primary-strong);
 }
 
 .search {
@@ -749,7 +772,18 @@ textarea:focus {
 }
 
 .study-selector {
+  display: grid;
+  gap: 14px;
   box-shadow: none;
+}
+
+.study-session-controls {
+  grid-template-columns: minmax(160px, 220px) minmax(120px, 180px) auto;
+  margin: 0;
+}
+
+.compact-tabs {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
 }
 
 .study-edit-form {
@@ -946,6 +980,29 @@ textarea {
 .schedule-box p {
   margin-top: 8px;
   color: var(--muted);
+}
+
+.changelog-box {
+  display: grid;
+  gap: 12px;
+}
+
+.changelog-row {
+  display: grid;
+  grid-template-columns: 90px 120px minmax(0, 1fr);
+  gap: 10px;
+  align-items: baseline;
+  padding-top: 12px;
+  border-top: 1px solid var(--border);
+}
+
+.changelog-row span,
+.changelog-row p {
+  color: var(--muted);
+}
+
+.changelog-row p {
+  margin-top: 0;
 }
 
 .empty-state {
@@ -1231,7 +1288,10 @@ textarea {
   .task-strip,
   .two-column,
   .card-form,
-  .study-edit-form {
+  .study-edit-form,
+  .batch-toolbar,
+  .study-session-controls,
+  .changelog-row {
     grid-template-columns: 1fr;
   }
 

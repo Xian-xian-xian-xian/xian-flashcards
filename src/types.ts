@@ -34,7 +34,20 @@ export type Card = {
   stage: number;
   due_at: string;
   last_rating: string;
+  known_count?: number;
+  fuzzy_count?: number;
+  unknown_count?: number;
   language?: string;
+};
+
+export type ReviewSnapshot = {
+  stage: number;
+  due_at: string;
+  last_rating: string;
+  known_count: number;
+  fuzzy_count: number;
+  unknown_count: number;
+  updated_at: string;
 };
 
 export type Stats = {

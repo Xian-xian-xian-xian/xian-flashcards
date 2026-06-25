@@ -1,5 +1,6 @@
 import {
   AlertTriangle,
+  ArrowLeft,
   Bell,
   BookOpen,
   Brain,
@@ -15,6 +16,7 @@ import {
   LogOut,
   MoreHorizontal,
   Moon,
+  MoveRight,
   Plus,
   RefreshCw,
   RotateCcw,
@@ -22,6 +24,8 @@ import {
   Search,
   Settings as SettingsIcon,
   Sparkles,
+  Square,
+  SquareCheck,
   Star,
   Sun,
   Target,
@@ -32,13 +36,13 @@ import {
 } from "lucide-react";
 import { FormEvent, useEffect, useMemo, useState } from "react";
 import { api, type CardPayload, type ConflictError } from "./api";
-import type { Card, CardType, DailyTask, Deck, ReviewRating, Settings, Stats, SyncStatus, ThemeMode, User } from "./types";
+import type { Card, CardType, DailyTask, Deck, ReviewRating, ReviewSnapshot, Settings, Stats, SyncStatus, ThemeMode, User } from "./types";
 
 type View = "home" | "deck" | "study" | "import" | "settings" | "about";
 type StudyMode = "flashcards" | "choice" | "write";
 type SyncState = "idle" | "syncing" | "success" | "error" | "conflict";
 
-const version = "0.2.0";
+const version = "0.2.1";
 
 const cardTypeLabels: Record<CardType, string> = {
   basic: "普通卡",
@@ -84,6 +88,10 @@ function parseChoices(value: string | string[] | undefined) {
     // Fall through to separator parsing.
   }
   return value.split(/[|；;]/).map((item) => item.trim()).filter(Boolean);
+}
+
+function blankPrompt(value: string) {
+  return value.replace(/_{2,}|\[\s*\]/g, "[]");
 }
 
 function isWordCard(card: Card) {
@@ -266,8 +274,9 @@ export default function App() {
   }
 
   async function handleAnswer(card: Card, rating: ReviewRating) {
-    await api.answer(card.id, rating);
+    const result = await api.answer(card.id, rating);
     await afterMutation(`${card.front}：${ratingLabels[rating]}`);
+    return result;
   }
 
   if (!authChecked) {
@@ -386,6 +395,10 @@ export default function App() {
               await api.deleteCard(id);
               await afterMutation();
             }}
+            onBatchCards={async (cardIds, action, deckId) => {
+              const result = await api.batchCards({ cardIds, action, deckId });
+              await afterMutation(action === "delete" ? `已删除 ${result.affected} 张卡片` : `已移动 ${result.affected} 张卡片`);
+            }}
             onToggleFavorite={async (card) => {
               await updateCardWithConflict(card.id, { favorite: card.favorite ? 0 : 1, baseUpdatedAt: card.updated_at });
             }}
@@ -403,6 +416,10 @@ export default function App() {
             onSelectRootDeck={setStudyRootDeckId}
             selectedDeck={studyRootDeck}
             onAnswer={handleAnswer}
+            onUndoAnswer={async (card, snapshot) => {
+              await api.restoreReview(card.id, snapshot);
+              await afterMutation("已撤销上一张");
+            }}
             onUpdateCard={updateCardWithConflict}
             onSpeak={speak}
           />
@@ -630,6 +647,7 @@ function DeckView(props: {
   onCreateCard: (payload: CardPayload) => Promise<void>;
   onUpdateCard: (id: number, payload: CardPayload) => Promise<void>;
   onDeleteCard: (id: number) => Promise<void>;
+  onBatchCards: (cardIds: number[], action: "move" | "delete", deckId?: number) => Promise<void>;
   onToggleFavorite: (card: Card) => Promise<void>;
   onSpeak: (text: string, language?: string) => void;
 }) {
@@ -640,6 +658,18 @@ function DeckView(props: {
   const [openDeckMenuId, setOpenDeckMenuId] = useState<number | null>(null);
   const [editingCard, setEditingCard] = useState<Card | null>(null);
   const [detailCard, setDetailCard] = useState<Card | null>(null);
+  const [selectedCardIds, setSelectedCardIds] = useState<number[]>([]);
+  const [batchTargetDeckId, setBatchTargetDeckId] = useState<number | null>(props.selectedDeckId);
+
+  const allVisibleSelected = props.cards.length > 0 && props.cards.every((card) => selectedCardIds.includes(card.id));
+
+  useEffect(() => {
+    setSelectedCardIds((ids) => ids.filter((id) => props.cards.some((card) => card.id === id)));
+  }, [props.cards]);
+
+  useEffect(() => {
+    setBatchTargetDeckId(props.selectedDeckId);
+  }, [props.selectedDeckId]);
 
   async function addDeck(event: FormEvent) {
     event.preventDefault();
@@ -647,6 +677,27 @@ function DeckView(props: {
     await props.onCreateDeck(deckName.trim(), parentDeckId);
     setDeckName("");
     setParentDeckId(null);
+  }
+
+  function toggleCard(id: number) {
+    setSelectedCardIds((ids) => ids.includes(id) ? ids.filter((item) => item !== id) : [...ids, id]);
+  }
+
+  function toggleAllCards() {
+    setSelectedCardIds(allVisibleSelected ? [] : props.cards.map((card) => card.id));
+  }
+
+  async function batchDelete() {
+    if (selectedCardIds.length === 0) return;
+    if (!window.confirm(`删除选中的 ${selectedCardIds.length} 张卡片？`)) return;
+    await props.onBatchCards(selectedCardIds, "delete");
+    setSelectedCardIds([]);
+  }
+
+  async function batchMove() {
+    if (selectedCardIds.length === 0 || !batchTargetDeckId) return;
+    await props.onBatchCards(selectedCardIds, "move", batchTargetDeckId);
+    setSelectedCardIds([]);
   }
 
   return (
@@ -698,11 +749,22 @@ function DeckView(props: {
         </div>
         <CardEditor onSubmit={props.onCreateCard} />
         {editingCard && <CardEditor card={editingCard} onCancel={() => setEditingCard(null)} onSubmit={async (payload) => { await props.onUpdateCard(editingCard.id, { ...payload, baseUpdatedAt: editingCard.updated_at }); setEditingCard(null); }} />}
+        <div className="batch-toolbar">
+          <button className="mini-button" title="全选" onClick={toggleAllCards}>{allVisibleSelected ? <SquareCheck /> : <Square />}</button>
+          <strong>{selectedCardIds.length ? `已选 ${selectedCardIds.length} 张` : "批量管理"}</strong>
+          <select value={batchTargetDeckId ?? ""} onChange={(event) => setBatchTargetDeckId(event.target.value ? Number(event.target.value) : null)}>
+            <option value="" disabled>移动到卡组</option>
+            {props.decks.map((deck) => <option key={deck.id} value={deck.id}>{"　".repeat(Math.max(deck.depth - 1, 0))}{deck.name}</option>)}
+          </select>
+          <button className="primary-button secondary-button" disabled={selectedCardIds.length === 0 || !batchTargetDeckId} onClick={batchMove}><MoveRight />移动</button>
+          <button className="primary-button danger-button" disabled={selectedCardIds.length === 0} onClick={batchDelete}><Trash2 />删除</button>
+        </div>
         <div className="card-list">
           {props.cards.map((card) => (
             <article className="word-card" key={card.id}>
               <div>
                 <div className="word-title">
+                  <button className="mini-button" title="选择卡片" onClick={() => toggleCard(card.id)}>{selectedCardIds.includes(card.id) ? <SquareCheck /> : <Square />}</button>
                   <strong>{card.front}</strong>
                   <span className="type-pill">{cardTypeLabels[card.card_type]}</span>
                   {isWordCard(card) && card.phonetic && <span className="phonetic">{card.phonetic}</span>}
@@ -773,7 +835,7 @@ function CardEditor(props: { card?: Card; onSubmit: (payload: CardPayload) => Pr
         <option value="choice">选择题卡</option>
         <option value="blank">填空题卡</option>
       </select>
-      <input value={front} onChange={(event) => setFront(event.target.value)} placeholder={cardType === "blank" ? "题干，使用 ____ 表示空格" : cardType === "choice" ? "题目" : "正面 / 单词"} />
+      <input value={front} onChange={(event) => setFront(event.target.value)} placeholder={cardType === "blank" ? "题干，使用 [] 表示空格" : cardType === "choice" ? "题目" : "正面 / 单词"} />
       {cardType === "word" && <input value={phonetic} onChange={(event) => setPhonetic(event.target.value)} placeholder="音标（可选）" />}
       <input value={back} onChange={(event) => setBack(event.target.value)} placeholder={cardType === "choice" || cardType === "blank" ? "正确答案" : "背面 / 释义"} />
       {cardType === "choice" && <input value={choices} onChange={(event) => setChoices(event.target.value)} placeholder="选项，用 | 分隔" />}
@@ -794,24 +856,32 @@ function StudyView(props: {
   selectedRootDeckId: number | null;
   onSelectRootDeck: (id: number) => void;
   selectedDeck?: Deck;
-  onAnswer: (card: Card, rating: ReviewRating) => Promise<void>;
+  onAnswer: (card: Card, rating: ReviewRating) => Promise<{ stage: number; dueAt: string; previous: ReviewSnapshot }>;
+  onUndoAnswer: (card: Card, snapshot: ReviewSnapshot) => Promise<void>;
   onUpdateCard: (id: number, payload: CardPayload) => Promise<void>;
   onSpeak: (text: string, language?: string) => void;
 }) {
-  const [index, setIndex] = useState(0);
+  const [studyKind, setStudyKind] = useState<"review" | "new">("review");
+  const [sessionLimit, setSessionLimit] = useState(20);
+  const [sessionCards, setSessionCards] = useState<Card[]>([]);
+  const [queue, setQueue] = useState<Card[]>([]);
+  const [masteredIds, setMasteredIds] = useState<number[]>([]);
+  const [history, setHistory] = useState<Array<{
+    card: Card;
+    previous: ReviewSnapshot;
+    queue: Card[];
+    masteredIds: number[];
+    flipped: boolean;
+  }>>([]);
   const [flipped, setFlipped] = useState(false);
   const [answer, setAnswer] = useState("");
   const [checked, setChecked] = useState<"right" | "wrong" | null>(null);
   const [editingStudyCard, setEditingStudyCard] = useState<Card | null>(null);
-  const card = props.cards[index % Math.max(props.cards.length, 1)];
+  const card = queue[0];
 
   useEffect(() => {
-    setIndex(0);
-    setFlipped(false);
-    setAnswer("");
-    setChecked(null);
-    setEditingStudyCard(null);
-  }, [props.mode, props.cards.length, props.selectedRootDeckId]);
+    startSession().catch((error) => console.error(error));
+  }, [studyKind, props.selectedRootDeckId]);
 
   useEffect(() => {
     setFlipped(false);
@@ -821,11 +891,48 @@ function StudyView(props: {
     if (card && isWordCard(card)) props.onSpeak(card.front, card.language ?? props.selectedDeck?.language);
   }, [card?.id]);
 
+  async function startSession(nextLimit = sessionLimit) {
+    if (!props.selectedRootDeckId) return;
+    const nextCards = await api.dueCards(props.selectedRootDeckId, Math.max(1, nextLimit), studyKind);
+    setSessionCards(nextCards);
+    setQueue(nextCards);
+    setMasteredIds([]);
+    setHistory([]);
+    setFlipped(false);
+    setAnswer("");
+    setChecked(null);
+    setEditingStudyCard(null);
+  }
+
   async function rate(rating: ReviewRating) {
     if (!card) return;
-    await props.onAnswer(card, rating);
-    setIndex((value) => value + 1);
+    const beforeQueue = queue;
+    const beforeMasteredIds = masteredIds;
+    const result = await props.onAnswer(card, rating);
+    const rest = beforeQueue.slice(1);
+    const nextMasteredIds = rating === "known" && !beforeMasteredIds.includes(card.id)
+      ? [...beforeMasteredIds, card.id]
+      : beforeMasteredIds;
+    const repeatCard = { ...card, stage: result.stage, due_at: result.dueAt, last_rating: rating };
+    const nextQueue = rating === "known"
+      ? rest
+      : [...rest.slice(0, rating === "unknown" ? 1 : 3), repeatCard, ...rest.slice(rating === "unknown" ? 1 : 3)];
+    setHistory((items) => [...items, { card, previous: result.previous, queue: beforeQueue, masteredIds: beforeMasteredIds, flipped }]);
+    setQueue(nextQueue);
+    setMasteredIds(nextMasteredIds);
     setFlipped(false);
+    setAnswer("");
+    setChecked(null);
+  }
+
+  async function undo() {
+    const previous = history.at(-1);
+    if (!previous) return;
+    await props.onUndoAnswer(previous.card, previous.previous);
+    setHistory((items) => items.slice(0, -1));
+    setQueue(previous.queue);
+    setMasteredIds(previous.masteredIds);
+    setFlipped(previous.flipped);
     setAnswer("");
     setChecked(null);
   }
@@ -835,11 +942,16 @@ function StudyView(props: {
     setChecked(normalizeAnswer(answer) === normalizeAnswer(card.back) || normalizeAnswer(answer) === normalizeAnswer(card.front) ? "right" : "wrong");
   }
 
-  const choices = card
-    ? card.card_type === "choice"
-      ? Array.from(new Set([...parseChoices(card.choices), card.back])).sort(() => 0.5 - Math.random())
-      : props.cards.filter((item) => item.id !== card.id).slice(0, 3).map((item) => item.back).concat(card.back).sort(() => 0.5 - Math.random())
-    : [];
+  const choices = useMemo(() => {
+    if (!card) return [];
+    const source = card.card_type === "choice"
+      ? Array.from(new Set([...parseChoices(card.choices), card.back]))
+      : sessionCards.filter((item) => item.id !== card.id).slice(0, 3).map((item) => item.back).concat(card.back);
+    return source.sort(() => 0.5 - Math.random());
+  }, [card?.id, sessionCards]);
+
+  const completed = masteredIds.length;
+  const total = sessionCards.length;
 
   return (
     <section className="stack">
@@ -851,6 +963,20 @@ function StudyView(props: {
             {props.rootDecks.map((deck) => <option key={deck.id} value={deck.id}>{deck.name} · {deck.due_count || 0} 到期</option>)}
           </select>
         </label>
+        <div className="study-session-controls">
+          <div className="mode-tabs compact-tabs">
+            <button className={studyKind === "review" ? "active" : ""} onClick={() => setStudyKind("review")}>复习</button>
+            <button className={studyKind === "new" ? "active" : ""} onClick={() => setStudyKind("new")}>新学</button>
+          </div>
+          <label>
+            {studyKind === "new" ? "新学张数" : "复习张数"}
+            <input type="number" min={1} max={200} value={sessionLimit} onChange={(event) => {
+              const next = Math.max(1, Number(event.target.value) || 1);
+              setSessionLimit(next);
+            }} />
+          </label>
+          <button className="primary-button" onClick={() => startSession()}><Sparkles />开始</button>
+        </div>
       </div>
 
       <div className="mode-tabs">
@@ -859,15 +985,17 @@ function StudyView(props: {
         ))}
       </div>
 
-      {!card ? <EmptyState text="这个大卡组暂无到期卡片。请选择其他大卡组，或先新学一些卡片。" /> : (
+      {!card ? <EmptyState text={total > 0 ? "本轮已完成。" : studyKind === "new" ? "这个大卡组暂无可新学卡片。" : "这个大卡组暂无到期复习卡片。"} /> : (
         <div className="study-panel">
           <div className="progress-line">
-            <span>{index + 1}</span>
-            <div><i style={{ width: `${Math.min(((index + 1) / Math.max(props.cards.length, 1)) * 100, 100)}%` }} /></div>
-            <span>{props.cards.length}</span>
+            <span>{completed}</span>
+            <div><i style={{ width: `${Math.min((completed / Math.max(total, 1)) * 100, 100)}%` }} /></div>
+            <span>{total}</span>
           </div>
           <div className="study-actions">
             <span className="type-pill">{cardTypeLabels[card.card_type]}</span>
+            <span className="type-pill">待掌握 {queue.length}</span>
+            <button className="mini-button" title="撤销上一张" disabled={history.length === 0} onClick={undo}><ArrowLeft /></button>
             <button className="mini-button" title="编辑当前卡片" onClick={() => setEditingStudyCard(card)}><Edit3 /></button>
             <button className="mini-button" title="发音" onClick={() => props.onSpeak(card.front, card.language ?? props.selectedDeck?.language)}><Volume2 /></button>
           </div>
@@ -885,7 +1013,7 @@ function StudyView(props: {
           )}
           {props.mode === "write" && (
             <div className="question-box">
-              <p>{card.card_type === "blank" ? card.front : card.back}</p>
+              <p>{card.card_type === "blank" ? blankPrompt(card.front) : card.back}</p>
               {card.example && <small>{card.example}</small>}
               <input value={answer} onChange={(event) => setAnswer(event.target.value)} placeholder="输入答案" />
               <button className="primary-button" onClick={checkWritten}>检查</button>
@@ -904,7 +1032,7 @@ function StudyView(props: {
 }
 
 function CardFront(props: { card: Card }) {
-  if (props.card.card_type === "blank") return <span>{props.card.front}</span>;
+  if (props.card.card_type === "blank") return <span>{blankPrompt(props.card.front)}</span>;
   if (props.card.card_type === "choice") return <span>{props.card.front}</span>;
   if (!isWordCard(props.card)) return <span>{props.card.front}</span>;
   return <span className="word-face"><strong>{props.card.front}</strong>{props.card.phonetic && <em>{props.card.phonetic}</em>}</span>;
@@ -935,7 +1063,7 @@ function ResultBadge(props: { checked: "right" | "wrong"; correct: string; onRat
 }
 
 function ImportView(props: { decks: Deck[]; selectedDeckId: number | null; onSelectDeck: (id: number) => void; onImported: (message: string) => Promise<void> }) {
-  const [text, setText] = useState("card_type,front,back,option1,option2,option3,option4\nchoice,Which one means apple?,苹果,苹果,香蕉,橙子,葡萄\nblank,I eat ____ every day.,apple,,,,");
+  const [text, setText] = useState("card_type,front,back,option1,option2,option3,option4\nchoice,Which one means apple?,苹果,苹果,香蕉,橙子,葡萄\nblank,I eat [] every day.,apple,,,,");
   const [file, setFile] = useState<File | null>(null);
 
   async function submit(event: FormEvent) {
@@ -955,7 +1083,7 @@ function ImportView(props: { decks: Deck[]; selectedDeckId: number | null; onSel
         <label>目标卡组<select value={props.selectedDeckId ?? ""} onChange={(event) => props.onSelectDeck(Number(event.target.value))}><option value="" disabled>选择卡组</option>{props.decks.map((deck) => <option key={deck.id} value={deck.id}>{"　".repeat(Math.max(deck.depth - 1, 0))}{deck.name}</option>)}</select></label>
         <label>上传 CSV/TSV/XLSX<input type="file" accept=".csv,.tsv,.xlsx,.xls" onChange={(event) => setFile(event.target.files?.[0] ?? null)} /></label>
         <label>或粘贴表格<textarea value={text} onChange={(event) => setText(event.target.value)} rows={10} /></label>
-        <p className="hint">支持 card_type/type/卡片类型。单词卡：word/front/back/phonetic/example；选择题：choice/question/answer/option1-option4；填空题：blank/front 中写 ____，back 写答案。</p>
+        <p className="hint">支持 card_type/type/卡片类型。单词卡：word/front/back/phonetic/example；选择题：choice/question/answer/option1-option4；填空题：blank/front 中写 []，back 写答案。</p>
         <button className="primary-button"><FileSpreadsheet />开始导入</button>
       </form>
     </section>
@@ -978,7 +1106,11 @@ function AboutView(props: { syncStatus: SyncStatus | null }) {
   return (
     <section className="panel about-panel">
       <div className="about-title"><Info /><div><p className="eyebrow">Xian 闪记卡</p><h2>版本 {version}</h2></div></div>
-      <div className="schedule-box"><h3>更新日志</h3><p>新增选择题卡、填空题卡、每日任务、连续打卡、按大卡组复习、同步按钮、自动同步和冲突处理。</p></div>
+      <div className="schedule-box changelog-box">
+        <h3>更新日志</h3>
+        <div className="changelog-row"><strong>0.2.1</strong><span>2026-06-25</span><p>修复多层卡组菜单重叠；新增卡片批量全选、移动、删除；填空题支持填写判定并统一 [] 占位符；学习页支持新学张数、本轮固定队列、错题循环到掌握和撤销。</p></div>
+        <div className="changelog-row"><strong>0.2.0</strong><span>2026-06-24</span><p>新增选择题卡、填空题卡、每日任务、连续打卡、按大卡组复习、同步按钮、自动同步和冲突处理。</p></div>
+      </div>
       <div className="schedule-box"><h3>同步状态</h3><p>最近同步：{props.syncStatus ? fullDateTime(props.syncStatus.lastSyncAt) : "暂无"} · 数据更新：{props.syncStatus?.dataUpdatedAt ? fullDateTime(props.syncStatus.dataUpdatedAt) : "暂无"}</p></div>
     </section>
   );
