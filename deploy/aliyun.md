@@ -85,3 +85,19 @@ data/flashcards.sqlite
 ```
 
 建议定期备份这个文件。
+
+## 7. 登录与用户隔离
+
+首次部署新版后，打开站点会先进入登录页。第一个注册的账号会自动接管旧版未绑定用户的数据；之后每个账号只能访问、修改和删除自己的卡组、卡片、复习记录和设置。为了避免公网用户随便注册，创建第一个账号后，后续注册会默认关闭。
+
+如果你要临时开放注册给其他人创建账号，可以启动时加上：
+
+```bash
+ALLOW_REGISTRATION=true PORT=4174 HOST=0.0.0.0 pm2 start pnpm --name flashcards -- start:remote
+```
+
+当前示例是 HTTP 访问，登录 Cookie 默认兼容 HTTP。如果你改成 HTTPS，可以在启动时加上：
+
+```bash
+COOKIE_SECURE=true PORT=4174 HOST=0.0.0.0 pm2 start pnpm --name flashcards -- start:remote
+```
