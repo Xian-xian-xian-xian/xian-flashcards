@@ -34,6 +34,38 @@ pnpm remote
 PORT=8080 pnpm start:remote
 ```
 
+## 发布到云端
+
+本地提交并推到 GitHub：
+
+```bash
+git add README.md package.json server src vite.config.ts scripts 模版
+git commit -m "Release 0.2.3"
+GIT_SSH_COMMAND="ssh -i ~/.ssh/codex_aliyun_flashcards -o IdentitiesOnly=yes" git push origin main
+```
+
+推到 GitHub 只更新仓库，不会自动更新 ECS。推荐用本地当前提交直接覆盖 ECS 代码，再在服务器重新构建并重启 PM2；这样不依赖服务器上的 Git 工作区是否干净：
+
+```bash
+# 先备份线上代码和数据库
+ssh -i ~/.ssh/codex_aliyun_flashcards root@121.43.195.214 'set -e; ts=$(date +%Y%m%d%H%M%S); cd /root; tar --exclude=flashcards/node_modules --exclude=flashcards/dist --exclude=flashcards/dist-server --exclude=flashcards/.git -czf flashcards.pre-release.$ts.tar.gz flashcards; cp flashcards/data/flashcards.sqlite flashcards.sqlite.pre-release.$ts'
+
+# 从本机把当前 Git 提交展开到 ECS，保留服务器上的 data/、node_modules、dist、dist-server 和 .git
+git archive HEAD | ssh -i ~/.ssh/codex_aliyun_flashcards root@121.43.195.214 "tar -x -C /root/flashcards"
+
+# 在服务器重新构建、重启服务
+ssh -i ~/.ssh/codex_aliyun_flashcards root@121.43.195.214 'set -e; cd /root/flashcards; pnpm install; pnpm build; pm2 restart flashcards --update-env; pm2 save'
+```
+
+验证线上版本：
+
+```bash
+curl http://127.0.0.1:4174/api/health
+curl http://121.43.195.214/api/health
+```
+
+如果页面仍显示旧版本，优先确认 `dist/assets` 的更新时间和 `pm2 list` 里的 `flashcards` 是否刚重启；浏览器端可用 `Cmd+Shift+R` 或 `Ctrl+F5` 强制刷新缓存。
+
 ## 功能
 
 - 卡组最多 5 层嵌套，支持创建、编辑、删除。
