@@ -84,6 +84,19 @@ function answersMatch(choice: string, answer: string) {
   return normalizeAnswer(choice) === normalizeAnswer(answer) || optionKey(choice) === optionKey(answer);
 }
 
+function dedupeChoiceOptions(choices: string[]) {
+  return choices.reduce<string[]>((items, choice) => {
+    const existingIndex = items.findIndex((item) => answersMatch(item, choice));
+    if (existingIndex === -1) return [...items, choice];
+    if (choice.length > items[existingIndex].length) {
+      const nextItems = [...items];
+      nextItems[existingIndex] = choice;
+      return nextItems;
+    }
+    return items;
+  }, []);
+}
+
 function parseChoices(value: string | string[] | undefined) {
   if (Array.isArray(value)) return value.map((item) => item.trim()).filter(Boolean);
   if (!value) return [];
@@ -1159,11 +1172,11 @@ function StudyView(props: {
 
   const choices = useMemo(() => {
     if (!card) return [];
-    const baseChoices = parseChoices(card.choices);
+    const baseChoices = dedupeChoiceOptions(parseChoices(card.choices));
     const source = card.card_type === "choice"
       ? baseChoices.some((choice) => answersMatch(choice, card.back)) ? baseChoices : [...baseChoices, card.back]
       : sessionCards.filter((item) => item.id !== card.id).slice(0, 3).map((item) => item.back).concat(card.back);
-    return source.sort(() => 0.5 - Math.random());
+    return dedupeChoiceOptions(source).sort(() => 0.5 - Math.random());
   }, [card?.id, sessionCards]);
 
   const displayCorrect = card ? choices.find((choice) => answersMatch(choice, card.back)) ?? card.back : "";

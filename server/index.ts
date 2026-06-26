@@ -125,6 +125,19 @@ function answersMatch(choice: string, answer: string) {
   return normalizeAnswer(choice) === normalizeAnswer(answer) || optionKey(choice) === optionKey(answer);
 }
 
+function dedupeChoiceOptions(choices: string[]) {
+  return choices.reduce<string[]>((items, choice) => {
+    const existingIndex = items.findIndex((item) => answersMatch(item, choice));
+    if (existingIndex === -1) return [...items, choice];
+    if (choice.length > items[existingIndex].length) {
+      const nextItems = [...items];
+      nextItems[existingIndex] = choice;
+      return nextItems;
+    }
+    return items;
+  }, []);
+}
+
 function addAnswerChoice(choices: string[], answer: string) {
   if (!answer.trim() || choices.some((choice) => answersMatch(choice, answer))) return choices;
   return [...choices, answer.trim()];
@@ -151,7 +164,7 @@ function inferCardType(row: Record<string, unknown>, front: string, choices: str
 }
 
 function normalizedChoicePayload(cardType: CardType, choices: string[] | string, answer: string) {
-  return cardType === "choice" ? addAnswerChoice(normalizeChoices(choices), answer).slice(0, 8) : [];
+  return cardType === "choice" ? addAnswerChoice(dedupeChoiceOptions(normalizeChoices(choices)), answer).slice(0, 8) : [];
 }
 
 function clampStudyTextScale(value: unknown) {
