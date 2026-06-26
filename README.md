@@ -40,7 +40,7 @@ PORT=8080 pnpm start:remote
 
 ```bash
 git add README.md package.json server src vite.config.ts scripts 模版
-git commit -m "Release 0.2.3"
+git commit -m "Release 0.2.4"
 GIT_SSH_COMMAND="ssh -i ~/.ssh/codex_aliyun_flashcards -o IdentitiesOnly=yes" git push origin main
 ```
 
@@ -71,7 +71,7 @@ curl http://121.43.195.214/api/health
 - 卡组最多 5 层嵌套，支持创建、编辑、删除。
 - 卡片支持创建、搜索、收藏、编辑、删除。
 - CSV、TSV、XLSX 或粘贴表格批量导入，并提供普通卡、单词卡、选择题卡、填空题卡模板。
-- 闪记卡、选择、填写三种学习入口。
+- 学习页按卡片类型自动显示闪记卡、选择题或填空题，并支持沉浸式学习和学习字号调整。
 - 浏览器 `speechSynthesis` 手动发音，学习页自动发音可在设置中开启或关闭。
 - 严格固定艾宾浩斯间隔：5 分钟、30 分钟、12 小时、1 天、2 天、4 天、7 天、15 天、30 天、90 天。
 - 认识 / 模糊 / 不认识反馈：

@@ -14,6 +14,8 @@ import {
   Info,
   ListChecks,
   LogOut,
+  Maximize2,
+  Minimize2,
   MoreHorizontal,
   Moon,
   MoveRight,
@@ -23,6 +25,7 @@ import {
   Save,
   Search,
   Settings as SettingsIcon,
+  SlidersHorizontal,
   Sparkles,
   Square,
   SquareCheck,
@@ -39,22 +42,15 @@ import { api, type CardPayload, type ConflictError } from "./api";
 import type { Card, CardType, DailyTask, Deck, ReviewRating, ReviewSnapshot, Settings, Stats, SyncStatus, ThemeMode, User } from "./types";
 
 type View = "home" | "deck" | "study" | "import" | "settings" | "about";
-type StudyMode = "flashcards" | "choice" | "write";
 type SyncState = "idle" | "syncing" | "success" | "error" | "conflict";
 
-const version = "0.2.3";
+const version = "0.2.4";
 
 const cardTypeLabels: Record<CardType, string> = {
   basic: "普通卡",
   word: "单词卡",
   choice: "选择题卡",
   blank: "填空题卡"
-};
-
-const modeLabels: Record<StudyMode, string> = {
-  flashcards: "闪记卡",
-  choice: "选择",
-  write: "填写"
 };
 
 const ratingLabels: Record<ReviewRating, string> = {
@@ -76,6 +72,16 @@ const emptyDailyTask: DailyTask = {
 
 function normalizeAnswer(value: string) {
   return value.trim().toLowerCase().replace(/\s+/g, " ");
+}
+
+function optionKey(value: string) {
+  const normalized = normalizeAnswer(value);
+  const match = normalized.match(/^([a-h])(?:[\s.)、:：-]+|$)/i);
+  return match?.[1] ?? normalized;
+}
+
+function answersMatch(choice: string, answer: string) {
+  return normalizeAnswer(choice) === normalizeAnswer(answer) || optionKey(choice) === optionKey(answer);
 }
 
 function parseChoices(value: string | string[] | undefined) {
@@ -105,6 +111,13 @@ function correctAnswer(card: Card) {
 function isCorrectAnswer(card: Card, answer: string) {
   const normalized = normalizeAnswer(answer);
   return normalized === normalizeAnswer(correctAnswer(card));
+}
+
+function inferCardType(front: string, back: string, choices: string[], phonetic: string, mnemonic: string): CardType {
+  if (choices.length > 0) return "choice";
+  if (/(\[\s*\]|_{2,}|（\s*）|\(\s*\))/.test(front)) return "blank";
+  if (phonetic.trim() || mnemonic.trim()) return "word";
+  return back.trim().length > 0 ? "basic" : "word";
 }
 
 function dueText(value: string) {
@@ -155,7 +168,6 @@ export default function App() {
   const [dailyTask, setDailyTask] = useState<DailyTask>(emptyDailyTask);
   const [syncStatus, setSyncStatus] = useState<SyncStatus | null>(null);
   const [syncState, setSyncState] = useState<SyncState>("idle");
-  const [studyMode, setStudyMode] = useState<StudyMode>("flashcards");
   const [search, setSearch] = useState("");
   const [toast, setToast] = useState<{ message: string; kind: "success" | "error" } | null>(null);
   const [pending, setPending] = useState<Record<string, boolean>>({});
@@ -482,14 +494,16 @@ export default function App() {
 
         {view === "study" && (
           <StudyView
-            mode={studyMode}
-            onMode={setStudyMode}
             cards={dueCards}
             rootDecks={rootDecks}
             selectedRootDeckId={studyRootDeckId}
             onSelectRootDeck={setStudyRootDeckId}
             selectedDeck={studyRootDeck}
             studyTextScale={settings.studyTextScale}
+            onStudyTextScale={async (studyTextScale) => {
+              await api.saveSettings({ studyTextScale });
+              setSettings((current) => ({ ...current, studyTextScale }));
+            }}
             autoSpeak={settings.autoSpeak === "on"}
             onAnswer={handleAnswer}
             onUndoAnswer={async (card, snapshot) => {
@@ -937,7 +951,6 @@ function DeckView(props: {
 }
 
 function CardEditor(props: { card?: Card; onSubmit: (payload: CardPayload) => Promise<void>; onCancel?: () => void }) {
-  const [cardType, setCardType] = useState<CardType>(props.card?.card_type ?? "word");
   const [front, setFront] = useState(props.card?.front ?? "");
   const [phonetic, setPhonetic] = useState(props.card?.phonetic ?? "");
   const [back, setBack] = useState(props.card?.back ?? "");
@@ -945,6 +958,7 @@ function CardEditor(props: { card?: Card; onSubmit: (payload: CardPayload) => Pr
   const [mnemonic, setMnemonic] = useState(props.card?.mnemonic ?? "");
   const [note, setNote] = useState(props.card?.note ?? "");
   const [choices, setChoices] = useState(parseChoices(props.card?.choices).join(" | "));
+  const [advancedOpen, setAdvancedOpen] = useState(Boolean(props.card && (props.card.phonetic || props.card.example || props.card.mnemonic || props.card.note || parseChoices(props.card.choices).length > 0)));
   const [saving, setSaving] = useState(false);
 
   async function submit(event: FormEvent) {
@@ -952,6 +966,8 @@ function CardEditor(props: { card?: Card; onSubmit: (payload: CardPayload) => Pr
     if (!front.trim() || !back.trim() || saving) return;
     setSaving(true);
     try {
+      const parsedChoices = parseChoices(choices);
+      const cardType = inferCardType(front, back, parsedChoices, phonetic, mnemonic);
       await props.onSubmit({
         card_type: cardType,
         front,
@@ -960,7 +976,7 @@ function CardEditor(props: { card?: Card; onSubmit: (payload: CardPayload) => Pr
         example,
         mnemonic,
         note,
-        choices: cardType === "choice" ? parseChoices(choices) : []
+        choices: cardType === "choice" ? parsedChoices : []
       });
       if (!props.card) {
         setFront("");
@@ -970,6 +986,7 @@ function CardEditor(props: { card?: Card; onSubmit: (payload: CardPayload) => Pr
         setMnemonic("");
         setNote("");
         setChoices("");
+        setAdvancedOpen(false);
       }
     } finally {
       setSaving(false);
@@ -978,19 +995,18 @@ function CardEditor(props: { card?: Card; onSubmit: (payload: CardPayload) => Pr
 
   return (
     <form className={`card-form ${props.card ? "edit-card-form" : ""}`} onSubmit={submit}>
-      <select value={cardType} onChange={(event) => setCardType(event.target.value as CardType)} title="卡片类型">
-        <option value="word">单词卡</option>
-        <option value="basic">普通卡</option>
-        <option value="choice">选择题卡</option>
-        <option value="blank">填空题卡</option>
-      </select>
-      <input value={front} onChange={(event) => setFront(event.target.value)} placeholder={cardType === "blank" ? "题干，使用 [] 表示空格" : cardType === "choice" ? "题目" : "正面 / 单词"} />
-      {cardType === "word" && <input value={phonetic} onChange={(event) => setPhonetic(event.target.value)} placeholder="音标（可选）" />}
-      <input value={back} onChange={(event) => setBack(event.target.value)} placeholder={cardType === "choice" || cardType === "blank" ? "正确答案" : "背面 / 释义"} />
-      {cardType === "choice" && <input value={choices} onChange={(event) => setChoices(event.target.value)} placeholder="选项，用 | 分隔" />}
-      <input value={example} onChange={(event) => setExample(event.target.value)} placeholder="例句 / 说明（可选）" />
-      {cardType === "word" && <input value={mnemonic} onChange={(event) => setMnemonic(event.target.value)} placeholder="助记（可选）" />}
-      <input value={note} onChange={(event) => setNote(event.target.value)} placeholder="备注（可选）" />
+      <input value={front} onChange={(event) => setFront(event.target.value)} placeholder="正面 / 题目，填空题使用 [] 表示空格" />
+      <input value={back} onChange={(event) => setBack(event.target.value)} placeholder="背面 / 正确答案" />
+      <button className="primary-button secondary-button" type="button" onClick={() => setAdvancedOpen((value) => !value)}><SlidersHorizontal />高级字段</button>
+      {advancedOpen && (
+        <div className="advanced-fields">
+          <input value={choices} onChange={(event) => setChoices(event.target.value)} placeholder="选择题选项，用 | 分隔；填写后自动识别为选择题" />
+          <input value={phonetic} onChange={(event) => setPhonetic(event.target.value)} placeholder="音标（可选）" />
+          <input value={example} onChange={(event) => setExample(event.target.value)} placeholder="例句 / 说明 / 解析（可选）" />
+          <input value={mnemonic} onChange={(event) => setMnemonic(event.target.value)} placeholder="助记（可选）" />
+          <input value={note} onChange={(event) => setNote(event.target.value)} placeholder="备注（可选）" />
+        </div>
+      )}
       <button className="primary-button" disabled={saving}>{props.card ? <Save /> : <Plus />}{saving ? "处理中" : props.card ? "保存" : "添加"}</button>
       {props.onCancel && <button className="primary-button secondary-button" type="button" disabled={saving} onClick={props.onCancel}><XCircle />取消</button>}
     </form>
@@ -998,14 +1014,13 @@ function CardEditor(props: { card?: Card; onSubmit: (payload: CardPayload) => Pr
 }
 
 function StudyView(props: {
-  mode: StudyMode;
-  onMode: (mode: StudyMode) => void;
   cards: Card[];
   rootDecks: Deck[];
   selectedRootDeckId: number | null;
   onSelectRootDeck: (id: number) => void;
   selectedDeck?: Deck;
   studyTextScale: number;
+  onStudyTextScale: (scale: number) => Promise<void>;
   autoSpeak: boolean;
   onAnswer: (card: Card, rating: ReviewRating) => Promise<{ stage: number; dueAt: string; previous: ReviewSnapshot }>;
   onUndoAnswer: (card: Card, snapshot: ReviewSnapshot) => Promise<void>;
@@ -1033,6 +1048,9 @@ function StudyView(props: {
   const [selectedChoice, setSelectedChoice] = useState("");
   const [editingStudyCard, setEditingStudyCard] = useState<Card | null>(null);
   const [busy, setBusy] = useState("");
+  const [scaleDraft, setScaleDraft] = useState(props.studyTextScale);
+  const [scaleSaving, setScaleSaving] = useState(false);
+  const [immersive, setImmersive] = useState(false);
   const card = queue[0];
 
   useEffect(() => {
@@ -1047,6 +1065,21 @@ function StudyView(props: {
     setEditingStudyCard(null);
     if (props.autoSpeak && card && isWordCard(card)) props.onSpeak(card.front, card.language ?? props.selectedDeck?.language);
   }, [card?.id, props.autoSpeak]);
+
+  useEffect(() => {
+    setScaleDraft(props.studyTextScale);
+  }, [props.studyTextScale]);
+
+  useEffect(() => {
+    document.documentElement.classList.toggle("study-immersive-active", immersive);
+    return () => document.documentElement.classList.remove("study-immersive-active");
+  }, [immersive]);
+
+  useEffect(() => {
+    const onFullscreen = () => setImmersive(Boolean(document.fullscreenElement));
+    document.addEventListener("fullscreenchange", onFullscreen);
+    return () => document.removeEventListener("fullscreenchange", onFullscreen);
+  }, []);
 
   async function startSession(nextLimit = sessionLimit) {
     if (!props.selectedRootDeckId || busy) return;
@@ -1121,22 +1154,25 @@ function StudyView(props: {
   function checkChoice(choice: string) {
     if (!card || checked) return;
     setSelectedChoice(choice);
-    setChecked(normalizeAnswer(choice) === normalizeAnswer(card.back) ? "right" : "wrong");
+    setChecked(answersMatch(choice, card.back) ? "right" : "wrong");
   }
 
   const choices = useMemo(() => {
     if (!card) return [];
+    const baseChoices = parseChoices(card.choices);
     const source = card.card_type === "choice"
-      ? Array.from(new Set([...parseChoices(card.choices), card.back]))
+      ? baseChoices.some((choice) => answersMatch(choice, card.back)) ? baseChoices : [...baseChoices, card.back]
       : sessionCards.filter((item) => item.id !== card.id).slice(0, 3).map((item) => item.back).concat(card.back);
     return source.sort(() => 0.5 - Math.random());
   }, [card?.id, sessionCards]);
 
+  const displayCorrect = card ? choices.find((choice) => answersMatch(choice, card.back)) ?? card.back : "";
+
   const completed = masteredIds.length;
   const total = sessionCards.length;
   const explanation = card ? [card.example, card.note].filter(Boolean).join(" · ") : "";
-  const showManualRatings = props.mode === "flashcards" || checked !== null;
-  const scale = props.studyTextScale;
+  const showManualRatings = card ? card.card_type !== "choice" && card.card_type !== "blank" || checked !== null : false;
+  const scale = scaleDraft;
   const studyStyle = {
     "--study-face-min": `${Math.round(32 * scale)}px`,
     "--study-face-max": `${Math.round(72 * scale)}px`,
@@ -1152,8 +1188,28 @@ function StudyView(props: {
     "--study-result-size": `${Math.round(16 * scale)}px`
   } as CSSProperties & Record<string, string>;
 
+  async function saveScale(nextScale: number) {
+    setScaleDraft(nextScale);
+    setScaleSaving(true);
+    try {
+      await props.onStudyTextScale(nextScale);
+    } finally {
+      setScaleSaving(false);
+    }
+  }
+
+  async function toggleImmersive() {
+    if (document.fullscreenElement) {
+      await document.exitFullscreen().catch(() => undefined);
+      setImmersive(false);
+      return;
+    }
+    await document.documentElement.requestFullscreen?.().catch(() => undefined);
+    setImmersive(true);
+  }
+
   return (
-    <section className="stack">
+    <section className={`stack study-view ${immersive ? "immersive" : ""}`}>
       <div className="panel study-selector">
         <label>
           大卡组
@@ -1178,12 +1234,6 @@ function StudyView(props: {
         </div>
       </div>
 
-      <div className="mode-tabs">
-        {(Object.keys(modeLabels) as StudyMode[]).map((mode) => (
-          <button key={mode} className={mode === props.mode ? "active" : ""} onClick={() => props.onMode(mode)}>{modeLabels[mode]}</button>
-        ))}
-      </div>
-
       {!card ? <EmptyState text={total > 0 ? "本轮已完成。" : studyKind === "new" ? "这个大卡组暂无可新学卡片。" : "这个大卡组暂无到期复习卡片。"} /> : (
         <div className="study-panel" style={studyStyle}>
           <div className="progress-line">
@@ -1194,26 +1244,32 @@ function StudyView(props: {
           <div className="study-actions">
             <span className="type-pill">{cardTypeLabels[card.card_type]}</span>
             <span className="type-pill">待掌握 {queue.length}</span>
+            <label className="study-scale-control" title="学习字号">
+              <SlidersHorizontal />
+              <input type="range" min={0.85} max={1.35} step={0.05} value={scaleDraft} onChange={(event) => saveScale(Number(event.target.value))} />
+              <strong>{scaleSaving ? "保存中" : `${Math.round(scaleDraft * 100)}%`}</strong>
+            </label>
+            <button className="mini-button" title={immersive ? "退出沉浸学习" : "沉浸学习"} onClick={toggleImmersive}>{immersive ? <Minimize2 /> : <Maximize2 />}</button>
             <button className="mini-button" title="撤销上一张" disabled={history.length === 0 || Boolean(busy)} onClick={undo}><ArrowLeft /></button>
             <button className="mini-button" title="编辑当前卡片" onClick={() => setEditingStudyCard(card)}><Edit3 /></button>
             <button className="mini-button" title="发音" onClick={() => props.onSpeak(card.front, card.language ?? props.selectedDeck?.language)}><Volume2 /></button>
           </div>
           {editingStudyCard && <CardEditor card={editingStudyCard} onCancel={() => setEditingStudyCard(null)} onSubmit={async (payload) => { await props.onUpdateCard(editingStudyCard.id, { ...payload, baseUpdatedAt: editingStudyCard.updated_at }); setEditingStudyCard(null); }} />}
-          {props.mode === "flashcards" && (
+          {card.card_type !== "choice" && card.card_type !== "blank" && (
             <button className={`flip-card ${flipped ? "flipped" : ""}`} onClick={() => setFlipped((value) => !value)}>
               {flipped ? <CardBack card={card} /> : <CardFront card={card} />}
             </button>
           )}
-          {props.mode === "choice" && (
+          {card.card_type === "choice" && (
             <div className="question-box">
-              <p>{card.card_type === "choice" ? card.front : `选择「${card.front}」的答案`}</p>
+              <p>{card.front}</p>
               <ChoiceGrid choices={choices} answer={card.back} selected={selectedChoice} checked={checked} onChoose={checkChoice} />
-              {checked && <AnswerFeedback checked={checked} correct={card.back} explanation={explanation} selected={selectedChoice} />}
+              {checked && <AnswerFeedback checked={checked} correct={displayCorrect} explanation={explanation} selected={selectedChoice} />}
             </div>
           )}
-          {props.mode === "write" && (
+          {card.card_type === "blank" && (
             <div className="question-box">
-              <p>{card.card_type === "blank" ? blankPrompt(card.front) : card.front}</p>
+              <p>{blankPrompt(card.front)}</p>
               {card.example && <small>{card.example}</small>}
               <input value={answer} onChange={(event) => { setAnswer(event.target.value); setChecked(null); }} placeholder="输入答案" />
               <button className="primary-button" disabled={Boolean(busy)} onClick={checkWritten}>检查</button>
@@ -1260,7 +1316,7 @@ function ChoiceGrid(props: { choices: string[]; answer: string; selected: string
     <div className="choice-grid">
       {props.choices.map((choice, index) => {
         const isSelected = choice === props.selected;
-        const isAnswer = normalizeAnswer(choice) === normalizeAnswer(props.answer);
+        const isAnswer = answersMatch(choice, props.answer);
         const state = props.checked && (isAnswer ? "correct" : isSelected ? "wrong" : "");
         return (
           <button
@@ -1354,12 +1410,6 @@ function SettingsView(props: { settings: Settings; onSave: (settings: Partial<Se
       <label>默认发音语言<select value={draft.voiceLanguage} onChange={(event) => updateDraft({ voiceLanguage: event.target.value })}><option value="en-US">英语 en-US</option><option value="ja-JP">日语 ja-JP</option><option value="ko-KR">韩语 ko-KR</option><option value="fr-FR">法语 fr-FR</option><option value="de-DE">德语 de-DE</option></select></label>
       <label>自动发音<select value={draft.autoSpeak} onChange={(event) => updateDraft({ autoSpeak: event.target.value as Settings["autoSpeak"] })}><option value="off">关闭</option><option value="on">开启</option></select></label>
       <label>每日新学目标<input type="number" min={0} value={draft.dailyNewGoal} onChange={(event) => updateDraft({ dailyNewGoal: Number(event.target.value) })} /></label>
-      <label>学习卡片字号
-        <div className="range-row">
-          <input type="range" min={0.85} max={1.35} step={0.05} value={draft.studyTextScale} onChange={(event) => updateDraft({ studyTextScale: Number(event.target.value) })} />
-          <strong>{Math.round(draft.studyTextScale * 100)}%</strong>
-        </div>
-      </label>
       <div className="settings-actions">
         <button className="primary-button" disabled={props.saving}><Save />{props.saving ? "保存中" : "保存设置"}</button>
         <button className="primary-button secondary-button" type="button" disabled={props.notifying} onClick={props.onNotify}><Bell />{props.notifying ? "授权中" : "开启浏览器通知"}</button>
@@ -1375,6 +1425,7 @@ function AboutView(props: { syncStatus: SyncStatus | null }) {
       <div className="about-title"><Info /><div><p className="eyebrow">Xian 闪记卡</p><h2>版本 {version}</h2></div></div>
       <div className="schedule-box changelog-box">
         <h3>更新日志</h3>
+        <div className="changelog-row"><strong>0.2.4</strong><span>2026-06-26</span><p>修复选择题答案标签匹配和第五选项问题；学习页按卡片类型自动显示；字号调整移入学习页；新增沉浸式学习并移除卡片悬停倾斜。</p></div>
         <div className="changelog-row"><strong>0.2.3</strong><span>2026-06-26</span><p>修复填写判定、每日新学统计、重复提交、单卡删除确认、设置保存、自动发音开关、导入模板、移动端导航和开发端口冲突等体验问题。</p></div>
         <div className="changelog-row"><strong>0.2.2</strong><span>2026-06-26</span><p>导入时自动识别选择题和填空题；选择/填写后先显示对错、正确答案和解析，再手动评级；新增学习卡片字号设置。</p></div>
         <div className="changelog-row"><strong>0.2.1</strong><span>2026-06-25</span><p>修复多层卡组菜单重叠；新增卡片批量全选、移动、删除；填空题支持填写判定并统一 [] 占位符；学习页支持新学张数、本轮固定队列、错题循环到掌握和撤销。</p></div>

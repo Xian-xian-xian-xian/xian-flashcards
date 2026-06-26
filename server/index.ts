@@ -39,7 +39,7 @@ type CardType = "basic" | "word" | "choice" | "blank";
 const maxDeckDepth = 5;
 const sessionCookieName = "flashcards_session";
 const sessionDays = 30;
-const appVersion = "0.2.3";
+const appVersion = "0.2.4";
 const timeZone = "Asia/Shanghai";
 const normalizedUsers = new Set<number>();
 
@@ -111,6 +111,25 @@ function normalizeChoices(value: unknown, fallback: string[] = []) {
   return Array.from(new Set(raw.map((item: unknown) => String(item ?? "").trim()).filter(Boolean))).slice(0, 8);
 }
 
+function normalizeAnswer(value: string) {
+  return value.trim().toLowerCase().replace(/\s+/g, " ");
+}
+
+function optionKey(value: string) {
+  const normalized = normalizeAnswer(value);
+  const match = normalized.match(/^([a-h])(?:[\s.)、:：-]+|$)/i);
+  return match?.[1] ?? normalized;
+}
+
+function answersMatch(choice: string, answer: string) {
+  return normalizeAnswer(choice) === normalizeAnswer(answer) || optionKey(choice) === optionKey(answer);
+}
+
+function addAnswerChoice(choices: string[], answer: string) {
+  if (!answer.trim() || choices.some((choice) => answersMatch(choice, answer))) return choices;
+  return [...choices, answer.trim()];
+}
+
 function importChoiceValues(row: Record<string, unknown>) {
   const optionValues = Array.from({ length: 8 }, (_, index) => {
     const number = index + 1;
@@ -132,7 +151,7 @@ function inferCardType(row: Record<string, unknown>, front: string, choices: str
 }
 
 function normalizedChoicePayload(cardType: CardType, choices: string[] | string, answer: string) {
-  return cardType === "choice" ? normalizeChoices([...normalizeChoices(choices), answer]) : [];
+  return cardType === "choice" ? addAnswerChoice(normalizeChoices(choices), answer).slice(0, 8) : [];
 }
 
 function clampStudyTextScale(value: unknown) {
@@ -641,7 +660,11 @@ app.patch("/api/cards/:id", (req, res) => {
     return;
   }
   const cardType = req.body.card_type === undefined ? null : normalizeCardType(req.body.card_type);
-  const nextChoices = req.body.choices === undefined ? null : JSON.stringify(normalizeChoices(req.body.choices));
+  const effectiveType = cardType ?? normalizeCardType(current.card_type);
+  const effectiveBack = typeof req.body.back === "string" && req.body.back.trim() ? req.body.back.trim() : String(current.back ?? "");
+  const nextChoices = req.body.choices === undefined && req.body.card_type === undefined && req.body.back === undefined
+    ? null
+    : JSON.stringify(normalizedChoicePayload(effectiveType, req.body.choices ?? String(current.choices ?? ""), effectiveBack));
   run(
     `UPDATE cards
      SET card_type = COALESCE(?, card_type),
