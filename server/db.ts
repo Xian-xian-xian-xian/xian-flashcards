@@ -93,6 +93,7 @@ export async function initDb() {
       date TEXT NOT NULL,
       daily_new_goal INTEGER DEFAULT 20,
       review_card_ids TEXT DEFAULT '[]',
+      new_card_ids TEXT DEFAULT '[]',
       completed_at TEXT DEFAULT '',
       created_at TEXT NOT NULL,
       updated_at TEXT NOT NULL,
@@ -143,6 +144,10 @@ export async function initDb() {
   const sessionColumns = all<{ name: string }>("PRAGMA table_info(study_sessions)").map((column) => column.name);
   if (!sessionColumns.includes("user_id")) {
     exec("ALTER TABLE study_sessions ADD COLUMN user_id INTEGER");
+  }
+  const dailyTaskColumns = all<{ name: string }>("PRAGMA table_info(daily_tasks)").map((column) => column.name);
+  if (!dailyTaskColumns.includes("new_card_ids")) {
+    exec("ALTER TABLE daily_tasks ADD COLUMN new_card_ids TEXT DEFAULT '[]'");
   }
   persist();
 }

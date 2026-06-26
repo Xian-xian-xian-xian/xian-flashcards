@@ -16,6 +16,7 @@ const port = Number(process.env.PORT ?? 4174);
 const host = process.env.HOST ?? "0.0.0.0";
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const publicDir = path.resolve(__dirname, "../../dist");
+const templateDir = path.resolve(process.cwd(), "模版");
 
 app.use(cors({ origin: true, credentials: true }));
 app.use(express.json({ limit: "10mb" }));
@@ -38,11 +39,12 @@ type CardType = "basic" | "word" | "choice" | "blank";
 const maxDeckDepth = 5;
 const sessionCookieName = "flashcards_session";
 const sessionDays = 30;
-const appVersion = "0.2.1";
+const appVersion = "0.2.3";
 const timeZone = "Asia/Shanghai";
+const normalizedUsers = new Set<number>();
 
 function requireText(value: unknown, name: string) {
-  if (typeof value !== "string" || !value.trim()) throw new Error(`${name} is required`);
+  if (typeof value !== "string" || !value.trim()) throw new Error(`${name}不能为空`);
   return value.trim();
 }
 
@@ -78,6 +80,21 @@ function normalizeCardType(value: unknown): CardType {
   return "basic";
 }
 
+function hasText(value: unknown) {
+  return String(value ?? "").trim().length > 0;
+}
+
+function rowValue(row: Record<string, unknown>, keys: string[]) {
+  for (const key of keys) {
+    if (key in row && hasText(row[key])) return row[key];
+  }
+  return undefined;
+}
+
+function hasAnyKey(row: Record<string, unknown>, keys: string[]) {
+  return keys.some((key) => key in row);
+}
+
 function normalizeChoices(value: unknown, fallback: string[] = []) {
   let raw: unknown[] = fallback;
   if (Array.isArray(value)) raw = value;
@@ -92,6 +109,36 @@ function normalizeChoices(value: unknown, fallback: string[] = []) {
     raw = value.split(/[|；;]/);
   }
   return Array.from(new Set(raw.map((item: unknown) => String(item ?? "").trim()).filter(Boolean))).slice(0, 8);
+}
+
+function importChoiceValues(row: Record<string, unknown>) {
+  const optionValues = Array.from({ length: 8 }, (_, index) => {
+    const number = index + 1;
+    return rowValue(row, [`option${number}`, `Option${number}`, `选项${number}`, `选项 ${number}`]);
+  });
+  return normalizeChoices([
+    ...optionValues,
+    rowValue(row, ["options", "Options", "选项", "候选项"])
+  ].flatMap((value) => String(value ?? "").split(/[|；;]/)));
+}
+
+function inferCardType(row: Record<string, unknown>, front: string, choices: string[]): CardType {
+  const explicit = rowValue(row, ["card_type", "type", "类型", "卡片类型", "题型"]);
+  if (explicit !== undefined) return normalizeCardType(explicit);
+  if (choices.length > 0 || hasAnyKey(row, ["option1", "Option1", "选项1", "options", "Options", "选项", "候选项"])) return "choice";
+  if (/(\[\s*\]|_{2,}|（\s*）|\(\s*\))/.test(front)) return "blank";
+  if (hasAnyKey(row, ["word", "单词", "phonetic", "音标", "meaning", "释义"])) return "word";
+  return "basic";
+}
+
+function normalizedChoicePayload(cardType: CardType, choices: string[] | string, answer: string) {
+  return cardType === "choice" ? normalizeChoices([...normalizeChoices(choices), answer]) : [];
+}
+
+function clampStudyTextScale(value: unknown) {
+  const scale = Number(value);
+  if (!Number.isFinite(scale)) return 1;
+  return Math.min(1.35, Math.max(0.85, Math.round(scale * 100) / 100));
 }
 
 function parseCookies(header: string | undefined) {
@@ -158,6 +205,7 @@ function requireUser(req: express.Request, res: express.Response, next: express.
     return;
   }
   res.locals.user = user;
+  normalizeExistingCards(Number(user.id));
   next();
 }
 
@@ -169,6 +217,31 @@ function claimExistingData(userId: number) {
   run("UPDATE decks SET user_id = ? WHERE user_id IS NULL", [userId]);
   run("UPDATE cards SET user_id = ? WHERE user_id IS NULL", [userId]);
   run("UPDATE study_sessions SET user_id = ? WHERE user_id IS NULL", [userId]);
+}
+
+function normalizeExistingCards(userId: number) {
+  if (normalizedUsers.has(userId)) return;
+  normalizedUsers.add(userId);
+  const cards = all<{ id: number; card_type: string; front: string; back: string; choices: string; phonetic: string; note: string; updated_at: string }>(
+    "SELECT id, card_type, front, back, choices, phonetic, note, updated_at FROM cards WHERE user_id = ?",
+    [userId]
+  );
+  cards.forEach((card) => {
+    const currentType = normalizeCardType(card.card_type);
+    let nextType: CardType | null = null;
+    const parsedChoices = normalizeChoices(card.choices);
+    if (currentType !== "choice" && parsedChoices.length > 0) nextType = "choice";
+    else if ((currentType === "basic" || currentType === "word") && /(\[\s*\]|_{2,})/.test(String(card.front))) nextType = "blank";
+    const finalType = nextType ?? currentType;
+    const nextChoices = normalizedChoicePayload(finalType, parsedChoices, String(card.back));
+    const shouldUpdateType = nextType !== null && nextType !== currentType;
+    const shouldUpdateChoices = finalType === "choice" && JSON.stringify(parsedChoices) !== JSON.stringify(nextChoices);
+    if (!shouldUpdateType && !shouldUpdateChoices) return;
+    run(
+      "UPDATE cards SET card_type = ?, choices = ?, updated_at = ? WHERE id = ? AND user_id = ?",
+      [finalType, JSON.stringify(nextChoices), nowIso(), Number(card.id), userId]
+    );
+  });
 }
 
 function getDailyGoal(userId: number) {
@@ -225,7 +298,7 @@ function deckRows(userId: number) {
 function getDeckDepth(userId: number, deckId: number | null): number {
   if (!deckId) return 0;
   const deck = get<{ parent_id: number | null }>("SELECT parent_id FROM decks WHERE id = ? AND user_id = ?", [deckId, userId]);
-  if (!deck) throw new Error("parent deck not found");
+  if (!deck) throw new Error("父级卡组不存在");
   return 1 + getDeckDepth(userId, deck.parent_id === null ? null : Number(deck.parent_id));
 }
 
@@ -249,10 +322,12 @@ function cardRow(userId: number, cardId: number) {
 
 function createCard(userId: number, deckId: number, input: CardInput) {
   const deck = get<{ id: number }>("SELECT id FROM decks WHERE id = ? AND user_id = ?", [deckId, userId]);
-  if (!deck) throw new Error("deck not found");
+  if (!deck) throw new Error("卡组不存在");
   const createdAt = nowIso();
   const cardType = normalizeCardType(input.card_type);
-  const choices = cardType === "choice" ? normalizeChoices(input.choices, [input.back]).concat(input.back).filter(Boolean) : [];
+  const choices = normalizedChoicePayload(cardType, input.choices ?? [], input.back);
+  const front = requireText(input.front, "题目");
+  const back = requireText(input.back, "答案");
   run(
     `INSERT INTO cards (user_id, deck_id, card_type, front, back, phonetic, example, mnemonic, note, choices, created_at, updated_at)
      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
@@ -260,8 +335,8 @@ function createCard(userId: number, deckId: number, input: CardInput) {
       userId,
       deckId,
       cardType,
-      requireText(input.front, "front"),
-      requireText(input.back, "back"),
+      front,
+      back,
       input.phonetic?.trim() ?? "",
       input.example?.trim() ?? "",
       input.mnemonic?.trim() ?? "",
@@ -307,21 +382,36 @@ function ensureDailyTask(userId: number) {
   if (!existing) {
     const now = nowIso();
     run(
-      `INSERT INTO daily_tasks (user_id, date, daily_new_goal, review_card_ids, completed_at, created_at, updated_at)
-       VALUES (?, ?, ?, ?, '', ?, ?)`,
-      [userId, date, getDailyGoal(userId), JSON.stringify(dueReviewIdsForToday(userId, now)), now, now]
+      `INSERT INTO daily_tasks (user_id, date, daily_new_goal, review_card_ids, new_card_ids, completed_at, created_at, updated_at)
+       VALUES (?, ?, ?, ?, ?, '', ?, ?)`,
+      [userId, date, getDailyGoal(userId), JSON.stringify(dueReviewIdsForToday(userId, now)), "[]", now, now]
     );
   }
-  return get<{ date: string; daily_new_goal: number; review_card_ids: string; completed_at: string }>(
+  return get<{ date: string; daily_new_goal: number; review_card_ids: string; new_card_ids: string; completed_at: string }>(
     "SELECT * FROM daily_tasks WHERE user_id = ? AND date = ?",
     [userId, date]
   )!;
+}
+
+function updateDailyNewCard(userId: number, cardId: number, action: "add" | "remove") {
+  const task = ensureDailyTask(userId);
+  const ids = new Set(parseJsonArray(task.new_card_ids));
+  if (action === "add") ids.add(cardId);
+  else ids.delete(cardId);
+  const now = nowIso();
+  run("UPDATE daily_tasks SET new_card_ids = ?, completed_at = '', updated_at = ? WHERE user_id = ? AND date = ?", [
+    JSON.stringify([...ids]),
+    now,
+    userId,
+    task.date
+  ]);
 }
 
 function dailyTaskSummary(userId: number) {
   const task = ensureDailyTask(userId);
   const date = String(task.date);
   const reviewIds = parseJsonArray(task.review_card_ids);
+  const newIds = parseJsonArray(task.new_card_ids);
   const reviewRows = reviewIds.length
     ? all<{ card_id: number; updated_at: string }>(
         `SELECT card_id, updated_at FROM reviews WHERE card_id IN (${reviewIds.map(() => "?").join(",")})`,
@@ -329,18 +419,7 @@ function dailyTaskSummary(userId: number) {
       )
     : [];
   const reviewCompleted = reviewRows.filter((row) => sameShanghaiDay(String(row.updated_at), date)).length;
-  const newRows = all<{ created_at: string; updated_at: string; attempts: number }>(
-    `SELECT r.updated_at,
-            c.created_at,
-            (r.known_count + r.fuzzy_count + r.unknown_count) AS attempts
-     FROM cards c
-     JOIN reviews r ON r.card_id = c.id
-     WHERE c.user_id = ?`,
-    [userId]
-  );
-  const newCompleted = newRows.filter((row) =>
-    Number(row.attempts) > 0 && sameShanghaiDay(String(row.created_at), date) && sameShanghaiDay(String(row.updated_at), date)
-  ).length;
+  const newCompleted = newIds.length;
   const completed = Boolean(task.completed_at) || (newCompleted >= Number(task.daily_new_goal) && reviewCompleted >= reviewIds.length);
   if (completed && !task.completed_at) {
     const now = nowIso();
@@ -431,6 +510,16 @@ app.post("/api/auth/logout", (req, res) => {
 
 app.use("/api", requireUser);
 
+app.get("/api/templates/:name", (req, res) => {
+  const allowed = new Set(["普通卡导入模板.xlsx", "单词卡导入模板.xlsx", "选择题卡导入模板.xlsx", "填空题卡导入模板.xlsx"]);
+  const name = path.basename(req.params.name);
+  if (!allowed.has(name)) {
+    res.status(404).json({ error: "模板不存在" });
+    return;
+  }
+  res.download(path.join(templateDir, name), name);
+});
+
 app.get("/api/decks", (_req, res) => {
   res.json(deckRows(currentUserId(res)));
 });
@@ -443,7 +532,7 @@ app.post("/api/decks", (req, res) => {
       ? null
       : Number(req.body.parentId);
     const depth = getDeckDepth(userId, parentId) + 1;
-    if (depth > maxDeckDepth) throw new Error(`deck nesting supports up to ${maxDeckDepth} levels`);
+    if (depth > maxDeckDepth) throw new Error(`卡组最多支持 ${maxDeckDepth} 层`);
     run(
       `INSERT INTO decks (user_id, parent_id, name, description, language, daily_goal, reminder_time, created_at, updated_at)
        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
@@ -477,10 +566,10 @@ app.patch("/api/decks/:id", (req, res) => {
           : Number(req.body.parentId);
     if (parentId !== undefined) {
       if (parentId === deckId || descendantDeckIds(userId, deckId).includes(Number(parentId))) {
-        throw new Error("deck cannot be moved inside itself");
+        throw new Error("卡组不能移动到自己或自己的子卡组内");
       }
       if (getDeckDepth(userId, parentId) + 1 > maxDeckDepth) {
-        throw new Error(`deck nesting supports up to ${maxDeckDepth} levels`);
+        throw new Error(`卡组最多支持 ${maxDeckDepth} 层`);
       }
     }
     run(
@@ -516,7 +605,7 @@ app.delete("/api/decks/:id", (req, res) => {
   const userId = currentUserId(res);
   const ids = descendantDeckIds(userId, Number(req.params.id));
   if (ids.length === 0) {
-    res.status(404).json({ error: "deck not found" });
+    res.status(404).json({ error: "卡组不存在" });
     return;
   }
   const placeholders = ids.map(() => "?").join(",");
@@ -543,7 +632,7 @@ app.patch("/api/cards/:id", (req, res) => {
   const cardId = Number(req.params.id);
   const current = cardRow(userId, cardId);
   if (!current) {
-    res.status(404).json({ error: "card not found" });
+    res.status(404).json({ error: "卡片不存在" });
     return;
   }
   const baseUpdatedAt = typeof req.body.baseUpdatedAt === "string" ? req.body.baseUpdatedAt : "";
@@ -639,25 +728,20 @@ function normalizeImportRows(rows: Record<string, unknown>[]) {
     .map((row) => {
       const values = Object.values(row).map((value) => String(value ?? "").trim());
       const hasPhonetic = "phonetic" in row || "音标" in row;
-      const cardType = normalizeCardType(row.card_type ?? row.type ?? row["类型"] ?? row["卡片类型"]);
-      const front = String(row.front ?? row.question ?? row.word ?? row["题目"] ?? row["正面"] ?? row["单词"] ?? values[0] ?? "").trim();
-      const back = String(row.back ?? row.answer ?? row.meaning ?? row["答案"] ?? row["背面"] ?? row["释义"] ?? values[1] ?? "").trim();
-      const choices = normalizeChoices([
-        row.option1 ?? row["选项1"],
-        row.option2 ?? row["选项2"],
-        row.option3 ?? row["选项3"],
-        row.option4 ?? row["选项4"],
-        row.options ?? row["选项"]
-      ].flatMap((value) => String(value ?? "").split(/[|；;]/)));
+      const choices = importChoiceValues(row);
+      const front = String(rowValue(row, ["front", "question", "word", "题目", "正面", "单词"]) ?? values[0] ?? "").trim();
+      const back = String(rowValue(row, ["back", "answer", "meaning", "答案", "背面", "释义"]) ?? values[1] ?? "").trim();
+      const cardType = inferCardType(row, front, choices);
+      const positionalExample = cardType === "choice" ? "" : values[2];
       return {
         card_type: cardType,
         front,
         back,
-        phonetic: String(row.phonetic ?? row["音标"] ?? "").trim(),
-        example: String(row.example ?? row["例句"] ?? values[2] ?? "").trim(),
-        mnemonic: String(row.mnemonic ?? row["助记"] ?? (hasPhonetic ? values[4] : values[3]) ?? "").trim(),
-        note: String(row.note ?? row["备注"] ?? (hasPhonetic ? values[5] : values[4]) ?? "").trim(),
-        choices: cardType === "choice" ? choices : []
+        phonetic: String(rowValue(row, ["phonetic", "音标"]) ?? "").trim(),
+        example: String(rowValue(row, ["example", "解析", "例句", "说明"]) ?? positionalExample ?? "").trim(),
+        mnemonic: String(rowValue(row, ["mnemonic", "助记"]) ?? (cardType === "choice" ? "" : hasPhonetic ? values[4] : values[3]) ?? "").trim(),
+        note: String(rowValue(row, ["note", "备注"]) ?? (cardType === "choice" ? "" : hasPhonetic ? values[5] : values[4]) ?? "").trim(),
+        choices: normalizedChoicePayload(cardType, choices, back)
       };
     })
     .filter((row) => row.front && row.back);
@@ -668,7 +752,7 @@ app.post("/api/import", upload.single("file"), (req, res) => {
     const userId = currentUserId(res);
     const deckId = Number(req.body.deckId);
     const deck = get<{ id: number }>("SELECT id FROM decks WHERE id = ? AND user_id = ?", [deckId, userId]);
-    if (!deck) throw new Error("deck not found");
+    if (!deck) throw new Error("卡组不存在");
     const text = req.body.text as string | undefined;
     let rows: Record<string, unknown>[] = [];
 
@@ -736,7 +820,7 @@ app.post("/api/reviews/:cardId/answer", (req, res) => {
   const userId = currentUserId(res);
   const rating = req.body.rating as ReviewRating;
   if (!["known", "fuzzy", "unknown"].includes(rating)) {
-    res.status(400).json({ error: "rating must be known, fuzzy, or unknown" });
+    res.status(400).json({ error: "请选择认识、模糊或不认识" });
     return;
   }
 
@@ -748,11 +832,13 @@ app.post("/api/reviews/:cardId/answer", (req, res) => {
     [Number(req.params.cardId), userId]
   );
   if (!current) {
-    res.status(404).json({ error: "review not found" });
+    res.status(404).json({ error: "复习记录不存在" });
     return;
   }
 
   const next = nextReviewState(Number(current.stage), rating);
+  const cardId = Number(req.params.cardId);
+  if (Number(current.stage) === 0) updateDailyNewCard(userId, cardId, "add");
   run(
     `UPDATE reviews
      SET stage = ?,
@@ -771,7 +857,7 @@ app.post("/api/reviews/:cardId/answer", (req, res) => {
       rating === "fuzzy" ? 1 : 0,
       rating === "unknown" ? 1 : 0,
       nowIso(),
-      Number(req.params.cardId),
+      cardId,
       userId
     ]
   );
@@ -785,9 +871,10 @@ app.post("/api/reviews/:cardId/restore", (req, res) => {
   const cardId = Number(req.params.cardId);
   const card = get<{ id: number }>("SELECT id FROM cards WHERE id = ? AND user_id = ?", [cardId, userId]);
   if (!card) {
-    res.status(404).json({ error: "review not found" });
+    res.status(404).json({ error: "复习记录不存在" });
     return;
   }
+  if (Math.max(0, Number(req.body.stage ?? 0)) === 0) updateDailyNewCard(userId, cardId, "remove");
   run(
     `UPDATE reviews
      SET stage = ?,
@@ -864,13 +951,19 @@ app.get("/api/settings", (_req, res) => {
     theme: getUserSetting(userId, "theme", "system"),
     voiceLanguage: getUserSetting(userId, "voiceLanguage", "en-US"),
     notifications: getUserSetting(userId, "notifications", "off"),
-    dailyNewGoal: getDailyGoal(userId)
+    autoSpeak: getUserSetting(userId, "autoSpeak", "off"),
+    dailyNewGoal: getDailyGoal(userId),
+    studyTextScale: clampStudyTextScale(getUserSetting(userId, "studyTextScale", "1"))
   });
 });
 
 app.put("/api/settings", (req, res) => {
   const userId = currentUserId(res);
-  for (const key of ["theme", "voiceLanguage", "notifications", "dailyNewGoal"]) {
+  for (const key of ["theme", "voiceLanguage", "notifications", "autoSpeak", "dailyNewGoal", "studyTextScale"]) {
+    if (key === "studyTextScale" && (typeof req.body[key] === "string" || typeof req.body[key] === "number")) {
+      setUserSetting(userId, key, String(clampStudyTextScale(req.body[key])));
+      continue;
+    }
     if (typeof req.body[key] === "string") setUserSetting(userId, key, req.body[key]);
     if (key === "dailyNewGoal" && typeof req.body[key] === "number") setUserSetting(userId, key, String(req.body[key]));
   }

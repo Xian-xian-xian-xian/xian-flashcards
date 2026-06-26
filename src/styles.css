@@ -738,6 +738,18 @@ textarea:focus {
 .study-panel {
   position: relative;
   padding: 22px;
+  --study-face-min: 32px;
+  --study-face-max: 72px;
+  --study-word-min: 38px;
+  --study-word-max: 72px;
+  --study-phonetic-min: 18px;
+  --study-phonetic-max: 28px;
+  --study-back-min: 22px;
+  --study-back-max: 34px;
+  --study-small-size: 16px;
+  --study-question-size: 24px;
+  --study-choice-size: 16px;
+  --study-result-size: 16px;
 }
 
 .progress-line {
@@ -829,7 +841,7 @@ textarea:focus {
 }
 
 .flip-card span {
-  font-size: clamp(32px, 8vw, 72px);
+  font-size: clamp(var(--study-face-min), 8vw, var(--study-face-max));
   font-weight: 950;
 }
 
@@ -844,26 +856,26 @@ textarea:focus {
 
 .flip-card .word-face strong,
 .flip-card .word-back strong {
-  font-size: clamp(38px, 8vw, 72px);
+  font-size: clamp(var(--study-word-min), 8vw, var(--study-word-max));
   line-height: 1;
 }
 
 .flip-card .word-face em,
 .flip-card .word-back em {
   color: var(--primary-strong);
-  font-size: clamp(18px, 3vw, 28px);
+  font-size: clamp(var(--study-phonetic-min), 3vw, var(--study-phonetic-max));
   font-style: normal;
   font-weight: 900;
 }
 
 .flip-card .word-back b {
-  font-size: clamp(22px, 4vw, 34px);
+  font-size: clamp(var(--study-back-min), 4vw, var(--study-back-max));
 }
 
 .flip-card .word-back small {
   max-width: 60ch;
   margin-top: 0;
-  font-size: 16px;
+  font-size: var(--study-small-size);
   line-height: 1.55;
 }
 
@@ -880,8 +892,13 @@ textarea:focus {
 
 .question-box p {
   margin: 0;
-  font-size: 24px;
+  font-size: var(--study-question-size);
   font-weight: 900;
+}
+
+.question-box small {
+  font-size: var(--study-small-size);
+  color: var(--muted);
 }
 
 .choice-grid {
@@ -898,8 +915,21 @@ textarea:focus {
   border-radius: 8px;
   background: var(--surface);
   color: var(--text);
+  font-size: var(--study-choice-size);
   font-weight: 800;
   box-shadow: inset 0 -3px 0 color-mix(in srgb, var(--blue), transparent 72%);
+}
+
+.choice-grid button.correct {
+  border-color: color-mix(in srgb, var(--green), transparent 35%);
+  background: color-mix(in srgb, var(--green), transparent 82%);
+  color: var(--text);
+}
+
+.choice-grid button.wrong {
+  border-color: color-mix(in srgb, var(--red), transparent 35%);
+  background: color-mix(in srgb, var(--red), transparent 84%);
+  color: var(--text);
 }
 
 .rating-row {
@@ -925,11 +955,13 @@ textarea:focus {
 }
 
 .result {
-  display: flex;
-  align-items: center;
-  gap: 10px;
+  display: grid;
+  width: min(680px, 100%);
+  gap: 6px;
   padding: 12px;
   border-radius: 8px;
+  font-size: var(--study-result-size);
+  text-align: left;
 }
 
 .result.right {
@@ -940,19 +972,52 @@ textarea:focus {
   background: color-mix(in srgb, var(--red), transparent 82%);
 }
 
-.result button {
-  min-height: 38px;
-  border: 0;
-  border-radius: 8px;
-  background: var(--surface);
-  color: var(--text);
-  font-weight: 900;
+.result span,
+.result small {
+  overflow-wrap: anywhere;
+}
+
+.range-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 64px;
+  gap: 12px;
+  align-items: center;
+}
+
+.range-row input {
+  padding: 0;
+}
+
+.range-row strong {
+  color: var(--primary-strong);
+  font-variant-numeric: tabular-nums;
+  text-align: right;
 }
 
 .import-form,
 .settings-panel {
   display: grid;
   gap: 16px;
+}
+
+.template-links,
+.settings-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+}
+
+.template-links a {
+  display: inline-flex;
+  align-items: center;
+  min-height: 38px;
+  padding: 0 12px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--primary-soft);
+  color: var(--primary-strong);
+  font-weight: 900;
+  text-decoration: none;
 }
 
 label {
@@ -1027,6 +1092,11 @@ textarea {
   font-weight: 900;
   box-shadow: var(--shadow);
   animation: toast-in 240ms cubic-bezier(0.22, 1.35, 0.36, 1) both;
+}
+
+.toast.error {
+  background: var(--red);
+  color: white;
 }
 
 .auth-shell {
@@ -1224,11 +1294,11 @@ textarea {
   }
 
   .sidebar {
-    position: sticky;
+    position: fixed;
     z-index: 5;
+    right: 0;
     bottom: 0;
-    top: auto;
-    grid-row: 2;
+    left: 0;
     flex-direction: row;
     height: auto;
     padding: 8px;
@@ -1265,7 +1335,7 @@ textarea {
   }
 
   .main {
-    padding: 18px;
+    padding: 18px 18px calc(86px + env(safe-area-inset-bottom));
   }
 
   .topbar h1 {
@@ -1311,7 +1381,7 @@ textarea {
 
 @media (max-width: 520px) {
   .main {
-    padding: 14px;
+    padding: 14px 14px calc(86px + env(safe-area-inset-bottom));
   }
 
   .topbar {

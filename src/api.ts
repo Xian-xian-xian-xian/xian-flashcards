@@ -24,7 +24,7 @@ async function request<T>(url: string, options?: RequestInit): Promise<T> {
   });
   if (!response.ok) {
     const body = await response.json().catch(() => ({}));
-    const error = new Error(body.error ?? `Request failed: ${response.status}`) as ConflictError;
+    const error = new Error(body.error ?? `请求失败：${response.status}`) as ConflictError;
     error.status = response.status;
     error.serverCard = body.serverCard;
     throw error;

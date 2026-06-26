@@ -60,7 +60,9 @@ export type Settings = {
   theme: ThemeMode;
   voiceLanguage: string;
   notifications: "on" | "off";
+  autoSpeak: "on" | "off";
   dailyNewGoal: number;
+  studyTextScale: number;
 };
 
 export type User = {

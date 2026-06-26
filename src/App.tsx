@@ -34,7 +34,7 @@ import {
   Volume2,
   XCircle
 } from "lucide-react";
-import { FormEvent, useEffect, useMemo, useState } from "react";
+import { CSSProperties, FormEvent, useEffect, useMemo, useState } from "react";
 import { api, type CardPayload, type ConflictError } from "./api";
 import type { Card, CardType, DailyTask, Deck, ReviewRating, ReviewSnapshot, Settings, Stats, SyncStatus, ThemeMode, User } from "./types";
 
@@ -42,7 +42,7 @@ type View = "home" | "deck" | "study" | "import" | "settings" | "about";
 type StudyMode = "flashcards" | "choice" | "write";
 type SyncState = "idle" | "syncing" | "success" | "error" | "conflict";
 
-const version = "0.2.1";
+const version = "0.2.3";
 
 const cardTypeLabels: Record<CardType, string> = {
   basic: "普通卡",
@@ -98,6 +98,15 @@ function isWordCard(card: Card) {
   return card.card_type === "word";
 }
 
+function correctAnswer(card: Card) {
+  return card.back;
+}
+
+function isCorrectAnswer(card: Card, answer: string) {
+  const normalized = normalizeAnswer(answer);
+  return normalized === normalizeAnswer(correctAnswer(card));
+}
+
 function dueText(value: string) {
   const date = new Date(value);
   const diff = date.getTime() - Date.now();
@@ -139,14 +148,17 @@ export default function App() {
     theme: "system",
     voiceLanguage: "en-US",
     notifications: "off",
-    dailyNewGoal: 20
+    autoSpeak: "off",
+    dailyNewGoal: 20,
+    studyTextScale: 1
   });
   const [dailyTask, setDailyTask] = useState<DailyTask>(emptyDailyTask);
   const [syncStatus, setSyncStatus] = useState<SyncStatus | null>(null);
   const [syncState, setSyncState] = useState<SyncState>("idle");
   const [studyMode, setStudyMode] = useState<StudyMode>("flashcards");
   const [search, setSearch] = useState("");
-  const [toast, setToast] = useState("");
+  const [toast, setToast] = useState<{ message: string; kind: "success" | "error" } | null>(null);
+  const [pending, setPending] = useState<Record<string, boolean>>({});
   const [conflict, setConflict] = useState<{ id: number; payload: CardPayload; serverCard: Card } | null>(null);
 
   const rootDecks = useMemo(() => decks.filter((deck) => deck.depth === 1), [decks]);
@@ -183,7 +195,7 @@ export default function App() {
       if (!options.silent) setSyncState("success");
     } catch (error) {
       setSyncState("error");
-      setToast((error as Error).message);
+      showToast((error as Error).message, "error");
     }
   }
 
@@ -195,7 +207,24 @@ export default function App() {
     if (selectedDeckId) await loadCards(selectedDeckId);
     await refresh({ silent: true });
     setSyncState("success");
-    if (message) setToast(message);
+    if (message) showToast(message);
+  }
+
+  function showToast(message: string, kind: "success" | "error" = "success") {
+    setToast({ message, kind });
+  }
+
+  async function withPending<T>(key: string, action: () => Promise<T>) {
+    if (pending[key]) return undefined;
+    setPending((current) => ({ ...current, [key]: true }));
+    try {
+      return await action();
+    } catch (error) {
+      showToast((error as Error).message, "error");
+      return undefined;
+    } finally {
+      setPending((current) => ({ ...current, [key]: false }));
+    }
   }
 
   async function updateCardWithConflict(id: number, payload: CardPayload) {
@@ -220,22 +249,28 @@ export default function App() {
         setCanRegister(status.canRegister);
         if (status.authenticated) return refresh();
       })
-      .catch((error) => setToast(error.message))
+      .catch((error) => showToast(error.message, "error"))
       .finally(() => setAuthChecked(true));
   }, []);
 
   useEffect(() => {
-    if (user) refresh().catch((error) => setToast(error.message));
+    if (user) refresh().catch((error) => showToast(error.message, "error"));
   }, [user?.id]);
 
   useEffect(() => {
-    if (selectedDeckId) loadCards(selectedDeckId).catch((error) => setToast(error.message));
+    if (selectedDeckId) loadCards(selectedDeckId).catch((error) => showToast(error.message, "error"));
   }, [selectedDeckId]);
 
   useEffect(() => {
     if (!studyRootDeckId) return;
-    api.dueCards(studyRootDeckId, 80).then(setDueCards).catch((error) => setToast(error.message));
+    api.dueCards(studyRootDeckId, 80).then(setDueCards).catch((error) => showToast(error.message, "error"));
   }, [studyRootDeckId]);
+
+  useEffect(() => {
+    if (!toast) return;
+    const timer = window.setTimeout(() => setToast(null), toast.kind === "error" ? 7000 : 3000);
+    return () => window.clearTimeout(timer);
+  }, [toast]);
 
   useEffect(() => {
     applyTheme(settings.theme);
@@ -258,8 +293,7 @@ export default function App() {
     if (settings.notifications !== "on" || dueCards.length === 0 || Notification.permission !== "granted") return;
     const timer = window.setTimeout(() => {
       new Notification("该复习啦", {
-        body: `${studyRootDeck?.name ?? "当前卡组"} 有 ${dueCards.length} 张卡片到期。`,
-        icon: "/vite.svg"
+        body: `${studyRootDeck?.name ?? "当前卡组"} 有 ${dueCards.length} 张卡片到期。`
       });
     }, 1000);
     return () => window.clearTimeout(timer);
@@ -274,9 +308,14 @@ export default function App() {
   }
 
   async function handleAnswer(card: Card, rating: ReviewRating) {
-    const result = await api.answer(card.id, rating);
-    await afterMutation(`${card.front}：${ratingLabels[rating]}`);
-    return result;
+    try {
+      const result = await api.answer(card.id, rating);
+      await afterMutation(`${card.front}：${ratingLabels[rating]}`);
+      return result;
+    } catch (error) {
+      showToast((error as Error).message, "error");
+      throw error;
+    }
   }
 
   if (!authChecked) {
@@ -313,23 +352,23 @@ export default function App() {
             <h1>{viewTitle(view)}</h1>
           </div>
           <div className="top-actions">
-            <button className={`sync-button ${syncState}`} title="同步" onClick={() => refresh()}>
+            <button className={`sync-button ${syncState}`} title="同步" disabled={syncState === "syncing"} onClick={() => withPending("sync", () => refresh())}>
               <RefreshCw />
               <span>{syncLabel(syncState)}</span>
             </button>
-            <button className="icon-button" title="切换主题" onClick={() => saveTheme(settings.theme === "dark" ? "light" : "dark")}>
+            <button className="icon-button" title="切换主题" disabled={Boolean(pending.theme)} onClick={() => saveTheme(settings.theme === "dark" ? "light" : "dark")}>
               {settings.theme === "dark" ? <Sun /> : <Moon />}
             </button>
-            <button className="icon-button" title="通知" onClick={enableNotifications}>
+            <button className="icon-button" title="通知" disabled={Boolean(pending.notify)} onClick={enableNotifications}>
               <Bell />
             </button>
-            <button className="icon-button" title="退出登录" onClick={logout}>
+            <button className="icon-button" title="退出登录" disabled={Boolean(pending.logout)} onClick={logout}>
               <LogOut />
             </button>
           </div>
         </header>
 
-        {toast && <button className="toast" onClick={() => setToast("")}>{toast}</button>}
+        {toast && <button className={`toast ${toast.kind}`} onClick={() => setToast(null)}>{toast.message}</button>}
         {conflict && (
           <ConflictDialog
             conflict={conflict}
@@ -372,35 +411,70 @@ export default function App() {
             onSearch={setSearch}
             onSelectDeck={setSelectedDeckId}
             onCreateDeck={async (name, parentId) => {
-              const result = await api.createDeck({ name, parentId, language: settings.voiceLanguage });
-              setSelectedDeckId(result.id);
-              await afterMutation();
+              try {
+                const result = await api.createDeck({ name, parentId, language: settings.voiceLanguage });
+                setSelectedDeckId(result.id);
+                await afterMutation();
+              } catch (error) {
+                showToast((error as Error).message, "error");
+                throw error;
+              }
             }}
             onUpdateDeck={async (id, name) => {
-              await api.updateDeck(id, { name });
-              await afterMutation();
+              try {
+                await api.updateDeck(id, { name });
+                await afterMutation();
+              } catch (error) {
+                showToast((error as Error).message, "error");
+                throw error;
+              }
             }}
             onDeleteDeck={async (id) => {
-              await api.deleteDeck(id);
-              setSelectedDeckId(null);
-              await afterMutation();
+              try {
+                await api.deleteDeck(id);
+                setSelectedDeckId(null);
+                await afterMutation();
+              } catch (error) {
+                showToast((error as Error).message, "error");
+                throw error;
+              }
             }}
             onCreateCard={async (payload) => {
-              if (!selectedDeckId) return;
-              await api.createCard(selectedDeckId, payload);
-              await afterMutation();
+              try {
+                if (!selectedDeckId) return;
+                await api.createCard(selectedDeckId, payload);
+                await afterMutation();
+              } catch (error) {
+                showToast((error as Error).message, "error");
+                throw error;
+              }
             }}
             onUpdateCard={updateCardWithConflict}
             onDeleteCard={async (id) => {
-              await api.deleteCard(id);
-              await afterMutation();
+              try {
+                await api.deleteCard(id);
+                await afterMutation();
+              } catch (error) {
+                showToast((error as Error).message, "error");
+                throw error;
+              }
             }}
             onBatchCards={async (cardIds, action, deckId) => {
-              const result = await api.batchCards({ cardIds, action, deckId });
-              await afterMutation(action === "delete" ? `已删除 ${result.affected} 张卡片` : `已移动 ${result.affected} 张卡片`);
+              try {
+                const result = await api.batchCards({ cardIds, action, deckId });
+                await afterMutation(action === "delete" ? `已删除 ${result.affected} 张卡片` : `已移动 ${result.affected} 张卡片`);
+              } catch (error) {
+                showToast((error as Error).message, "error");
+                throw error;
+              }
             }}
             onToggleFavorite={async (card) => {
-              await updateCardWithConflict(card.id, { favorite: card.favorite ? 0 : 1, baseUpdatedAt: card.updated_at });
+              try {
+                await updateCardWithConflict(card.id, { favorite: card.favorite ? 0 : 1, baseUpdatedAt: card.updated_at });
+              } catch (error) {
+                showToast((error as Error).message, "error");
+                throw error;
+              }
             }}
             onSpeak={speak}
           />
@@ -415,10 +489,17 @@ export default function App() {
             selectedRootDeckId={studyRootDeckId}
             onSelectRootDeck={setStudyRootDeckId}
             selectedDeck={studyRootDeck}
+            studyTextScale={settings.studyTextScale}
+            autoSpeak={settings.autoSpeak === "on"}
             onAnswer={handleAnswer}
             onUndoAnswer={async (card, snapshot) => {
-              await api.restoreReview(card.id, snapshot);
-              await afterMutation("已撤销上一张");
+              try {
+                await api.restoreReview(card.id, snapshot);
+                await afterMutation("已撤销上一张");
+              } catch (error) {
+                showToast((error as Error).message, "error");
+                throw error;
+              }
             }}
             onUpdateCard={updateCardWithConflict}
             onSpeak={speak}
@@ -431,6 +512,7 @@ export default function App() {
             selectedDeckId={selectedDeckId}
             onSelectDeck={setSelectedDeckId}
             onImported={async (message) => afterMutation(message)}
+            onError={(message) => showToast(message, "error")}
           />
         )}
 
@@ -438,14 +520,25 @@ export default function App() {
           <SettingsView
             settings={settings}
             onSave={async (next) => {
-              const merged = { ...settings, ...next };
-              setSettings(merged);
-              applyTheme(merged.theme);
-              if (next.dailyNewGoal !== undefined) await api.saveDailyTaskSettings({ dailyNewGoal: Number(next.dailyNewGoal) });
-              await api.saveSettings(next);
-              await afterMutation("设置已保存");
+              await withPending("settings", async () => {
+                const previous = settings;
+                const merged = { ...settings, ...next };
+                setSettings(merged);
+                applyTheme(merged.theme);
+                try {
+                  if (next.dailyNewGoal !== undefined) await api.saveDailyTaskSettings({ dailyNewGoal: Number(next.dailyNewGoal) });
+                  await api.saveSettings(next);
+                  await afterMutation("设置已保存");
+                } catch (error) {
+                  setSettings(previous);
+                  applyTheme(previous.theme);
+                  throw error;
+                }
+              });
             }}
             onNotify={enableNotifications}
+            saving={Boolean(pending.settings)}
+            notifying={Boolean(pending.notify)}
           />
         )}
 
@@ -455,33 +548,46 @@ export default function App() {
   );
 
   async function saveTheme(theme: ThemeMode) {
-    setSettings((current) => ({ ...current, theme }));
-    applyTheme(theme);
-    await api.saveSettings({ theme });
-    await afterMutation("主题已保存");
+    await withPending("theme", async () => {
+      const previous = settings.theme;
+      setSettings((current) => ({ ...current, theme }));
+      applyTheme(theme);
+      try {
+        await api.saveSettings({ theme });
+        await afterMutation("主题已保存");
+      } catch (error) {
+        setSettings((current) => ({ ...current, theme: previous }));
+        applyTheme(previous);
+        throw error;
+      }
+    });
   }
 
   async function enableNotifications() {
-    if (!("Notification" in window)) {
-      setToast("当前浏览器不支持通知");
-      return;
-    }
-    const permission = await Notification.requestPermission();
-    const enabled = permission === "granted";
-    await api.saveSettings({ notifications: enabled ? "on" : "off" });
-    setSettings((current) => ({ ...current, notifications: enabled ? "on" : "off" }));
-    await afterMutation(enabled ? "通知已开启" : "通知未授权");
+    await withPending("notify", async () => {
+      if (!("Notification" in window)) {
+        showToast("当前浏览器不支持通知", "error");
+        return;
+      }
+      const permission = await Notification.requestPermission();
+      const enabled = permission === "granted";
+      await api.saveSettings({ notifications: enabled ? "on" : "off" });
+      setSettings((current) => ({ ...current, notifications: enabled ? "on" : "off" }));
+      await afterMutation(enabled ? "通知已开启" : "通知未授权");
+    });
   }
 
   async function logout() {
-    await api.logout();
-    setUser(null);
-    setDecks([]);
-    setCards([]);
-    setDueCards([]);
-    setSelectedDeckId(null);
-    setStudyRootDeckId(null);
-    setView("home");
+    await withPending("logout", async () => {
+      await api.logout();
+      setUser(null);
+      setDecks([]);
+      setCards([]);
+      setDueCards([]);
+      setSelectedDeckId(null);
+      setStudyRootDeckId(null);
+      setView("home");
+    });
   }
 }
 
@@ -660,6 +766,7 @@ function DeckView(props: {
   const [detailCard, setDetailCard] = useState<Card | null>(null);
   const [selectedCardIds, setSelectedCardIds] = useState<number[]>([]);
   const [batchTargetDeckId, setBatchTargetDeckId] = useState<number | null>(props.selectedDeckId);
+  const [busy, setBusy] = useState("");
 
   const allVisibleSelected = props.cards.length > 0 && props.cards.every((card) => selectedCardIds.includes(card.id));
 
@@ -673,10 +780,15 @@ function DeckView(props: {
 
   async function addDeck(event: FormEvent) {
     event.preventDefault();
-    if (!deckName.trim()) return;
-    await props.onCreateDeck(deckName.trim(), parentDeckId);
-    setDeckName("");
-    setParentDeckId(null);
+    if (!deckName.trim() || busy) return;
+    setBusy("create-deck");
+    try {
+      await props.onCreateDeck(deckName.trim(), parentDeckId);
+      setDeckName("");
+      setParentDeckId(null);
+    } finally {
+      setBusy("");
+    }
   }
 
   function toggleCard(id: number) {
@@ -688,16 +800,47 @@ function DeckView(props: {
   }
 
   async function batchDelete() {
-    if (selectedCardIds.length === 0) return;
+    if (selectedCardIds.length === 0 || busy) return;
     if (!window.confirm(`删除选中的 ${selectedCardIds.length} 张卡片？`)) return;
-    await props.onBatchCards(selectedCardIds, "delete");
-    setSelectedCardIds([]);
+    setBusy("batch-delete");
+    try {
+      await props.onBatchCards(selectedCardIds, "delete");
+      setSelectedCardIds([]);
+    } finally {
+      setBusy("");
+    }
   }
 
   async function batchMove() {
-    if (selectedCardIds.length === 0 || !batchTargetDeckId) return;
-    await props.onBatchCards(selectedCardIds, "move", batchTargetDeckId);
-    setSelectedCardIds([]);
+    if (selectedCardIds.length === 0 || !batchTargetDeckId || busy) return;
+    setBusy("batch-move");
+    try {
+      await props.onBatchCards(selectedCardIds, "move", batchTargetDeckId);
+      setSelectedCardIds([]);
+    } finally {
+      setBusy("");
+    }
+  }
+
+  async function deleteCard(card: Card) {
+    if (busy) return;
+    if (!window.confirm(`删除「${card.front}」这张卡片？`)) return;
+    setBusy(`delete-card-${card.id}`);
+    try {
+      await props.onDeleteCard(card.id);
+    } finally {
+      setBusy("");
+    }
+  }
+
+  async function toggleFavorite(card: Card) {
+    if (busy) return;
+    setBusy(`favorite-${card.id}`);
+    try {
+      await props.onToggleFavorite(card);
+    } finally {
+      setBusy("");
+    }
   }
 
   return (
@@ -712,7 +855,7 @@ function DeckView(props: {
               <option key={deck.id} value={deck.id}>{"　".repeat(Math.max(deck.depth - 1, 0))}{deck.name}</option>
             ))}
           </select>
-          <button className="icon-button strong" title="创建卡组"><Plus /></button>
+          <button className="icon-button strong" title="创建卡组" disabled={busy === "create-deck"}><Plus /></button>
         </form>
         <div className="deck-list">
           {props.decks.map((deck) => (
@@ -727,14 +870,14 @@ function DeckView(props: {
                   <div className="deck-menu-popover">
                     <button disabled={deck.depth >= 5} onClick={() => { setParentDeckId(deck.id); setDeckName(`${deck.name} / `); setOpenDeckMenuId(null); }}><FolderPlus /><span>子卡组</span></button>
                     <button onClick={() => { setEditingDeckId(deck.id); setEditingDeckName(deck.name); setOpenDeckMenuId(null); }}><Edit3 /><span>编辑</span></button>
-                    <button className="danger" onClick={() => { setOpenDeckMenuId(null); if (window.confirm(`删除「${deck.name}」及其子卡组和卡片？`)) props.onDeleteDeck(deck.id); }}><Trash2 /><span>删除</span></button>
+                    <button className="danger" disabled={Boolean(busy)} onClick={async () => { setOpenDeckMenuId(null); if (window.confirm(`删除「${deck.name}」及其子卡组和卡片？`)) { setBusy(`delete-deck-${deck.id}`); try { await props.onDeleteDeck(deck.id); } finally { setBusy(""); } } }}><Trash2 /><span>删除</span></button>
                   </div>
                 )}
               </div>
               {editingDeckId === deck.id && (
-                <form className="edit-row" onSubmit={(event) => { event.preventDefault(); if (editingDeckName.trim()) props.onUpdateDeck(deck.id, editingDeckName.trim()).then(() => setEditingDeckId(null)); }}>
+                <form className="edit-row" onSubmit={async (event) => { event.preventDefault(); if (editingDeckName.trim() && !busy) { setBusy(`edit-deck-${deck.id}`); try { await props.onUpdateDeck(deck.id, editingDeckName.trim()); setEditingDeckId(null); } finally { setBusy(""); } } }}>
                   <input value={editingDeckName} onChange={(event) => setEditingDeckName(event.target.value)} />
-                  <button className="mini-button strong" title="保存卡组"><Save /></button>
+                  <button className="mini-button strong" title="保存卡组" disabled={busy === `edit-deck-${deck.id}`}><Save /></button>
                   <button className="mini-button" title="取消" type="button" onClick={() => setEditingDeckId(null)}><XCircle /></button>
                 </form>
               )}
@@ -756,8 +899,8 @@ function DeckView(props: {
             <option value="" disabled>移动到卡组</option>
             {props.decks.map((deck) => <option key={deck.id} value={deck.id}>{"　".repeat(Math.max(deck.depth - 1, 0))}{deck.name}</option>)}
           </select>
-          <button className="primary-button secondary-button" disabled={selectedCardIds.length === 0 || !batchTargetDeckId} onClick={batchMove}><MoveRight />移动</button>
-          <button className="primary-button danger-button" disabled={selectedCardIds.length === 0} onClick={batchDelete}><Trash2 />删除</button>
+          <button className="primary-button secondary-button" disabled={selectedCardIds.length === 0 || !batchTargetDeckId || Boolean(busy)} onClick={batchMove}><MoveRight />{busy === "batch-move" ? "移动中" : "移动"}</button>
+          <button className="primary-button danger-button" disabled={selectedCardIds.length === 0 || Boolean(busy)} onClick={batchDelete}><Trash2 />{busy === "batch-delete" ? "删除中" : "删除"}</button>
         </div>
         <div className="card-list">
           {props.cards.map((card) => (
@@ -769,7 +912,7 @@ function DeckView(props: {
                   <span className="type-pill">{cardTypeLabels[card.card_type]}</span>
                   {isWordCard(card) && card.phonetic && <span className="phonetic">{card.phonetic}</span>}
                   <button className="mini-button" title="发音" onClick={() => props.onSpeak(card.front)}><Volume2 /></button>
-                  <button className={`mini-button ${card.favorite ? "starred" : ""}`} title="收藏" onClick={() => props.onToggleFavorite(card)}><Star /></button>
+                  <button className={`mini-button ${card.favorite ? "starred" : ""}`} title="收藏" disabled={busy === `favorite-${card.id}`} onClick={() => toggleFavorite(card)}><Star /></button>
                   <button className="mini-button" title="详情" onClick={() => setDetailCard(card)}><Eye /></button>
                   <button className="mini-button" title="编辑" onClick={() => setEditingCard(card)}><Edit3 /></button>
                 </div>
@@ -781,7 +924,7 @@ function DeckView(props: {
               <div className="card-meta">
                 <span>阶段 {card.stage}/10</span>
                 <span>下次 {dueText(card.due_at)}</span>
-                <button className="mini-button danger" title="删除" onClick={() => props.onDeleteCard(card.id)}><Trash2 /></button>
+                <button className="mini-button danger" title="删除" disabled={busy === `delete-card-${card.id}`} onClick={() => deleteCard(card)}><Trash2 /></button>
               </div>
             </article>
           ))}
@@ -802,28 +945,34 @@ function CardEditor(props: { card?: Card; onSubmit: (payload: CardPayload) => Pr
   const [mnemonic, setMnemonic] = useState(props.card?.mnemonic ?? "");
   const [note, setNote] = useState(props.card?.note ?? "");
   const [choices, setChoices] = useState(parseChoices(props.card?.choices).join(" | "));
+  const [saving, setSaving] = useState(false);
 
   async function submit(event: FormEvent) {
     event.preventDefault();
-    if (!front.trim() || !back.trim()) return;
-    await props.onSubmit({
-      card_type: cardType,
-      front,
-      back,
-      phonetic,
-      example,
-      mnemonic,
-      note,
-      choices: cardType === "choice" ? parseChoices(choices) : []
-    });
-    if (!props.card) {
-      setFront("");
-      setPhonetic("");
-      setBack("");
-      setExample("");
-      setMnemonic("");
-      setNote("");
-      setChoices("");
+    if (!front.trim() || !back.trim() || saving) return;
+    setSaving(true);
+    try {
+      await props.onSubmit({
+        card_type: cardType,
+        front,
+        back,
+        phonetic,
+        example,
+        mnemonic,
+        note,
+        choices: cardType === "choice" ? parseChoices(choices) : []
+      });
+      if (!props.card) {
+        setFront("");
+        setPhonetic("");
+        setBack("");
+        setExample("");
+        setMnemonic("");
+        setNote("");
+        setChoices("");
+      }
+    } finally {
+      setSaving(false);
     }
   }
 
@@ -842,8 +991,8 @@ function CardEditor(props: { card?: Card; onSubmit: (payload: CardPayload) => Pr
       <input value={example} onChange={(event) => setExample(event.target.value)} placeholder="例句 / 说明（可选）" />
       {cardType === "word" && <input value={mnemonic} onChange={(event) => setMnemonic(event.target.value)} placeholder="助记（可选）" />}
       <input value={note} onChange={(event) => setNote(event.target.value)} placeholder="备注（可选）" />
-      <button className="primary-button">{props.card ? <Save /> : <Plus />}{props.card ? "保存" : "添加"}</button>
-      {props.onCancel && <button className="primary-button secondary-button" type="button" onClick={props.onCancel}><XCircle />取消</button>}
+      <button className="primary-button" disabled={saving}>{props.card ? <Save /> : <Plus />}{saving ? "处理中" : props.card ? "保存" : "添加"}</button>
+      {props.onCancel && <button className="primary-button secondary-button" type="button" disabled={saving} onClick={props.onCancel}><XCircle />取消</button>}
     </form>
   );
 }
@@ -856,6 +1005,8 @@ function StudyView(props: {
   selectedRootDeckId: number | null;
   onSelectRootDeck: (id: number) => void;
   selectedDeck?: Deck;
+  studyTextScale: number;
+  autoSpeak: boolean;
   onAnswer: (card: Card, rating: ReviewRating) => Promise<{ stage: number; dueAt: string; previous: ReviewSnapshot }>;
   onUndoAnswer: (card: Card, snapshot: ReviewSnapshot) => Promise<void>;
   onUpdateCard: (id: number, payload: CardPayload) => Promise<void>;
@@ -872,11 +1023,16 @@ function StudyView(props: {
     queue: Card[];
     masteredIds: number[];
     flipped: boolean;
+    answer: string;
+    checked: "right" | "wrong" | null;
+    selectedChoice: string;
   }>>([]);
   const [flipped, setFlipped] = useState(false);
   const [answer, setAnswer] = useState("");
   const [checked, setChecked] = useState<"right" | "wrong" | null>(null);
+  const [selectedChoice, setSelectedChoice] = useState("");
   const [editingStudyCard, setEditingStudyCard] = useState<Card | null>(null);
+  const [busy, setBusy] = useState("");
   const card = queue[0];
 
   useEffect(() => {
@@ -887,59 +1043,85 @@ function StudyView(props: {
     setFlipped(false);
     setAnswer("");
     setChecked(null);
+    setSelectedChoice("");
     setEditingStudyCard(null);
-    if (card && isWordCard(card)) props.onSpeak(card.front, card.language ?? props.selectedDeck?.language);
-  }, [card?.id]);
+    if (props.autoSpeak && card && isWordCard(card)) props.onSpeak(card.front, card.language ?? props.selectedDeck?.language);
+  }, [card?.id, props.autoSpeak]);
 
   async function startSession(nextLimit = sessionLimit) {
-    if (!props.selectedRootDeckId) return;
-    const nextCards = await api.dueCards(props.selectedRootDeckId, Math.max(1, nextLimit), studyKind);
-    setSessionCards(nextCards);
-    setQueue(nextCards);
-    setMasteredIds([]);
-    setHistory([]);
-    setFlipped(false);
-    setAnswer("");
-    setChecked(null);
-    setEditingStudyCard(null);
+    if (!props.selectedRootDeckId || busy) return;
+    setBusy("session");
+    try {
+      const nextCards = await api.dueCards(props.selectedRootDeckId, Math.max(1, nextLimit), studyKind);
+      setSessionCards(nextCards);
+      setQueue(nextCards);
+      setMasteredIds([]);
+      setHistory([]);
+      setFlipped(false);
+      setAnswer("");
+      setChecked(null);
+      setSelectedChoice("");
+      setEditingStudyCard(null);
+    } finally {
+      setBusy("");
+    }
   }
 
   async function rate(rating: ReviewRating) {
-    if (!card) return;
+    if (!card || busy) return;
+    setBusy(`rate-${rating}`);
     const beforeQueue = queue;
     const beforeMasteredIds = masteredIds;
-    const result = await props.onAnswer(card, rating);
-    const rest = beforeQueue.slice(1);
-    const nextMasteredIds = rating === "known" && !beforeMasteredIds.includes(card.id)
-      ? [...beforeMasteredIds, card.id]
-      : beforeMasteredIds;
-    const repeatCard = { ...card, stage: result.stage, due_at: result.dueAt, last_rating: rating };
-    const nextQueue = rating === "known"
-      ? rest
-      : [...rest.slice(0, rating === "unknown" ? 1 : 3), repeatCard, ...rest.slice(rating === "unknown" ? 1 : 3)];
-    setHistory((items) => [...items, { card, previous: result.previous, queue: beforeQueue, masteredIds: beforeMasteredIds, flipped }]);
-    setQueue(nextQueue);
-    setMasteredIds(nextMasteredIds);
-    setFlipped(false);
-    setAnswer("");
-    setChecked(null);
+    try {
+      const result = await props.onAnswer(card, rating);
+      const rest = beforeQueue.slice(1);
+      const nextMasteredIds = rating === "known" && !beforeMasteredIds.includes(card.id)
+        ? [...beforeMasteredIds, card.id]
+        : beforeMasteredIds;
+      const repeatCard = { ...card, stage: result.stage, due_at: result.dueAt, last_rating: rating };
+      const nextQueue = rating === "known"
+        ? rest
+        : [...rest.slice(0, rating === "unknown" ? 1 : 3), repeatCard, ...rest.slice(rating === "unknown" ? 1 : 3)];
+      setHistory((items) => [...items, { card, previous: result.previous, queue: beforeQueue, masteredIds: beforeMasteredIds, flipped, answer, checked, selectedChoice }]);
+      setQueue(nextQueue);
+      setMasteredIds(nextMasteredIds);
+      setFlipped(false);
+      setAnswer("");
+      setChecked(null);
+      setSelectedChoice("");
+    } finally {
+      setBusy("");
+    }
   }
 
   async function undo() {
     const previous = history.at(-1);
-    if (!previous) return;
-    await props.onUndoAnswer(previous.card, previous.previous);
-    setHistory((items) => items.slice(0, -1));
-    setQueue(previous.queue);
-    setMasteredIds(previous.masteredIds);
-    setFlipped(previous.flipped);
-    setAnswer("");
-    setChecked(null);
+    if (!previous || busy) return;
+    setBusy("undo");
+    try {
+      await props.onUndoAnswer(previous.card, previous.previous);
+      setHistory((items) => items.slice(0, -1));
+      setQueue(previous.queue);
+      setMasteredIds(previous.masteredIds);
+      setFlipped(previous.flipped);
+      setAnswer(previous.answer);
+      setChecked(previous.checked);
+      setSelectedChoice(previous.selectedChoice);
+    } finally {
+      setBusy("");
+    }
   }
 
   function checkWritten() {
     if (!card) return;
-    setChecked(normalizeAnswer(answer) === normalizeAnswer(card.back) || normalizeAnswer(answer) === normalizeAnswer(card.front) ? "right" : "wrong");
+    setSelectedChoice("");
+    setChecked(isCorrectAnswer(card, answer) ? "right" : "wrong");
+  }
+
+  function checkChoice(choice: string) {
+    if (!card || checked) return;
+    setSelectedChoice(choice);
+    setChecked(normalizeAnswer(choice) === normalizeAnswer(card.back) ? "right" : "wrong");
   }
 
   const choices = useMemo(() => {
@@ -952,6 +1134,23 @@ function StudyView(props: {
 
   const completed = masteredIds.length;
   const total = sessionCards.length;
+  const explanation = card ? [card.example, card.note].filter(Boolean).join(" · ") : "";
+  const showManualRatings = props.mode === "flashcards" || checked !== null;
+  const scale = props.studyTextScale;
+  const studyStyle = {
+    "--study-face-min": `${Math.round(32 * scale)}px`,
+    "--study-face-max": `${Math.round(72 * scale)}px`,
+    "--study-word-min": `${Math.round(38 * scale)}px`,
+    "--study-word-max": `${Math.round(72 * scale)}px`,
+    "--study-phonetic-min": `${Math.round(18 * scale)}px`,
+    "--study-phonetic-max": `${Math.round(28 * scale)}px`,
+    "--study-back-min": `${Math.round(22 * scale)}px`,
+    "--study-back-max": `${Math.round(34 * scale)}px`,
+    "--study-small-size": `${Math.round(16 * scale)}px`,
+    "--study-question-size": `${Math.round(24 * scale)}px`,
+    "--study-choice-size": `${Math.round(16 * scale)}px`,
+    "--study-result-size": `${Math.round(16 * scale)}px`
+  } as CSSProperties & Record<string, string>;
 
   return (
     <section className="stack">
@@ -975,7 +1174,7 @@ function StudyView(props: {
               setSessionLimit(next);
             }} />
           </label>
-          <button className="primary-button" onClick={() => startSession()}><Sparkles />开始</button>
+          <button className="primary-button" disabled={busy === "session"} onClick={() => startSession()}><Sparkles />{busy === "session" ? "载入中" : "开始"}</button>
         </div>
       </div>
 
@@ -986,7 +1185,7 @@ function StudyView(props: {
       </div>
 
       {!card ? <EmptyState text={total > 0 ? "本轮已完成。" : studyKind === "new" ? "这个大卡组暂无可新学卡片。" : "这个大卡组暂无到期复习卡片。"} /> : (
-        <div className="study-panel">
+        <div className="study-panel" style={studyStyle}>
           <div className="progress-line">
             <span>{completed}</span>
             <div><i style={{ width: `${Math.min((completed / Math.max(total, 1)) * 100, 100)}%` }} /></div>
@@ -995,7 +1194,7 @@ function StudyView(props: {
           <div className="study-actions">
             <span className="type-pill">{cardTypeLabels[card.card_type]}</span>
             <span className="type-pill">待掌握 {queue.length}</span>
-            <button className="mini-button" title="撤销上一张" disabled={history.length === 0} onClick={undo}><ArrowLeft /></button>
+            <button className="mini-button" title="撤销上一张" disabled={history.length === 0 || Boolean(busy)} onClick={undo}><ArrowLeft /></button>
             <button className="mini-button" title="编辑当前卡片" onClick={() => setEditingStudyCard(card)}><Edit3 /></button>
             <button className="mini-button" title="发音" onClick={() => props.onSpeak(card.front, card.language ?? props.selectedDeck?.language)}><Volume2 /></button>
           </div>
@@ -1008,23 +1207,26 @@ function StudyView(props: {
           {props.mode === "choice" && (
             <div className="question-box">
               <p>{card.card_type === "choice" ? card.front : `选择「${card.front}」的答案`}</p>
-              <ChoiceGrid choices={choices} answer={card.back} onResult={(ok) => rate(ok ? "known" : "unknown")} />
+              <ChoiceGrid choices={choices} answer={card.back} selected={selectedChoice} checked={checked} onChoose={checkChoice} />
+              {checked && <AnswerFeedback checked={checked} correct={card.back} explanation={explanation} selected={selectedChoice} />}
             </div>
           )}
           {props.mode === "write" && (
             <div className="question-box">
-              <p>{card.card_type === "blank" ? blankPrompt(card.front) : card.back}</p>
+              <p>{card.card_type === "blank" ? blankPrompt(card.front) : card.front}</p>
               {card.example && <small>{card.example}</small>}
-              <input value={answer} onChange={(event) => setAnswer(event.target.value)} placeholder="输入答案" />
-              <button className="primary-button" onClick={checkWritten}>检查</button>
-              {checked && <ResultBadge checked={checked} correct={card.card_type === "word" ? card.front : card.back} onRate={rate} />}
+              <input value={answer} onChange={(event) => { setAnswer(event.target.value); setChecked(null); }} placeholder="输入答案" />
+              <button className="primary-button" disabled={Boolean(busy)} onClick={checkWritten}>检查</button>
+              {checked && <AnswerFeedback checked={checked} correct={correctAnswer(card)} explanation={explanation} selected={answer} />}
             </div>
           )}
-          <div className="rating-row">
-            <button className="rating unknown" onClick={() => rate("unknown")}><XCircle />不认识</button>
-            <button className="rating fuzzy" onClick={() => rate("fuzzy")}><RotateCcw />模糊</button>
-            <button className="rating known" onClick={() => rate("known")}><CheckCircle2 />认识</button>
-          </div>
+          {showManualRatings && (
+            <div className="rating-row">
+              <button className="rating unknown" disabled={Boolean(busy)} onClick={() => rate("unknown")}><XCircle />{busy === "rate-unknown" ? "提交中" : "不认识"}</button>
+              <button className="rating fuzzy" disabled={Boolean(busy)} onClick={() => rate("fuzzy")}><RotateCcw />{busy === "rate-fuzzy" ? "提交中" : "模糊"}</button>
+              <button className="rating known" disabled={Boolean(busy)} onClick={() => rate("known")}><CheckCircle2 />{busy === "rate-known" ? "提交中" : "认识"}</button>
+            </div>
+          )}
         </div>
       )}
     </section>
@@ -1053,52 +1255,117 @@ function CardBack(props: { card: Card }) {
   );
 }
 
-function ChoiceGrid(props: { choices: string[]; answer: string; onResult: (ok: boolean) => void }) {
-  return <div className="choice-grid">{props.choices.map((choice, index) => <button key={`${choice}-${index}`} onClick={() => props.onResult(choice === props.answer)}>{choice}</button>)}</div>;
+function ChoiceGrid(props: { choices: string[]; answer: string; selected: string; checked: "right" | "wrong" | null; onChoose: (choice: string) => void }) {
+  return (
+    <div className="choice-grid">
+      {props.choices.map((choice, index) => {
+        const isSelected = choice === props.selected;
+        const isAnswer = normalizeAnswer(choice) === normalizeAnswer(props.answer);
+        const state = props.checked && (isAnswer ? "correct" : isSelected ? "wrong" : "");
+        return (
+          <button
+            className={state}
+            disabled={props.checked !== null}
+            key={`${choice}-${index}`}
+            onClick={() => props.onChoose(choice)}
+          >
+            {choice}
+          </button>
+        );
+      })}
+    </div>
+  );
 }
 
-function ResultBadge(props: { checked: "right" | "wrong"; correct: string; onRate: (rating: ReviewRating) => void }) {
+function AnswerFeedback(props: { checked: "right" | "wrong"; correct: string; explanation: string; selected: string }) {
   const right = props.checked === "right";
-  return <div className={`result ${right ? "right" : "wrong"}`}><strong>{right ? "正确" : `正确答案：${props.correct}`}</strong><button onClick={() => props.onRate(right ? "known" : "unknown")}>{right ? "继续" : "加入复习"}</button></div>;
+  return (
+    <div className={`result ${right ? "right" : "wrong"}`}>
+      <strong>{right ? "回答正确" : "回答错误"}</strong>
+      {!right && props.selected && <span>你的答案：{props.selected}</span>}
+      <span>正确答案：{props.correct}</span>
+      {props.explanation && <small>解析：{props.explanation}</small>}
+    </div>
+  );
 }
 
-function ImportView(props: { decks: Deck[]; selectedDeckId: number | null; onSelectDeck: (id: number) => void; onImported: (message: string) => Promise<void> }) {
+function ImportView(props: { decks: Deck[]; selectedDeckId: number | null; onSelectDeck: (id: number) => void; onImported: (message: string) => Promise<void>; onError: (message: string) => void }) {
   const [text, setText] = useState("card_type,front,back,option1,option2,option3,option4\nchoice,Which one means apple?,苹果,苹果,香蕉,橙子,葡萄\nblank,I eat [] every day.,apple,,,,");
   const [file, setFile] = useState<File | null>(null);
+  const [importing, setImporting] = useState(false);
 
   async function submit(event: FormEvent) {
     event.preventDefault();
-    if (!props.selectedDeckId) return;
-    const form = new FormData();
-    form.set("deckId", String(props.selectedDeckId));
-    if (file) form.set("file", file);
-    else form.set("text", text);
-    const result = await api.importCards(form);
-    await props.onImported(`导入 ${result.imported} 张，跳过 ${result.skipped} 行`);
+    if (!props.selectedDeckId || importing) return;
+    setImporting(true);
+    try {
+      const form = new FormData();
+      form.set("deckId", String(props.selectedDeckId));
+      if (file) form.set("file", file);
+      else form.set("text", text);
+      const result = await api.importCards(form);
+      await props.onImported(`导入 ${result.imported} 张，跳过 ${result.skipped} 行`);
+    } catch (error) {
+      props.onError((error as Error).message);
+    } finally {
+      setImporting(false);
+    }
   }
+
+  const templates = ["普通卡导入模板.xlsx", "单词卡导入模板.xlsx", "选择题卡导入模板.xlsx", "填空题卡导入模板.xlsx"];
 
   return (
     <section className="panel">
       <form className="import-form" onSubmit={submit}>
         <label>目标卡组<select value={props.selectedDeckId ?? ""} onChange={(event) => props.onSelectDeck(Number(event.target.value))}><option value="" disabled>选择卡组</option>{props.decks.map((deck) => <option key={deck.id} value={deck.id}>{"　".repeat(Math.max(deck.depth - 1, 0))}{deck.name}</option>)}</select></label>
+        <div className="template-links" aria-label="导入模板">
+          {templates.map((name) => <a key={name} href={`/api/templates/${encodeURIComponent(name)}`} download>{name.replace("导入模板.xlsx", "")}</a>)}
+        </div>
         <label>上传 CSV/TSV/XLSX<input type="file" accept=".csv,.tsv,.xlsx,.xls" onChange={(event) => setFile(event.target.files?.[0] ?? null)} /></label>
         <label>或粘贴表格<textarea value={text} onChange={(event) => setText(event.target.value)} rows={10} /></label>
-        <p className="hint">支持 card_type/type/卡片类型。单词卡：word/front/back/phonetic/example；选择题：choice/question/answer/option1-option4；填空题：blank/front 中写 []，back 写答案。</p>
-        <button className="primary-button"><FileSpreadsheet />开始导入</button>
+        <p className="hint">可自动识别题型：有选项列会导入为选择题，题干含 [] 或连续下划线会导入为填空题；也支持显式 card_type/type/卡片类型。</p>
+        <button className="primary-button" disabled={importing || !props.selectedDeckId}><FileSpreadsheet />{importing ? "导入中" : "开始导入"}</button>
       </form>
     </section>
   );
 }
 
-function SettingsView(props: { settings: Settings; onSave: (settings: Partial<Settings>) => Promise<void>; onNotify: () => Promise<void> }) {
+function SettingsView(props: { settings: Settings; onSave: (settings: Partial<Settings>) => Promise<void>; onNotify: () => Promise<void>; saving: boolean; notifying: boolean }) {
+  const [draft, setDraft] = useState<Settings>(props.settings);
+
+  useEffect(() => {
+    setDraft(props.settings);
+  }, [props.settings]);
+
+  function updateDraft(next: Partial<Settings>) {
+    const merged = { ...draft, ...next };
+    setDraft(merged);
+    if (next.theme) applyTheme(merged.theme);
+  }
+
+  async function save(event: FormEvent) {
+    event.preventDefault();
+    await props.onSave(draft);
+  }
+
   return (
-    <section className="panel settings-panel">
-      <label>主题<select value={props.settings.theme} onChange={(event) => props.onSave({ theme: event.target.value as ThemeMode })}><option value="system">跟随系统</option><option value="light">浅色</option><option value="dark">暗黑</option></select></label>
-      <label>默认发音语言<select value={props.settings.voiceLanguage} onChange={(event) => props.onSave({ voiceLanguage: event.target.value })}><option value="en-US">英语 en-US</option><option value="ja-JP">日语 ja-JP</option><option value="ko-KR">韩语 ko-KR</option><option value="fr-FR">法语 fr-FR</option><option value="de-DE">德语 de-DE</option></select></label>
-      <label>每日新学目标<input type="number" min={0} value={props.settings.dailyNewGoal} onChange={(event) => props.onSave({ dailyNewGoal: Number(event.target.value) })} /></label>
-      <button className="primary-button" onClick={props.onNotify}><Bell />开启浏览器通知</button>
+    <form className="panel settings-panel" onSubmit={save}>
+      <label>主题<select value={draft.theme} onChange={(event) => updateDraft({ theme: event.target.value as ThemeMode })}><option value="system">跟随系统</option><option value="light">浅色</option><option value="dark">暗黑</option></select></label>
+      <label>默认发音语言<select value={draft.voiceLanguage} onChange={(event) => updateDraft({ voiceLanguage: event.target.value })}><option value="en-US">英语 en-US</option><option value="ja-JP">日语 ja-JP</option><option value="ko-KR">韩语 ko-KR</option><option value="fr-FR">法语 fr-FR</option><option value="de-DE">德语 de-DE</option></select></label>
+      <label>自动发音<select value={draft.autoSpeak} onChange={(event) => updateDraft({ autoSpeak: event.target.value as Settings["autoSpeak"] })}><option value="off">关闭</option><option value="on">开启</option></select></label>
+      <label>每日新学目标<input type="number" min={0} value={draft.dailyNewGoal} onChange={(event) => updateDraft({ dailyNewGoal: Number(event.target.value) })} /></label>
+      <label>学习卡片字号
+        <div className="range-row">
+          <input type="range" min={0.85} max={1.35} step={0.05} value={draft.studyTextScale} onChange={(event) => updateDraft({ studyTextScale: Number(event.target.value) })} />
+          <strong>{Math.round(draft.studyTextScale * 100)}%</strong>
+        </div>
+      </label>
+      <div className="settings-actions">
+        <button className="primary-button" disabled={props.saving}><Save />{props.saving ? "保存中" : "保存设置"}</button>
+        <button className="primary-button secondary-button" type="button" disabled={props.notifying} onClick={props.onNotify}><Bell />{props.notifying ? "授权中" : "开启浏览器通知"}</button>
+      </div>
       <div className="schedule-box"><h3>艾宾浩斯间隔</h3><p>5 分钟 · 30 分钟 · 12 小时 · 1 天 · 2 天 · 4 天 · 7 天 · 15 天 · 30 天 · 90 天</p></div>
-    </section>
+    </form>
   );
 }
 
@@ -1108,6 +1375,8 @@ function AboutView(props: { syncStatus: SyncStatus | null }) {
       <div className="about-title"><Info /><div><p className="eyebrow">Xian 闪记卡</p><h2>版本 {version}</h2></div></div>
       <div className="schedule-box changelog-box">
         <h3>更新日志</h3>
+        <div className="changelog-row"><strong>0.2.3</strong><span>2026-06-26</span><p>修复填写判定、每日新学统计、重复提交、单卡删除确认、设置保存、自动发音开关、导入模板、移动端导航和开发端口冲突等体验问题。</p></div>
+        <div className="changelog-row"><strong>0.2.2</strong><span>2026-06-26</span><p>导入时自动识别选择题和填空题；选择/填写后先显示对错、正确答案和解析，再手动评级；新增学习卡片字号设置。</p></div>
         <div className="changelog-row"><strong>0.2.1</strong><span>2026-06-25</span><p>修复多层卡组菜单重叠；新增卡片批量全选、移动、删除；填空题支持填写判定并统一 [] 占位符；学习页支持新学张数、本轮固定队列、错题循环到掌握和撤销。</p></div>
         <div className="changelog-row"><strong>0.2.0</strong><span>2026-06-24</span><p>新增选择题卡、填空题卡、每日任务、连续打卡、按大卡组复习、同步按钮、自动同步和冲突处理。</p></div>
       </div>
