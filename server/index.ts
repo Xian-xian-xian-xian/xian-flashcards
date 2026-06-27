@@ -39,7 +39,7 @@ type CardType = "basic" | "word" | "choice" | "blank";
 const maxDeckDepth = 5;
 const sessionCookieName = "flashcards_session";
 const sessionDays = 30;
-const appVersion = "0.2.6";
+const appVersion = "0.2.7";
 const timeZone = "Asia/Shanghai";
 const normalizedUsers = new Set<number>();
 
@@ -181,7 +181,10 @@ function clampStudyLineHeight(value: unknown) {
 }
 
 function normalizeStudyFontFamily(value: unknown) {
-  return ["system", "rounded", "serif", "mono"].includes(String(value)) ? String(value) : "system";
+  const fontFamily = String(value ?? "").trim();
+  if (!fontFamily) return "system";
+  if (fontFamily.length > 80 || /[\u0000-\u001f;]/.test(fontFamily)) return "system";
+  return fontFamily;
 }
 
 function parseCookies(header: string | undefined) {
@@ -719,7 +722,7 @@ app.patch("/api/cards/:id", (req, res) => {
       userId
     ]
   );
-  res.json({ ok: true });
+  res.json({ ok: true, card: cardRow(userId, cardId) });
 });
 
 app.delete("/api/cards/:id", (req, res) => {
@@ -1022,7 +1025,7 @@ app.put("/api/settings", (req, res) => {
       setUserSetting(userId, key, req.body[key]);
       continue;
     }
-    if (key === "studyFontFamily" && ["system", "rounded", "serif", "mono"].includes(req.body[key])) {
+    if (key === "studyFontFamily" && typeof req.body[key] === "string") {
       setUserSetting(userId, key, req.body[key]);
       continue;
     }

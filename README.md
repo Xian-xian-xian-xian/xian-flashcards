@@ -1,4 +1,4 @@
-# Xian 闪记卡
+# 闪记
 
 一个本地优先的网页闪记卡应用，支持卡组管理、表格导入、自动发音、艾宾浩斯复习、浏览器通知、橙色主题和暗黑模式。
 
@@ -40,7 +40,7 @@ PORT=8080 pnpm start:remote
 
 ```bash
 git add README.md package.json server src vite.config.ts scripts 模版
-git commit -m "Release 0.2.6"
+git commit -m "Release 0.2.7"
 GIT_SSH_COMMAND="ssh -i ~/.ssh/codex_aliyun_flashcards -o IdentitiesOnly=yes" git push origin main
 ```
 

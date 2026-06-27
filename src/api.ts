@@ -49,7 +49,7 @@ export const api = {
   createCard: (deckId: number, payload: CardPayload) =>
     request<{ id: number }>(`/api/decks/${deckId}/cards`, { method: "POST", body: JSON.stringify(payload) }),
   updateCard: (id: number, payload: CardPayload) =>
-    request<{ ok: true }>(`/api/cards/${id}`, { method: "PATCH", body: JSON.stringify(payload) }),
+    request<{ ok: true; card: Card }>(`/api/cards/${id}`, { method: "PATCH", body: JSON.stringify(payload) }),
   deleteCard: (id: number) => request<{ ok: true }>(`/api/cards/${id}`, { method: "DELETE" }),
   batchCards: (payload: { cardIds: number[]; action: "move" | "delete"; deckId?: number }) =>
     request<{ ok: true; affected: number }>("/api/cards/batch", { method: "POST", body: JSON.stringify(payload) }),

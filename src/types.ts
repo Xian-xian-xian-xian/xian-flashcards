@@ -65,7 +65,7 @@ export type Settings = {
   studyTextScale: number;
   studyTextAlign: "center" | "left";
   studyLineHeight: number;
-  studyFontFamily: "system" | "rounded" | "serif" | "mono";
+  studyFontFamily: string;
 };
 
 export type User = {

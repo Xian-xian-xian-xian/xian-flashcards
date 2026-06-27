@@ -47,7 +47,7 @@ import type { Card, CardType, DailyTask, Deck, ReviewRating, ReviewSnapshot, Set
 type View = "home" | "deck" | "study" | "import" | "settings" | "about";
 type SyncState = "idle" | "syncing" | "success" | "error" | "conflict";
 
-const version = "0.2.6";
+const version = "0.2.7";
 
 const cardTypeLabels: Record<CardType, string> = {
   basic: "普通卡",
@@ -252,20 +252,38 @@ function delay(ms: number) {
   return new Promise((resolve) => window.setTimeout(resolve, ms));
 }
 
-const studyFontOptions: Array<{ value: Settings["studyFontFamily"]; label: string }> = [
+type LocalFontData = {
+  family: string;
+  fullName: string;
+  postscriptName: string;
+};
+
+const studyFontOptions: Array<{ value: string; label: string }> = [
   { value: "system", label: "系统" },
   { value: "rounded", label: "圆体" },
   { value: "serif", label: "宋体" },
   { value: "mono", label: "等宽" }
 ];
 
-function studyFontStack(value: Settings["studyFontFamily"]) {
-  return {
+function cssQuotedFontFamily(value: string) {
+  return `"${value.replace(/\\/g, "\\\\").replace(/"/g, "\\\"")}"`;
+}
+
+function studyFontStack(value: string) {
+  const preset: Record<string, string> = {
     system: "Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, \"Segoe UI\", \"Microsoft YaHei\", sans-serif",
     rounded: "ui-rounded, \"PingFang SC\", \"Microsoft YaHei\", \"Hiragino Sans GB\", sans-serif",
     serif: "\"Noto Serif CJK SC\", \"Songti SC\", SimSun, serif",
     mono: "\"SFMono-Regular\", Consolas, \"Liberation Mono\", \"Microsoft YaHei Mono\", monospace"
-  }[value];
+  };
+  return preset[value] ?? `${cssQuotedFontFamily(value)}, ${preset.system}`;
+}
+
+async function queryInstalledFonts() {
+  const queryLocalFonts = (window as Window & { queryLocalFonts?: () => Promise<LocalFontData[]> }).queryLocalFonts;
+  if (!queryLocalFonts) return [];
+  const fonts = await queryLocalFonts();
+  return Array.from(new Set(fonts.map((font) => font.family).filter(Boolean))).sort((a, b) => a.localeCompare(b));
 }
 
 export default function App() {
@@ -365,8 +383,10 @@ export default function App() {
   }
 
   async function updateCardWithConflict(id: number, payload: CardPayload) {
+    let updatedCard: Card | null = null;
     try {
-      await api.updateCard(id, payload);
+      const result = await api.updateCard(id, payload);
+      updatedCard = result.card;
     } catch (error) {
       const nextError = error as ConflictError;
       if (nextError.status === 409 && nextError.serverCard) {
@@ -377,6 +397,7 @@ export default function App() {
       throw error;
     }
     await afterMutation();
+    return updatedCard;
   }
 
   useEffect(() => {
@@ -456,7 +477,7 @@ export default function App() {
   }
 
   if (!authChecked) {
-    return <div className="auth-shell"><div className="auth-panel"><p className="eyebrow">Xian 闪记卡</p><h1>正在检查登录状态</h1></div></div>;
+    return <div className="auth-shell"><div className="auth-panel"><p className="eyebrow">闪记</p><h1>正在检查登录状态</h1></div></div>;
   }
 
   if (!user) {
@@ -467,8 +488,8 @@ export default function App() {
     <div className="app-shell">
       <aside className="sidebar" aria-label="主导航">
         <div className="brand">
-          <span className="brand-mark">X</span>
-          <span>Xian 闪记卡</span>
+          <span className="brand-mark">闪</span>
+          <span>闪记</span>
         </div>
         <div className="user-pill">
           <UserIcon />
@@ -768,8 +789,8 @@ function LoginView(props: { canRegister: boolean; onAuthed: (user: User) => void
     <div className="auth-shell">
       <section className="auth-panel">
         <div className="brand auth-brand">
-          <span className="brand-mark">X</span>
-          <span>Xian 闪记卡</span>
+          <span className="brand-mark">闪</span>
+          <span>闪记</span>
         </div>
         <p className="eyebrow">{mode === "register" ? "首次设置管理员账号" : "登录后访问你的卡片"}</p>
         <h1>{mode === "register" ? "创建账号" : "登录"}</h1>
@@ -829,9 +850,13 @@ function HomeView(props: {
   onStudy: (id: number) => void;
 }) {
   const mastered = props.stats.total_cards ? Math.round((props.stats.mastered_cards / props.stats.total_cards) * 100) : 0;
+  const dailyTarget = Math.max(props.dailyTask.daily_new_goal + props.dailyTask.review_total, 1);
+  const dailyDone = Math.min(props.dailyTask.new_completed, props.dailyTask.daily_new_goal) + Math.min(props.dailyTask.review_completed, props.dailyTask.review_total);
+  const dailyProgress = props.dailyTask.completed ? 100 : Math.round((dailyDone / dailyTarget) * 100);
   return (
     <section className="stack">
-      <div className="hero-panel">
+      <div className={`hero-panel daily-hero ${props.dailyTask.completed ? "complete" : ""}`}>
+        <div className="daily-glow" aria-hidden="true" />
         <div>
           <p className="eyebrow">今日打卡</p>
           <div className="streak-heading">
@@ -839,6 +864,13 @@ function HomeView(props: {
             <span className={`streak-badge ${props.dailyTask.completed ? "done" : ""}`}><CheckCircle2 />连续 {props.dailyTask.streak} 天</span>
           </div>
           <p>复习 {props.dailyTask.review_completed}/{props.dailyTask.review_total} · {props.dailyTask.completed ? "今日打卡成功" : "完成新学和复习后自动打卡"}</p>
+          <div className="daily-progress" aria-label={`今日进度 ${dailyProgress}%`}>
+            <span style={{ width: `${dailyProgress}%` }} />
+          </div>
+        </div>
+        <div className="daily-medal" aria-hidden="true">
+          <Sparkles />
+          <strong>{dailyProgress}%</strong>
         </div>
         <button className="primary-button" disabled={props.rootDecks.length === 0} onClick={() => props.rootDecks[0] && props.onStudy(props.rootDecks[0].id)}>
           <Sparkles />开始学习
@@ -908,7 +940,7 @@ function DeckView(props: {
   onUpdateDeck: (id: number, name: string) => Promise<void>;
   onDeleteDeck: (id: number) => Promise<void>;
   onCreateCard: (payload: CardPayload) => Promise<void>;
-  onUpdateCard: (id: number, payload: CardPayload) => Promise<void>;
+  onUpdateCard: (id: number, payload: CardPayload) => Promise<Card | null | undefined>;
   onDeleteCard: (id: number) => Promise<void>;
   onBatchCards: (cardIds: number[], action: "move" | "delete", deckId?: number) => Promise<void>;
   onToggleFavorite: (card: Card) => Promise<void>;
@@ -1173,7 +1205,7 @@ function StudyView(props: {
   autoSpeak: boolean;
   onAnswer: (card: Card, rating: ReviewRating) => Promise<{ stage: number; dueAt: string; previous: ReviewSnapshot }>;
   onUndoAnswer: (card: Card, snapshot: ReviewSnapshot) => Promise<void>;
-  onUpdateCard: (id: number, payload: CardPayload) => Promise<void>;
+  onUpdateCard: (id: number, payload: CardPayload) => Promise<Card | null | undefined>;
   onSpeak: (text: string, language?: string) => void;
 }) {
   const [studyKind, setStudyKind] = useState<"review" | "new">("review");
@@ -1200,6 +1232,9 @@ function StudyView(props: {
   const [scaleDraft, setScaleDraft] = useState(props.studyTextScale);
   const [scaleSaving, setScaleSaving] = useState(false);
   const [activeTextTool, setActiveTextTool] = useState<"scale" | "lineHeight" | "align" | "font" | null>(null);
+  const [installedFonts, setInstalledFonts] = useState<string[]>([]);
+  const [fontLoading, setFontLoading] = useState(false);
+  const [fontDraft, setFontDraft] = useState("");
   const [immersive, setImmersive] = useState(false);
   const [cardMotion, setCardMotion] = useState<"entering" | "leaving" | "idle">("entering");
   const [celebrationKey, setCelebrationKey] = useState(0);
@@ -1393,6 +1428,32 @@ function StudyView(props: {
     await props.onStudyFontFamily(nextFontFamily);
   }
 
+  async function loadFonts() {
+    setFontLoading(true);
+    try {
+      setInstalledFonts(await queryInstalledFonts());
+    } finally {
+      setFontLoading(false);
+    }
+  }
+
+  function replaceSessionCard(nextCard: Card) {
+    setSessionCards((items) => items.map((item) => item.id === nextCard.id ? nextCard : item));
+    setQueue((items) => items.map((item) => item.id === nextCard.id ? nextCard : item));
+    setHistory((items) => items.map((item) => ({
+      ...item,
+      card: item.card.id === nextCard.id ? nextCard : item.card,
+      queue: item.queue.map((queuedCard) => queuedCard.id === nextCard.id ? nextCard : queuedCard)
+    })));
+  }
+
+  async function saveStudyCard(payload: CardPayload) {
+    if (!editingStudyCard) return;
+    const updatedCard = await props.onUpdateCard(editingStudyCard.id, { ...payload, baseUpdatedAt: editingStudyCard.updated_at });
+    if (updatedCard) replaceSessionCard(updatedCard);
+    setEditingStudyCard(null);
+  }
+
   async function toggleImmersive() {
     if (document.fullscreenElement) {
       await document.exitFullscreen().catch(() => undefined);
@@ -1480,6 +1541,14 @@ function StudyView(props: {
                   {studyFontOptions.map((option) => (
                     <button key={option.value} className={props.studyFontFamily === option.value ? "active" : ""} onClick={() => saveFontFamily(option.value)}>{option.label}</button>
                   ))}
+                  <button onClick={loadFonts}>{fontLoading ? "读取中" : "系统字体"}</button>
+                  {installedFonts.slice(0, 16).map((font) => (
+                    <button key={font} className={props.studyFontFamily === font ? "active" : ""} style={{ fontFamily: studyFontStack(font) }} onClick={() => saveFontFamily(font)}>{font}</button>
+                  ))}
+                  <form className="font-custom-form" onSubmit={(event) => { event.preventDefault(); if (fontDraft.trim()) saveFontFamily(fontDraft.trim()); }}>
+                    <input value={fontDraft} onChange={(event) => setFontDraft(event.target.value)} placeholder="输入字体名" />
+                    <button>应用</button>
+                  </form>
                 </div>
               )}
             </TextToolButton>
@@ -1488,7 +1557,7 @@ function StudyView(props: {
             <button className="mini-button" title="编辑当前卡片" onClick={() => setEditingStudyCard(card)}><Edit3 /></button>
             <button className="mini-button" title="发音" onClick={() => props.onSpeak(card.front, card.language ?? props.selectedDeck?.language)}><Volume2 /></button>
           </div>
-          {editingStudyCard && <CardEditor card={editingStudyCard} onCancel={() => setEditingStudyCard(null)} onSubmit={async (payload) => { await props.onUpdateCard(editingStudyCard.id, { ...payload, baseUpdatedAt: editingStudyCard.updated_at }); setEditingStudyCard(null); }} />}
+          {editingStudyCard && <CardEditor card={editingStudyCard} onCancel={() => setEditingStudyCard(null)} onSubmit={saveStudyCard} />}
           {card.card_type !== "choice" && card.card_type !== "blank" && (
             <button className={`flip-card ${flipped ? "flipped" : ""}`} onClick={() => setFlipped((value) => !value)}>
               <span className="flip-card-inner">
@@ -1544,6 +1613,7 @@ function StudyComplete(props: { total: number; completed: number; onRestart: () 
         <span className="finish-orbit" />
         {Array.from({ length: 18 }, (_, index) => <i key={index} />)}
       </div>
+      <div className="finish-medal" aria-hidden="true"><Sparkles /></div>
       <p className="eyebrow">本轮完成</p>
       <h2>{props.completed}/{props.total}</h2>
       <p>这一组已经全部掌握，今天的脑力很亮。</p>
@@ -1692,9 +1762,10 @@ function SettingsView(props: { settings: Settings; onSave: (settings: Partial<Se
 function AboutView(props: { syncStatus: SyncStatus | null }) {
   return (
     <section className="panel about-panel">
-      <div className="about-title"><Info /><div><p className="eyebrow">Xian 闪记卡</p><h2>版本 {version}</h2></div></div>
+      <div className="about-title"><Info /><div><p className="eyebrow">闪记</p><h2>版本 {version}</h2></div></div>
       <div className="schedule-box changelog-box">
         <h3>更新日志</h3>
+        <div className="changelog-row"><strong>0.2.7</strong><span>2026-06-27</span><p>编辑学习中卡片后即时刷新本轮内容；选择题选项跟随左对齐；字体支持读取和输入系统字体；升级打卡完成感和项目名称。</p></div>
         <div className="changelog-row"><strong>0.2.6</strong><span>2026-06-27</span><p>升级学习页排版控制，新增字号、行距、对齐和字体按钮选择；修正左对齐语义；优化全屏和竖屏手机体验；新增整组完成动画音效和自适应选择题选项布局。</p></div>
         <div className="changelog-row"><strong>0.2.5</strong><span>2026-06-27</span><p>新增答题音效、卡片翻转和切题动效；评级后不再弹出右下角提示；强化连续打卡展示；学习页支持文本左对齐或居中。</p></div>
         <div className="changelog-row"><strong>0.2.4</strong><span>2026-06-26</span><p>修复选择题答案标签匹配和第五选项问题；学习页按卡片类型自动显示；字号调整移入学习页；新增沉浸式学习并移除卡片悬停倾斜。</p></div>
