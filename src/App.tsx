@@ -51,7 +51,7 @@ import type { Card, CardType, DailyTask, Deck, ReviewRating, ReviewRemaining, Re
 type View = "home" | "deck" | "study" | "import" | "settings" | "about";
 type SyncState = "idle" | "syncing" | "success" | "error" | "conflict";
 
-const version = "0.2.12";
+const version = "0.2.13";
 
 const cardTypeLabels: Record<CardType, string> = {
   basic: "普通卡",
@@ -140,16 +140,21 @@ function markdownBlocks(value: string): MarkdownBlock[] {
 
 function renderInlineMarkdown(value: string) {
   const nodes: ReactNode[] = [];
-  const pattern = /(\$\$[^$]+\$\$|\$[^$\n]+\$|\*\*[^*]+\*\*|__[^_]+__|`[^`]+`|\[[^\]]+\]\([^)]+\)|\*[^*]+\*|_[^_]+_)/g;
+  const pattern = /(!\[[^\]]*]\([^)]+\)|\$\$[^$]+\$\$|\$[^$\n]+\$|\*\*[^*]+\*\*|__[^_]+__|~~[^~]+~~|`[^`]+`|\[[^\]]+\]\([^)]+\)|\*[^*]+\*|_[^_]+_)/g;
   let lastIndex = 0;
   value.replace(pattern, (match, _capture, offset) => {
     if (offset > lastIndex) nodes.push(value.slice(lastIndex, offset));
-    if (match.startsWith("$$")) {
+    if (match.startsWith("![")) {
+      const image = match.match(/^!\[([^\]]*)]\(([^)]+)\)$/);
+      nodes.push(image ? <img key={nodes.length} src={image[2]} alt={image[1]} loading="lazy" /> : match);
+    } else if (match.startsWith("$$")) {
       nodes.push(<span key={nodes.length} className="math-inline">{match.slice(2, -2)}</span>);
     } else if (match.startsWith("$")) {
       nodes.push(<span key={nodes.length} className="math-inline">{match.slice(1, -1)}</span>);
     } else if (match.startsWith("**") || match.startsWith("__")) {
       nodes.push(<strong key={nodes.length}>{match.slice(2, -2)}</strong>);
+    } else if (match.startsWith("~~")) {
+      nodes.push(<del key={nodes.length}>{match.slice(2, -2)}</del>);
     } else if (match.startsWith("`")) {
       nodes.push(<code key={nodes.length}>{match.slice(1, -1)}</code>);
     } else if (match.startsWith("[")) {
@@ -163,6 +168,60 @@ function renderInlineMarkdown(value: string) {
   });
   if (lastIndex < value.length) nodes.push(value.slice(lastIndex));
   return nodes;
+}
+
+function renderMarkdownLines(lines: string[]) {
+  return lines.map((line, lineIndex) => <span key={lineIndex} className="markdown-line">{renderInlineMarkdown(line)}</span>);
+}
+
+function renderMarkdownTextBlock(content: string, index: number) {
+  if (/^\s*(-{3,}|\*{3,}|_{3,})\s*$/.test(content)) return <hr key={index} className="markdown-divider" />;
+  const lines = content.split("\n");
+  if (lines.some((line) => /^\s*(-{3,}|\*{3,}|_{3,})\s*$/.test(line))) {
+    const nodes: ReactNode[] = [];
+    let paragraph: string[] = [];
+    const flushParagraph = () => {
+      if (paragraph.length === 0) return;
+      nodes.push(renderMarkdownTextBlock(paragraph.join("\n"), nodes.length));
+      paragraph = [];
+    };
+    lines.forEach((line) => {
+      if (/^\s*(-{3,}|\*{3,}|_{3,})\s*$/.test(line)) {
+        flushParagraph();
+        nodes.push(<hr key={nodes.length} className="markdown-divider" />);
+      } else {
+        paragraph.push(line);
+      }
+    });
+    flushParagraph();
+    return <span key={index} className="markdown-fragment">{nodes}</span>;
+  }
+  const heading = content.match(/^(#{1,6})\s+(.+)$/);
+  if (heading) {
+    const level = heading[1].length;
+    return <strong key={index} className={`markdown-heading level-${level}`}>{renderInlineMarkdown(heading[2])}</strong>;
+  }
+  if (lines.every((line) => /^\s*> ?/.test(line))) {
+    return <blockquote key={index}>{renderMarkdownLines(lines.map((line) => line.replace(/^\s*> ?/, "")))}</blockquote>;
+  }
+  if (lines.every((line) => /^\s*[-+*]\s+/.test(line))) {
+    return <ul key={index}>{lines.map((line, lineIndex) => <li key={lineIndex}>{renderInlineMarkdown(line.replace(/^\s*[-+*]\s+/, ""))}</li>)}</ul>;
+  }
+  if (lines.every((line) => /^\s*\d+[.)]\s+/.test(line))) {
+    return <ol key={index}>{lines.map((line, lineIndex) => <li key={lineIndex}>{renderInlineMarkdown(line.replace(/^\s*\d+[.)]\s+/, ""))}</li>)}</ol>;
+  }
+  if (lines.length >= 2 && lines.every((line) => /^\s*\|.*\|\s*$/.test(line)) && /^\s*\|?(?:\s*:?-{3,}:?\s*\|)+\s*$/.test(lines[1])) {
+    const rows = lines.filter((_, rowIndex) => rowIndex !== 1).map((line) => line.trim().replace(/^\||\|$/g, "").split("|").map((cell) => cell.trim()));
+    return (
+      <span key={index} className="markdown-table-wrap">
+        <table>
+          <thead><tr>{rows[0].map((cell, cellIndex) => <th key={cellIndex}>{renderInlineMarkdown(cell)}</th>)}</tr></thead>
+          <tbody>{rows.slice(1).map((row, rowIndex) => <tr key={rowIndex}>{row.map((cell, cellIndex) => <td key={cellIndex}>{renderInlineMarkdown(cell)}</td>)}</tr>)}</tbody>
+        </table>
+      </span>
+    );
+  }
+  return <span key={index} className="markdown-paragraph">{renderMarkdownLines(lines)}</span>;
 }
 
 function MarkdownText(props: { value: string; className?: string }) {
@@ -180,21 +239,7 @@ function MarkdownText(props: { value: string; className?: string }) {
           );
         }
         if (block.type === "math") return <span key={index} className="math-block">{block.content}</span>;
-        const lines = block.content.split("\n");
-        if (lines.every((line) => /^\s*[-*]\s+/.test(line))) {
-          return <ul key={index}>{lines.map((line, lineIndex) => <li key={lineIndex}>{renderInlineMarkdown(line.replace(/^\s*[-*]\s+/, ""))}</li>)}</ul>;
-        }
-        if (lines.every((line) => /^\s*\d+[.)]\s+/.test(line))) {
-          return <ol key={index}>{lines.map((line, lineIndex) => <li key={lineIndex}>{renderInlineMarkdown(line.replace(/^\s*\d+[.)]\s+/, ""))}</li>)}</ol>;
-        }
-        if (block.content.startsWith("# ")) return <strong key={index}>{renderInlineMarkdown(block.content.replace(/^#\s+/, ""))}</strong>;
-        return (
-          <span key={index} className="markdown-paragraph">
-            {lines.map((line, lineIndex) => (
-              <span key={lineIndex}>{renderInlineMarkdown(line)}{lineIndex < lines.length - 1 && <br />}</span>
-            ))}
-          </span>
-        );
+        return renderMarkdownTextBlock(block.content, index);
       })}
     </span>
   );
@@ -2050,6 +2095,7 @@ function AboutView(props: { syncStatus: SyncStatus | null }) {
       <div className="about-title"><Info /><div><p className="eyebrow">闪记</p><h2>版本 {version}</h2></div></div>
       <div className="schedule-box changelog-box">
         <h3>更新日志</h3>
+        <div className="changelog-row"><strong>0.2.13</strong><span>2026-06-27</span><p>调整学习页评级按钮宽度、题目参考位置和答题反馈字号；补齐 Markdown 分割线、标题、引用、表格等展示，并让换行跟随学习行距。</p></div>
         <div className="changelog-row"><strong>0.2.12</strong><span>2026-06-27</span><p>答题后的题干选项参考固定在屏幕右侧，支持拖动中间分隔调整左右占比，并修正解析按 Markdown 原文加粗展示。</p></div>
         <div className="changelog-row"><strong>0.2.11</strong><span>2026-06-27</span><p>修复学习页手机布局、底部评级固定、系统字体选择、解析/其他换行展示和新学/复习剩余数量。</p></div>
         <div className="changelog-row"><strong>0.2.10</strong><span>2026-06-27</span><p>支持 Markdown 代码块和数学公式展示；长解析答题后默认显示右侧题目参考并可隐藏；评级按钮固定在学习面板底部。</p></div>

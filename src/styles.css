@@ -1285,12 +1285,21 @@ textarea:focus {
 .markdown-text {
   display: grid;
   gap: 0.42em;
+  line-height: inherit;
   white-space: normal;
   overflow-wrap: anywhere;
 }
 
-.markdown-text :is(strong, em, code, a) {
+.markdown-text :is(strong, em, code, a, del) {
   overflow-wrap: anywhere;
+}
+
+.markdown-text img {
+  display: block;
+  max-width: 100%;
+  max-height: min(420px, 52vh);
+  border-radius: 8px;
+  object-fit: contain;
 }
 
 .markdown-text code {
@@ -1377,14 +1386,82 @@ textarea:focus {
 .markdown-text ul,
 .markdown-text ol {
   display: grid;
-  gap: 0.24em;
+  gap: calc((var(--study-line-height, 1.5) - 1) * 0.45em);
   margin: 0;
   padding-left: 1.25em;
   text-align: left;
 }
 
-.markdown-paragraph {
+.markdown-text blockquote {
+  display: grid;
+  gap: calc((var(--study-line-height, 1.5) - 1) * 0.45em);
+  margin: 0;
+  padding: 0.2em 0 0.2em 0.8em;
+  border-left: 4px solid color-mix(in srgb, var(--primary), transparent 46%);
+  color: var(--muted);
+  text-align: left;
+}
+
+.markdown-divider {
+  width: 100%;
+  height: 1px;
+  margin: 0.35em 0;
+  border: 0;
+  background: var(--border);
+}
+
+.markdown-heading {
   display: block;
+  line-height: inherit;
+}
+
+.markdown-heading.level-1 {
+  font-size: 1.22em;
+}
+
+.markdown-heading.level-2 {
+  font-size: 1.14em;
+}
+
+.markdown-heading.level-3 {
+  font-size: 1.08em;
+}
+
+.markdown-fragment,
+.markdown-paragraph,
+.markdown-line {
+  display: block;
+}
+
+.markdown-fragment {
+  display: grid;
+  gap: 0.42em;
+}
+
+.markdown-table-wrap {
+  display: block;
+  width: 100%;
+  overflow-x: auto;
+}
+
+.markdown-table-wrap table {
+  width: 100%;
+  min-width: 360px;
+  border-collapse: collapse;
+  text-align: left;
+}
+
+.markdown-table-wrap th,
+.markdown-table-wrap td {
+  padding: 0.45em 0.55em;
+  border: 1px solid var(--border);
+  vertical-align: top;
+}
+
+.markdown-table-wrap th {
+  background: var(--primary-soft);
+  color: var(--primary-strong);
+  font-weight: 900;
 }
 
 .flip-card .word-face,
@@ -1433,6 +1510,7 @@ textarea:focus {
 }
 
 .answer-layout {
+  position: relative;
   display: grid;
   grid-template-columns: minmax(0, 1fr);
   gap: 16px;
@@ -1445,17 +1523,19 @@ textarea:focus {
 }
 
 .question-dock {
-  position: fixed;
-  top: 14px;
-  right: 14px;
-  bottom: 14px;
+  position: absolute;
+  top: 0;
+  right: 0;
+  bottom: auto;
   z-index: 20;
   display: grid;
+  grid-template-rows: auto minmax(0, 1fr);
   gap: 10px;
   width: var(--answer-dock-width);
+  height: 100%;
   max-width: calc(100vw - 28px);
-  max-height: calc(100vh - 28px);
-  overflow: auto;
+  max-height: 100%;
+  overflow: hidden;
   padding: 12px;
   border: 1px solid var(--border);
   border-radius: 8px;
@@ -1504,12 +1584,14 @@ body.resizing-answer-dock .question-dock-resizer::after {
 
 .question-dock-title strong {
   color: var(--primary-strong);
-  font-size: 14px;
+  font-size: var(--study-small-size);
 }
 
 .question-dock-body {
   display: grid;
   gap: 10px;
+  min-height: 0;
+  overflow: auto;
   font-size: var(--study-small-size);
   line-height: var(--study-line-height);
 }
@@ -1657,9 +1739,10 @@ body.resizing-answer-dock .question-dock-resizer::after {
   position: sticky;
   bottom: 0;
   z-index: 3;
-  width: calc(100% + 20px);
+  width: min(940px, 100%);
   flex: 0 0 auto;
-  margin: 12px -10px -10px;
+  align-self: center;
+  margin: 12px 0 -10px;
   padding: 10px;
   border: 1px solid var(--border);
   border-radius: 8px;
@@ -1738,7 +1821,7 @@ body.resizing-answer-dock .question-dock-resizer::after {
   gap: 6px;
   padding: 12px;
   border-radius: 8px;
-  font-size: var(--study-result-size);
+  font-size: var(--study-small-size);
   text-align: var(--study-text-align);
   line-height: var(--study-line-height);
 }
@@ -1768,12 +1851,14 @@ body.resizing-answer-dock .question-dock-resizer::after {
   padding: 10px;
   border-radius: 8px;
   background: color-mix(in srgb, var(--surface), transparent 18%);
+  font-size: var(--study-small-size);
+  line-height: var(--study-line-height);
   text-align: left;
 }
 
 .feedback-block > span {
   color: var(--primary-strong);
-  font-size: 12px;
+  font-size: inherit;
   font-weight: 900;
 }
 
@@ -2587,9 +2672,9 @@ textarea {
 
   .rating-row {
     bottom: 0;
-    width: calc(100% + 8px);
-    margin-right: -4px;
-    margin-left: -4px;
+    width: 100%;
+    margin-right: 0;
+    margin-left: 0;
     padding: 8px;
     gap: 8px;
   }

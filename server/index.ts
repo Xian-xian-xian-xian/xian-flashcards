@@ -39,7 +39,7 @@ type CardType = "basic" | "word" | "choice" | "blank";
 const maxDeckDepth = 5;
 const sessionCookieName = "flashcards_session";
 const sessionDays = 30;
-const appVersion = "0.2.12";
+const appVersion = "0.2.13";
 const timeZone = "Asia/Shanghai";
 const normalizedUsers = new Set<number>();
 
