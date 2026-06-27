@@ -160,22 +160,46 @@ function playAnswerSound(result: "right" | "wrong") {
     const AudioContextClass = window.AudioContext || (window as typeof window & { webkitAudioContext?: typeof AudioContext }).webkitAudioContext;
     if (!AudioContextClass) return;
     const context = new AudioContextClass();
-    const gain = context.createGain();
-    gain.connect(context.destination);
-    gain.gain.setValueAtTime(0.0001, context.currentTime);
-    gain.gain.exponentialRampToValueAtTime(result === "right" ? 0.16 : 0.12, context.currentTime + 0.015);
-    gain.gain.exponentialRampToValueAtTime(0.0001, context.currentTime + (result === "right" ? 0.24 : 0.18));
+    const master = context.createGain();
+    master.connect(context.destination);
+    master.gain.setValueAtTime(0.0001, context.currentTime);
+    master.gain.exponentialRampToValueAtTime(result === "right" ? 0.2 : 0.12, context.currentTime + 0.012);
+    master.gain.exponentialRampToValueAtTime(0.0001, context.currentTime + (result === "right" ? 0.58 : 0.18));
 
-    const tones = result === "right" ? [660, 880] : [220, 165];
-    tones.forEach((frequency, index) => {
+    const tones = result === "right"
+      ? [
+          { frequency: 523.25, start: 0, length: 0.16 },
+          { frequency: 659.25, start: 0.07, length: 0.17 },
+          { frequency: 783.99, start: 0.14, length: 0.2 },
+          { frequency: 1046.5, start: 0.25, length: 0.28 }
+        ]
+      : [
+          { frequency: 220, start: 0, length: 0.12 },
+          { frequency: 165, start: 0.055, length: 0.12 }
+        ];
+    tones.forEach(({ frequency, start, length }) => {
       const oscillator = context.createOscillator();
       oscillator.type = result === "right" ? "sine" : "triangle";
-      oscillator.frequency.setValueAtTime(frequency, context.currentTime + index * 0.055);
-      oscillator.connect(gain);
-      oscillator.start(context.currentTime + index * 0.055);
-      oscillator.stop(context.currentTime + index * 0.055 + 0.13);
+      oscillator.frequency.setValueAtTime(frequency, context.currentTime + start);
+      oscillator.connect(master);
+      oscillator.start(context.currentTime + start);
+      oscillator.stop(context.currentTime + start + length);
     });
-    window.setTimeout(() => context.close().catch(() => undefined), 360);
+    if (result === "right") {
+      [1568, 2093, 2637].forEach((frequency, index) => {
+        const sparkle = context.createOscillator();
+        const sparkleGain = context.createGain();
+        sparkle.type = "triangle";
+        sparkle.frequency.setValueAtTime(frequency, context.currentTime + 0.12 + index * 0.075);
+        sparkleGain.gain.setValueAtTime(0.0001, context.currentTime + 0.12 + index * 0.075);
+        sparkleGain.gain.exponentialRampToValueAtTime(0.045, context.currentTime + 0.135 + index * 0.075);
+        sparkleGain.gain.exponentialRampToValueAtTime(0.0001, context.currentTime + 0.25 + index * 0.075);
+        sparkle.connect(sparkleGain).connect(context.destination);
+        sparkle.start(context.currentTime + 0.12 + index * 0.075);
+        sparkle.stop(context.currentTime + 0.27 + index * 0.075);
+      });
+    }
+    window.setTimeout(() => context.close().catch(() => undefined), result === "right" ? 760 : 360);
   } catch {
     // Browsers can deny audio startup until a user gesture; feedback still works without sound.
   }
@@ -1102,6 +1126,7 @@ function StudyView(props: {
   const [scaleSaving, setScaleSaving] = useState(false);
   const [immersive, setImmersive] = useState(false);
   const [cardMotion, setCardMotion] = useState<"entering" | "leaving" | "idle">("entering");
+  const [celebrationKey, setCelebrationKey] = useState(0);
   const card = queue[0];
 
   useEffect(() => {
@@ -1113,6 +1138,7 @@ function StudyView(props: {
     setAnswer("");
     setChecked(null);
     setSelectedChoice("");
+    setCelebrationKey(0);
     setEditingStudyCard(null);
     setCardMotion("entering");
     const timer = window.setTimeout(() => setCardMotion("idle"), 220);
@@ -1148,6 +1174,7 @@ function StudyView(props: {
       setAnswer("");
       setChecked(null);
       setSelectedChoice("");
+      setCelebrationKey(0);
       setEditingStudyCard(null);
       setCardMotion("entering");
     } finally {
@@ -1179,6 +1206,7 @@ function StudyView(props: {
       setAnswer("");
       setChecked(null);
       setSelectedChoice("");
+      setCelebrationKey(0);
     } finally {
       setBusy("");
     }
@@ -1207,6 +1235,7 @@ function StudyView(props: {
     setSelectedChoice("");
     const result = isCorrectAnswer(card, answer) ? "right" : "wrong";
     playAnswerSound(result);
+    if (result === "right") setCelebrationKey((key) => key + 1);
     setChecked(result);
   }
 
@@ -1215,6 +1244,7 @@ function StudyView(props: {
     setSelectedChoice(choice);
     const result = answersMatch(choice, card.back) ? "right" : "wrong";
     playAnswerSound(result);
+    if (result === "right") setCelebrationKey((key) => key + 1);
     setChecked(result);
   }
 
@@ -1302,7 +1332,14 @@ function StudyView(props: {
       </div>
 
       {!card ? <EmptyState text={total > 0 ? "本轮已完成。" : studyKind === "new" ? "这个大卡组暂无可新学卡片。" : "这个大卡组暂无到期复习卡片。"} /> : (
-        <div className={`study-panel ${cardMotion} align-${props.studyTextAlign}`} style={studyStyle}>
+        <div className={`study-panel ${cardMotion} align-${props.studyTextAlign} ${checked === "right" ? "celebrating" : ""}`} style={studyStyle}>
+          {checked === "right" && (
+            <div className="answer-celebration" key={celebrationKey} aria-hidden="true">
+              <span className="celebration-ring" />
+              <span className="celebration-badge"><CheckCircle2 />太棒了</span>
+              {Array.from({ length: 12 }, (_, index) => <i key={index} />)}
+            </div>
+          )}
           <div className="progress-line">
             <span>{completed}</span>
             <div><i style={{ width: `${Math.min((completed / Math.max(total, 1)) * 100, 100)}%` }} /></div>
