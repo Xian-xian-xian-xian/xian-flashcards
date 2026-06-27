@@ -1523,20 +1523,19 @@ textarea:focus {
 }
 
 .question-dock {
-  position: absolute;
-  top: 0;
-  right: 0;
-  bottom: auto;
+  position: fixed;
+  top: var(--answer-dock-top, 14px);
+  right: var(--answer-dock-right, 14px);
+  bottom: var(--answer-dock-bottom, 96px);
   z-index: 20;
   display: grid;
   grid-template-rows: auto minmax(0, 1fr);
-  gap: 10px;
+  gap: 8px;
   width: var(--answer-dock-width);
-  height: 100%;
   max-width: calc(100vw - 28px);
-  max-height: 100%;
+  max-height: calc(100vh - var(--answer-dock-top, 14px) - var(--answer-dock-bottom, 96px));
   overflow: hidden;
-  padding: 12px;
+  padding: 10px;
   border: 1px solid var(--border);
   border-radius: 8px;
   background: color-mix(in srgb, var(--surface), var(--primary-soft) 44%);
@@ -1589,33 +1588,39 @@ body.resizing-answer-dock .question-dock-resizer::after {
 
 .question-dock-body {
   display: grid;
-  gap: 10px;
+  align-content: start;
+  gap: 8px;
   min-height: 0;
   overflow: auto;
   font-size: var(--study-small-size);
   line-height: var(--study-line-height);
 }
 
-.question-dock-body ol {
-  display: grid;
-  gap: 8px;
-  margin: 0;
-  padding-left: 1.25em;
+.question-dock-prompt {
+  gap: 0.28em;
+  font-weight: 800;
 }
 
-.question-dock-body li {
-  padding: 8px;
+.question-dock-options {
+  display: grid;
+  gap: 6px;
+  margin: 0;
+  padding: 0;
+}
+
+.question-dock-options > div {
+  padding: 7px 8px;
   border: 1px solid var(--border);
   border-radius: 8px;
   background: var(--surface);
 }
 
-.question-dock-body li.correct {
+.question-dock-options > div.correct {
   border-color: color-mix(in srgb, var(--green), transparent 35%);
   background: color-mix(in srgb, var(--green), transparent 84%);
 }
 
-.question-dock-body li.selected:not(.correct) {
+.question-dock-options > div.selected:not(.correct) {
   border-color: color-mix(in srgb, var(--red), transparent 35%);
   background: color-mix(in srgb, var(--red), transparent 86%);
 }

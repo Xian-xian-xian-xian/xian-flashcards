@@ -44,14 +44,14 @@ import {
   Volume2,
   XCircle
 } from "lucide-react";
-import { CSSProperties, FormEvent, PointerEvent as ReactPointerEvent, ReactNode, useEffect, useMemo, useState } from "react";
+import { CSSProperties, FormEvent, PointerEvent as ReactPointerEvent, ReactNode, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { api, type CardPayload, type ConflictError } from "./api";
 import type { Card, CardType, DailyTask, Deck, ReviewRating, ReviewRemaining, ReviewSnapshot, Settings, Stats, SyncStatus, ThemeMode, User } from "./types";
 
 type View = "home" | "deck" | "study" | "import" | "settings" | "about";
 type SyncState = "idle" | "syncing" | "success" | "error" | "conflict";
 
-const version = "0.2.13";
+const version = "0.2.14";
 
 const cardTypeLabels: Record<CardType, string> = {
   basic: "普通卡",
@@ -1428,6 +1428,9 @@ function StudyView(props: {
   const [cardMotion, setCardMotion] = useState<"entering" | "leaving" | "idle">("entering");
   const [celebrationKey, setCelebrationKey] = useState(0);
   const [completionPlayed, setCompletionPlayed] = useState(false);
+  const answerLayoutRef = useRef<HTMLDivElement | null>(null);
+  const ratingRowRef = useRef<HTMLDivElement | null>(null);
+  const [answerDockFrame, setAnswerDockFrame] = useState({ top: 14, right: 14, bottom: 96 });
   const card = queue[0];
 
   useEffect(() => {
@@ -1594,6 +1597,28 @@ function StudyView(props: {
   const explanationIsLong = explanationText.length > 80 || /\n|```|\$\$/.test(explanationText);
   const showAnswerDock = Boolean(card && checked && explanationIsLong && answerDockOpen);
   const showManualRatings = card ? card.card_type !== "choice" && card.card_type !== "blank" || checked !== null : false;
+
+  useLayoutEffect(() => {
+    if (!showAnswerDock) return;
+
+    const updateFrame = () => {
+      const layoutRect = answerLayoutRef.current?.getBoundingClientRect();
+      const ratingRect = ratingRowRef.current?.getBoundingClientRect();
+      if (!layoutRect) return;
+      const viewportWidth = window.innerWidth;
+      const viewportHeight = window.innerHeight;
+      setAnswerDockFrame({
+        top: Math.max(14, Math.round(layoutRect.top)),
+        right: Math.max(14, Math.round(viewportWidth - layoutRect.right)),
+        bottom: Math.max(14, Math.round(viewportHeight - (ratingRect?.top ?? layoutRect.bottom)))
+      });
+    };
+
+    updateFrame();
+    window.addEventListener("resize", updateFrame);
+    return () => window.removeEventListener("resize", updateFrame);
+  }, [showAnswerDock, answerDockWidth, card?.id, checked, immersive]);
+
   const scale = scaleDraft;
   const studyStyle = {
     "--study-face-min": `${Math.round(32 * scale)}px`,
@@ -1611,7 +1636,10 @@ function StudyView(props: {
     "--study-text-align": props.studyTextAlign,
     "--study-line-height": String(props.studyLineHeight),
     "--study-font-family": studyFontStack(props.studyFontFamily),
-    "--answer-dock-width": `${answerDockWidth}px`
+    "--answer-dock-width": `${answerDockWidth}px`,
+    "--answer-dock-top": `${answerDockFrame.top}px`,
+    "--answer-dock-right": `${answerDockFrame.right}px`,
+    "--answer-dock-bottom": `${answerDockFrame.bottom}px`
   } as CSSProperties & Record<string, string>;
 
   async function saveScale(nextScale: number) {
@@ -1829,7 +1857,7 @@ function StudyView(props: {
               </button>
             )}
             {card.card_type === "choice" && (
-              <div className={`answer-layout ${showAnswerDock ? "with-dock" : ""}`}>
+              <div ref={answerLayoutRef} className={`answer-layout ${showAnswerDock ? "with-dock" : ""}`}>
                 <div className={`question-box choice-question ${choiceLayoutClass(choices, props.studyChoiceLayout)}`}>
                   <MarkdownText value={card.front} className="question-text" />
                   <ChoiceArea choices={choices} answer={card.back} selected={selectedChoice} checked={checked} layout={props.studyChoiceLayout} onChoose={checkChoice}>
@@ -1849,7 +1877,7 @@ function StudyView(props: {
               </div>
             )}
             {card.card_type === "blank" && (
-              <div className={`answer-layout ${showAnswerDock ? "with-dock" : ""}`}>
+              <div ref={answerLayoutRef} className={`answer-layout ${showAnswerDock ? "with-dock" : ""}`}>
                 <div className="question-box">
                   <MarkdownText value={blankPrompt(card.front)} className="question-text" />
                   {card.example && <MarkdownText value={card.example} className="question-note" />}
@@ -1870,7 +1898,7 @@ function StudyView(props: {
             )}
           </div>
           {showManualRatings && (
-            <div className="rating-row">
+            <div ref={ratingRowRef} className="rating-row">
               <button className="rating unknown" disabled={Boolean(busy)} onClick={() => rate("unknown")}><XCircle />{busy === "rate-unknown" ? "提交中" : "不认识"}</button>
               <button className="rating fuzzy" disabled={Boolean(busy)} onClick={() => rate("fuzzy")}><RotateCcw />{busy === "rate-fuzzy" ? "提交中" : "模糊"}</button>
               <button className="rating known" disabled={Boolean(busy)} onClick={() => rate("known")}><CheckCircle2 />{busy === "rate-known" ? "提交中" : "认识"}</button>
@@ -1891,15 +1919,15 @@ function QuestionDock(props: { card: Card; choices?: string[]; selected: string;
         <button className="mini-button" title="隐藏题目参考" onClick={props.onClose}><XCircle /></button>
       </div>
       <div className="question-dock-body">
-        <MarkdownText value={props.card.card_type === "blank" ? blankPrompt(props.card.front) : props.card.front} />
+        <MarkdownText value={props.card.card_type === "blank" ? blankPrompt(props.card.front) : props.card.front} className="question-dock-prompt" />
         {props.choices && props.choices.length > 0 && (
-          <ol>
+          <div className="question-dock-options">
             {props.choices.map((choice, index) => (
-              <li key={`${choice}-${index}`} className={answersMatch(choice, props.answer) ? "correct" : choice === props.selected ? "selected" : ""}>
+              <div key={`${choice}-${index}`} className={answersMatch(choice, props.answer) ? "correct" : choice === props.selected ? "selected" : ""}>
                 <MarkdownText value={choice} />
-              </li>
+              </div>
             ))}
-          </ol>
+          </div>
         )}
         {props.selected && <small>你的答案：<MarkdownText value={props.selected} /></small>}
       </div>
@@ -2095,6 +2123,7 @@ function AboutView(props: { syncStatus: SyncStatus | null }) {
       <div className="about-title"><Info /><div><p className="eyebrow">闪记</p><h2>版本 {version}</h2></div></div>
       <div className="schedule-box changelog-box">
         <h3>更新日志</h3>
+        <div className="changelog-row"><strong>0.2.14</strong><span>2026-06-27</span><p>题目参考改为屏幕固定区域，滚动学习内容时不再跟随；选项改为无序号紧凑显示。</p></div>
         <div className="changelog-row"><strong>0.2.13</strong><span>2026-06-27</span><p>调整学习页评级按钮宽度、题目参考位置和答题反馈字号；补齐 Markdown 分割线、标题、引用、表格等展示，并让换行跟随学习行距。</p></div>
         <div className="changelog-row"><strong>0.2.12</strong><span>2026-06-27</span><p>答题后的题干选项参考固定在屏幕右侧，支持拖动中间分隔调整左右占比，并修正解析按 Markdown 原文加粗展示。</p></div>
         <div className="changelog-row"><strong>0.2.11</strong><span>2026-06-27</span><p>修复学习页手机布局、底部评级固定、系统字体选择、解析/其他换行展示和新学/复习剩余数量。</p></div>
