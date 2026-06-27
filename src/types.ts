@@ -64,6 +64,7 @@ export type Settings = {
   dailyNewGoal: number;
   studyTextScale: number;
   studyTextAlign: "center" | "left";
+  studyChoiceLayout: "auto" | "one" | "two";
   studyLineHeight: number;
   studyFontFamily: string;
 };

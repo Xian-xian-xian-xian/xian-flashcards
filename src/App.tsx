@@ -7,6 +7,7 @@ import {
   BookOpen,
   Brain,
   CheckCircle2,
+  Columns2,
   Edit3,
   Eye,
   FileSpreadsheet,
@@ -24,6 +25,7 @@ import {
   Plus,
   RefreshCw,
   RotateCcw,
+  Rows2,
   Save,
   Search,
   Settings as SettingsIcon,
@@ -47,7 +49,7 @@ import type { Card, CardType, DailyTask, Deck, ReviewRating, ReviewSnapshot, Set
 type View = "home" | "deck" | "study" | "import" | "settings" | "about";
 type SyncState = "idle" | "syncing" | "success" | "error" | "conflict";
 
-const version = "0.2.7";
+const version = "0.2.8";
 
 const cardTypeLabels: Record<CardType, string> = {
   basic: "普通卡",
@@ -103,7 +105,61 @@ function parseChoices(value: string | string[] | undefined) {
   } catch {
     // Fall through to separator parsing.
   }
-  return value.split(/[|；;]/).map((item) => item.trim()).filter(Boolean);
+  const separator = value.includes("|") || value.includes("；") || value.includes(";") ? /[|；;]/ : /\n{1,}/;
+  return value.split(separator).map((item) => item.trim()).filter(Boolean);
+}
+
+function markdownBlocks(value: string) {
+  return value.replace(/\r\n/g, "\n").split(/\n{2,}/).map((block) => block.trim()).filter(Boolean);
+}
+
+function renderInlineMarkdown(value: string) {
+  const nodes: ReactNode[] = [];
+  const pattern = /(\*\*[^*]+\*\*|__[^_]+__|`[^`]+`|\[[^\]]+\]\([^)]+\)|\*[^*]+\*|_[^_]+_)/g;
+  let lastIndex = 0;
+  value.replace(pattern, (match, _capture, offset) => {
+    if (offset > lastIndex) nodes.push(value.slice(lastIndex, offset));
+    if (match.startsWith("**") || match.startsWith("__")) {
+      nodes.push(<strong key={nodes.length}>{match.slice(2, -2)}</strong>);
+    } else if (match.startsWith("`")) {
+      nodes.push(<code key={nodes.length}>{match.slice(1, -1)}</code>);
+    } else if (match.startsWith("[")) {
+      const link = match.match(/^\[([^\]]+)\]\(([^)]+)\)$/);
+      nodes.push(link ? <a key={nodes.length} href={link[2]} target="_blank" rel="noreferrer">{link[1]}</a> : match);
+    } else {
+      nodes.push(<em key={nodes.length}>{match.slice(1, -1)}</em>);
+    }
+    lastIndex = offset + match.length;
+    return match;
+  });
+  if (lastIndex < value.length) nodes.push(value.slice(lastIndex));
+  return nodes;
+}
+
+function MarkdownText(props: { value: string; className?: string }) {
+  const blocks = markdownBlocks(props.value);
+  if (blocks.length === 0) return null;
+  return (
+    <span className={`markdown-text ${props.className ?? ""}`}>
+      {blocks.map((block, index) => {
+        const lines = block.split("\n");
+        if (lines.every((line) => /^\s*[-*]\s+/.test(line))) {
+          return <ul key={index}>{lines.map((line, lineIndex) => <li key={lineIndex}>{renderInlineMarkdown(line.replace(/^\s*[-*]\s+/, ""))}</li>)}</ul>;
+        }
+        if (lines.every((line) => /^\s*\d+[.)]\s+/.test(line))) {
+          return <ol key={index}>{lines.map((line, lineIndex) => <li key={lineIndex}>{renderInlineMarkdown(line.replace(/^\s*\d+[.)]\s+/, ""))}</li>)}</ol>;
+        }
+        if (block.startsWith("# ")) return <strong key={index}>{renderInlineMarkdown(block.replace(/^#\s+/, ""))}</strong>;
+        return (
+          <span key={index} className="markdown-paragraph">
+            {lines.map((line, lineIndex) => (
+              <span key={lineIndex}>{renderInlineMarkdown(line)}{lineIndex < lines.length - 1 && <br />}</span>
+            ))}
+          </span>
+        );
+      })}
+    </span>
+  );
 }
 
 function blankPrompt(value: string) {
@@ -305,6 +361,7 @@ export default function App() {
     dailyNewGoal: 20,
     studyTextScale: 1,
     studyTextAlign: "center",
+    studyChoiceLayout: "auto",
     studyLineHeight: 1.5,
     studyFontFamily: "system"
   });
@@ -647,6 +704,7 @@ export default function App() {
             selectedDeck={studyRootDeck}
             studyTextScale={settings.studyTextScale}
             studyTextAlign={settings.studyTextAlign}
+            studyChoiceLayout={settings.studyChoiceLayout}
             studyLineHeight={settings.studyLineHeight}
             studyFontFamily={settings.studyFontFamily}
             onStudyTextScale={async (studyTextScale) => {
@@ -656,6 +714,10 @@ export default function App() {
             onStudyTextAlign={async (studyTextAlign) => {
               await api.saveSettings({ studyTextAlign });
               setSettings((current) => ({ ...current, studyTextAlign }));
+            }}
+            onStudyChoiceLayout={async (studyChoiceLayout) => {
+              await api.saveSettings({ studyChoiceLayout });
+              setSettings((current) => ({ ...current, studyChoiceLayout }));
             }}
             onStudyLineHeight={async (studyLineHeight) => {
               await api.saveSettings({ studyLineHeight });
@@ -1170,22 +1232,39 @@ function CardEditor(props: { card?: Card; onSubmit: (payload: CardPayload) => Pr
 
   return (
     <form className={`card-form ${props.card ? "edit-card-form" : ""}`} onSubmit={submit}>
-      <input value={front} onChange={(event) => setFront(event.target.value)} placeholder="正面 / 题目，填空题使用 [] 表示空格" />
-      <input value={back} onChange={(event) => setBack(event.target.value)} placeholder="背面 / 正确答案" />
+      <SmartTextField value={front} onChange={setFront} placeholder="正面 / 题目，填空题使用 [] 表示空格" required />
+      <SmartTextField value={back} onChange={setBack} placeholder="背面 / 正确答案" required />
       <button className="primary-button secondary-button" type="button" onClick={() => setAdvancedOpen((value) => !value)}><SlidersHorizontal />高级字段</button>
       {advancedOpen && (
         <div className="advanced-fields">
-          <input value={choices} onChange={(event) => setChoices(event.target.value)} placeholder="选择题选项，用 | 分隔；填写后自动识别为选择题" />
-          <input value={phonetic} onChange={(event) => setPhonetic(event.target.value)} placeholder="音标（可选）" />
-          <input value={example} onChange={(event) => setExample(event.target.value)} placeholder="例句 / 说明 / 解析（可选）" />
-          <input value={mnemonic} onChange={(event) => setMnemonic(event.target.value)} placeholder="助记（可选）" />
-          <input value={note} onChange={(event) => setNote(event.target.value)} placeholder="备注（可选）" />
+          <SmartTextField value={choices} onChange={setChoices} placeholder="选择题选项，用 |、; 分隔，或一行一个选项" multilineThreshold={28} />
+          <SmartTextField value={phonetic} onChange={setPhonetic} placeholder="音标（可选）" />
+          <SmartTextField value={example} onChange={setExample} placeholder="例句 / 说明 / 解析（可选）" />
+          <SmartTextField value={mnemonic} onChange={setMnemonic} placeholder="助记（可选）" />
+          <SmartTextField value={note} onChange={setNote} placeholder="备注（可选）" />
         </div>
       )}
       <button className="primary-button" disabled={saving}>{props.card ? <Save /> : <Plus />}{saving ? "处理中" : props.card ? "保存" : "添加"}</button>
       {props.onCancel && <button className="primary-button secondary-button" type="button" disabled={saving} onClick={props.onCancel}><XCircle />取消</button>}
     </form>
   );
+}
+
+function SmartTextField(props: { value: string; onChange: (value: string) => void; placeholder: string; required?: boolean; multilineThreshold?: number }) {
+  const expanded = props.value.length > (props.multilineThreshold ?? 42) || props.value.includes("\n");
+  if (expanded) {
+    return (
+      <textarea
+        className="smart-textarea"
+        value={props.value}
+        onChange={(event) => props.onChange(event.target.value)}
+        placeholder={props.placeholder}
+        rows={Math.min(8, Math.max(3, props.value.split("\n").length + 1))}
+        required={props.required}
+      />
+    );
+  }
+  return <input value={props.value} onChange={(event) => props.onChange(event.target.value)} placeholder={props.placeholder} required={props.required} />;
 }
 
 function StudyView(props: {
@@ -1196,10 +1275,12 @@ function StudyView(props: {
   selectedDeck?: Deck;
   studyTextScale: number;
   studyTextAlign: Settings["studyTextAlign"];
+  studyChoiceLayout: Settings["studyChoiceLayout"];
   studyLineHeight: number;
   studyFontFamily: Settings["studyFontFamily"];
   onStudyTextScale: (scale: number) => Promise<void>;
   onStudyTextAlign: (align: Settings["studyTextAlign"]) => Promise<void>;
+  onStudyChoiceLayout: (layout: Settings["studyChoiceLayout"]) => Promise<void>;
   onStudyLineHeight: (lineHeight: number) => Promise<void>;
   onStudyFontFamily: (fontFamily: Settings["studyFontFamily"]) => Promise<void>;
   autoSpeak: boolean;
@@ -1231,7 +1312,7 @@ function StudyView(props: {
   const [busy, setBusy] = useState("");
   const [scaleDraft, setScaleDraft] = useState(props.studyTextScale);
   const [scaleSaving, setScaleSaving] = useState(false);
-  const [activeTextTool, setActiveTextTool] = useState<"scale" | "lineHeight" | "align" | "font" | null>(null);
+  const [activeTextTool, setActiveTextTool] = useState<"scale" | "lineHeight" | "align" | "choiceLayout" | "font" | null>(null);
   const [installedFonts, setInstalledFonts] = useState<string[]>([]);
   const [fontLoading, setFontLoading] = useState(false);
   const [fontDraft, setFontDraft] = useState("");
@@ -1418,6 +1499,11 @@ function StudyView(props: {
     await props.onStudyTextAlign(nextAlign);
   }
 
+  async function saveChoiceLayout(nextLayout: Settings["studyChoiceLayout"]) {
+    if (nextLayout === props.studyChoiceLayout) return;
+    await props.onStudyChoiceLayout(nextLayout);
+  }
+
   async function saveLineHeight(nextLineHeight: number) {
     if (Math.abs(nextLineHeight - props.studyLineHeight) < 0.01) return;
     await props.onStudyLineHeight(nextLineHeight);
@@ -1535,6 +1621,15 @@ function StudyView(props: {
                 </div>
               )}
             </TextToolButton>
+            <TextToolButton icon={props.studyChoiceLayout === "one" ? <Rows2 /> : <Columns2 />} title="选项列数" active={activeTextTool === "choiceLayout"} onClick={() => setActiveTextTool(activeTextTool === "choiceLayout" ? null : "choiceLayout")}>
+              {activeTextTool === "choiceLayout" && (
+                <div className="text-tool-popover compact">
+                  <button className={props.studyChoiceLayout === "auto" ? "active" : ""} onClick={() => saveChoiceLayout("auto")}><SlidersHorizontal />自动</button>
+                  <button className={props.studyChoiceLayout === "one" ? "active" : ""} onClick={() => saveChoiceLayout("one")}><Rows2 />一列</button>
+                  <button className={props.studyChoiceLayout === "two" ? "active" : ""} onClick={() => saveChoiceLayout("two")}><Columns2 />两列</button>
+                </div>
+              )}
+            </TextToolButton>
             <TextToolButton icon={<Type />} title="学习字体" active={activeTextTool === "font"} onClick={() => setActiveTextTool(activeTextTool === "font" ? null : "font")}>
               {activeTextTool === "font" && (
                 <div className="text-tool-popover font-popover">
@@ -1568,15 +1663,16 @@ function StudyView(props: {
           )}
           {card.card_type === "choice" && (
             <div className="question-box">
-              <p>{card.front}</p>
-              <ChoiceGrid choices={choices} answer={card.back} selected={selectedChoice} checked={checked} onChoose={checkChoice} />
-              {checked && <AnswerFeedback checked={checked} correct={displayCorrect} explanation={explanation} selected={selectedChoice} />}
+              <MarkdownText value={card.front} className="question-text" />
+              <ChoiceArea choices={choices} answer={card.back} selected={selectedChoice} checked={checked} layout={props.studyChoiceLayout} onChoose={checkChoice}>
+                {checked && <AnswerFeedback checked={checked} correct={displayCorrect} explanation={explanation} selected={selectedChoice} />}
+              </ChoiceArea>
             </div>
           )}
           {card.card_type === "blank" && (
             <div className="question-box">
-              <p>{blankPrompt(card.front)}</p>
-              {card.example && <small>{card.example}</small>}
+              <MarkdownText value={blankPrompt(card.front)} className="question-text" />
+              {card.example && <MarkdownText value={card.example} className="question-note" />}
               <input value={answer} onChange={(event) => { setAnswer(event.target.value); setChecked(null); }} placeholder="输入答案" />
               <button className="primary-button" disabled={Boolean(busy)} onClick={checkWritten}>检查</button>
               {checked && <AnswerFeedback checked={checked} correct={correctAnswer(card)} explanation={explanation} selected={answer} />}
@@ -1623,52 +1719,69 @@ function StudyComplete(props: { total: number; completed: number; onRestart: () 
 }
 
 function CardFront(props: { card: Card }) {
-  if (props.card.card_type === "blank") return <span>{blankPrompt(props.card.front)}</span>;
-  if (props.card.card_type === "choice") return <span>{props.card.front}</span>;
-  if (!isWordCard(props.card)) return <span>{props.card.front}</span>;
-  return <span className="word-face"><strong>{props.card.front}</strong>{props.card.phonetic && <em>{props.card.phonetic}</em>}</span>;
+  if (props.card.card_type === "blank") return <MarkdownText value={blankPrompt(props.card.front)} />;
+  if (props.card.card_type === "choice") return <MarkdownText value={props.card.front} />;
+  if (!isWordCard(props.card)) return <MarkdownText value={props.card.front} />;
+  return <span className="word-face"><strong><MarkdownText value={props.card.front} /></strong>{props.card.phonetic && <em>{props.card.phonetic}</em>}</span>;
 }
 
 function CardBack(props: { card: Card }) {
   if (!isWordCard(props.card)) {
-    return <><span>{props.card.back}</span>{props.card.example && <small>{props.card.example}</small>}</>;
+    return <><MarkdownText value={props.card.back} />{props.card.example && <small><MarkdownText value={props.card.example} /></small>}</>;
   }
   return (
     <span className="word-back">
-      <strong>{props.card.front}</strong>
+      <strong><MarkdownText value={props.card.front} /></strong>
       {props.card.phonetic && <em>{props.card.phonetic}</em>}
-      <b>{props.card.back}</b>
-      {props.card.example && <small>{props.card.example}</small>}
-      {props.card.mnemonic && <small>助记：{props.card.mnemonic}</small>}
+      <b><MarkdownText value={props.card.back} /></b>
+      {props.card.example && <small><MarkdownText value={props.card.example} /></small>}
+      {props.card.mnemonic && <small>助记：<MarkdownText value={props.card.mnemonic} /></small>}
     </span>
   );
 }
 
-function ChoiceGrid(props: { choices: string[]; answer: string; selected: string; checked: "right" | "wrong" | null; onChoose: (choice: string) => void }) {
-  const maxLength = Math.max(0, ...props.choices.map((choice) => choice.length));
-  const totalLength = props.choices.reduce((sum, choice) => sum + choice.length, 0);
-  const layout = maxLength > 34 || totalLength > 120 || props.choices.length > 5
+function choiceLayoutClass(choices: string[], layout: Settings["studyChoiceLayout"]) {
+  if (layout === "one") return "long";
+  if (layout === "two") return "short";
+  const maxLength = Math.max(0, ...choices.map((choice) => choice.length));
+  const totalLength = choices.reduce((sum, choice) => sum + choice.length, 0);
+  return maxLength > 34 || totalLength > 120 || choices.length > 5
     ? "long"
     : maxLength > 16 || totalLength > 64
       ? "medium"
       : "short";
+}
+
+function ChoiceArea(props: {
+  choices: string[];
+  answer: string;
+  selected: string;
+  checked: "right" | "wrong" | null;
+  layout: Settings["studyChoiceLayout"];
+  onChoose: (choice: string) => void;
+  children: ReactNode;
+}) {
+  const layoutClass = choiceLayoutClass(props.choices, props.layout);
   return (
-    <div className={`choice-grid ${layout}`}>
-      {props.choices.map((choice, index) => {
-        const isSelected = choice === props.selected;
-        const isAnswer = answersMatch(choice, props.answer);
-        const state = props.checked && (isAnswer ? "correct" : isSelected ? "wrong" : "");
-        return (
-          <button
-            className={state}
-            disabled={props.checked !== null}
-            key={`${choice}-${index}`}
-            onClick={() => props.onChoose(choice)}
-          >
-            {choice}
-          </button>
-        );
-      })}
+    <div className={`choice-area ${layoutClass}`}>
+      <div className={`choice-grid ${layoutClass}`}>
+        {props.choices.map((choice, index) => {
+          const isSelected = choice === props.selected;
+          const isAnswer = answersMatch(choice, props.answer);
+          const state = props.checked && (isAnswer ? "correct" : isSelected ? "wrong" : "");
+          return (
+            <button
+              className={state}
+              disabled={props.checked !== null}
+              key={`${choice}-${index}`}
+              onClick={() => props.onChoose(choice)}
+            >
+              <MarkdownText value={choice} />
+            </button>
+          );
+        })}
+      </div>
+      {props.children}
     </div>
   );
 }
@@ -1678,9 +1791,9 @@ function AnswerFeedback(props: { checked: "right" | "wrong"; correct: string; ex
   return (
     <div className={`result ${right ? "right" : "wrong"}`}>
       <strong>{right ? "回答正确" : "回答错误"}</strong>
-      {!right && props.selected && <span>你的答案：{props.selected}</span>}
-      <span>正确答案：{props.correct}</span>
-      {props.explanation && <small>解析：{props.explanation}</small>}
+      {!right && props.selected && <span>你的答案：<MarkdownText value={props.selected} /></span>}
+      <span>正确答案：<MarkdownText value={props.correct} /></span>
+      {props.explanation && <small>解析：<MarkdownText value={props.explanation} /></small>}
     </div>
   );
 }
@@ -1765,6 +1878,7 @@ function AboutView(props: { syncStatus: SyncStatus | null }) {
       <div className="about-title"><Info /><div><p className="eyebrow">闪记</p><h2>版本 {version}</h2></div></div>
       <div className="schedule-box changelog-box">
         <h3>更新日志</h3>
+        <div className="changelog-row"><strong>0.2.8</strong><span>2026-06-27</span><p>支持 Markdown 文本展示；选项和解析保留换行；长文本编辑自动展开；选择题可手动切换一列或两列；解析宽度与选项区域一致。</p></div>
         <div className="changelog-row"><strong>0.2.7</strong><span>2026-06-27</span><p>编辑学习中卡片后即时刷新本轮内容；选择题选项跟随左对齐；字体支持读取和输入系统字体；升级打卡完成感和项目名称。</p></div>
         <div className="changelog-row"><strong>0.2.6</strong><span>2026-06-27</span><p>升级学习页排版控制，新增字号、行距、对齐和字体按钮选择；修正左对齐语义；优化全屏和竖屏手机体验；新增整组完成动画音效和自适应选择题选项布局。</p></div>
         <div className="changelog-row"><strong>0.2.5</strong><span>2026-06-27</span><p>新增答题音效、卡片翻转和切题动效；评级后不再弹出右下角提示；强化连续打卡展示；学习页支持文本左对齐或居中。</p></div>
@@ -1784,7 +1898,7 @@ function CardDetail(props: { card: Card; onClose: () => void }) {
   return (
     <div className="modal-backdrop">
       <section className="modal-panel">
-        <div className="modal-title"><h2>{props.card.front}</h2><button className="mini-button" onClick={props.onClose}><XCircle /></button></div>
+        <div className="modal-title"><h2><MarkdownText value={props.card.front} /></h2><button className="mini-button" onClick={props.onClose}><XCircle /></button></div>
         <div className="detail-grid">
           <Detail label="类型" value={cardTypeLabels[props.card.card_type]} />
           <Detail label="答案" value={props.card.back} />
@@ -1794,7 +1908,7 @@ function CardDetail(props: { card: Card; onClose: () => void }) {
           <Detail label="音标" value={props.card.phonetic || "无"} />
           <Detail label="例句" value={props.card.example || "无"} />
           <Detail label="助记" value={props.card.mnemonic || "无"} />
-          <Detail label="选项" value={choices.length ? choices.join(" / ") : "无"} />
+          <Detail label="选项" value={choices.length ? choices.join("\n") : "无"} />
           <Detail label="备注" value={props.card.note || "无"} />
         </div>
       </section>
@@ -1803,7 +1917,7 @@ function CardDetail(props: { card: Card; onClose: () => void }) {
 }
 
 function Detail(props: { label: string; value: string }) {
-  return <div className="detail-item"><span>{props.label}</span><strong>{props.value}</strong></div>;
+  return <div className="detail-item"><span>{props.label}</span><strong><MarkdownText value={props.value} /></strong></div>;
 }
 
 function ConflictDialog(props: { conflict: { id: number; payload: CardPayload; serverCard: Card }; onKeepServer: () => Promise<void>; onOverwrite: () => Promise<void> }) {
@@ -1813,8 +1927,8 @@ function ConflictDialog(props: { conflict: { id: number; payload: CardPayload; s
         <div className="modal-title"><h2><AlertTriangle />同步冲突</h2></div>
         <p className="hint">这张卡片已在其他设备修改。请选择保留服务器版本，或用本机编辑覆盖。</p>
         <div className="conflict-grid">
-          <div><h3>服务器版本</h3><p>{props.conflict.serverCard.front}</p><small>{props.conflict.serverCard.back}</small></div>
-          <div><h3>本机编辑</h3><p>{props.conflict.payload.front}</p><small>{props.conflict.payload.back}</small></div>
+          <div><h3>服务器版本</h3><p><MarkdownText value={props.conflict.serverCard.front} /></p><small><MarkdownText value={props.conflict.serverCard.back} /></small></div>
+          <div><h3>本机编辑</h3><p><MarkdownText value={String(props.conflict.payload.front ?? "")} /></p><small><MarkdownText value={String(props.conflict.payload.back ?? "")} /></small></div>
         </div>
         <div className="rating-row">
           <button className="primary-button secondary-button" onClick={props.onKeepServer}>保留服务器版本</button>

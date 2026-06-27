@@ -793,6 +793,16 @@ textarea:focus {
   grid-column: 1 / -1;
 }
 
+.advanced-fields .smart-textarea:first-child,
+.card-form .smart-textarea {
+  grid-column: 1 / -1;
+}
+
+.smart-textarea {
+  min-height: 108px;
+  resize: vertical;
+}
+
 .word-card {
   align-items: flex-start;
 }
@@ -1222,6 +1232,43 @@ textarea:focus {
   font-weight: 950;
 }
 
+.markdown-text {
+  display: grid;
+  gap: 0.42em;
+  white-space: normal;
+  overflow-wrap: anywhere;
+}
+
+.markdown-text :is(strong, em, code, a) {
+  overflow-wrap: anywhere;
+}
+
+.markdown-text code {
+  padding: 0.08em 0.32em;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: color-mix(in srgb, var(--surface), var(--primary-soft) 48%);
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 0.92em;
+}
+
+.markdown-text a {
+  color: var(--primary-strong);
+}
+
+.markdown-text ul,
+.markdown-text ol {
+  display: grid;
+  gap: 0.24em;
+  margin: 0;
+  padding-left: 1.25em;
+  text-align: left;
+}
+
+.markdown-paragraph {
+  display: block;
+}
+
 .flip-card .word-face,
 .flip-card .word-back {
   display: grid;
@@ -1267,7 +1314,8 @@ textarea:focus {
   gap: 16px;
 }
 
-.question-box p {
+.question-box p,
+.question-text {
   width: min(840px, 100%);
   margin: 0;
   font-size: var(--study-question-size);
@@ -1275,25 +1323,40 @@ textarea:focus {
   line-height: var(--study-line-height);
 }
 
-.question-box small {
+.question-box small,
+.question-note {
   width: min(840px, 100%);
   font-size: var(--study-small-size);
   color: var(--muted);
 }
 
-.choice-grid {
+.choice-area {
   display: grid;
   width: min(680px, 100%);
+  gap: 12px;
+}
+
+.choice-area.medium {
+  width: min(860px, 100%);
+}
+
+.choice-area.long {
+  width: min(940px, 100%);
+}
+
+.choice-grid {
+  display: grid;
+  width: 100%;
   grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 12px;
 }
 
 .choice-grid.medium {
-  width: min(860px, 100%);
+  width: 100%;
 }
 
 .choice-grid.long {
-  width: min(940px, 100%);
+  width: 100%;
   grid-template-columns: 1fr;
 }
 
@@ -1313,6 +1376,10 @@ textarea:focus {
   overflow-wrap: anywhere;
   white-space: normal;
   box-shadow: inset 0 -3px 0 color-mix(in srgb, var(--blue), transparent 72%);
+}
+
+.choice-grid button .markdown-text {
+  width: 100%;
 }
 
 .choice-grid.medium button,
@@ -1409,7 +1476,7 @@ textarea:focus {
 
 .result {
   display: grid;
-  width: min(680px, 100%);
+  width: 100%;
   gap: 6px;
   padding: 12px;
   border-radius: 8px;

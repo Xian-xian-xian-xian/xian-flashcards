@@ -39,7 +39,7 @@ type CardType = "basic" | "word" | "choice" | "blank";
 const maxDeckDepth = 5;
 const sessionCookieName = "flashcards_session";
 const sessionDays = 30;
-const appVersion = "0.2.7";
+const appVersion = "0.2.8";
 const timeZone = "Asia/Shanghai";
 const normalizedUsers = new Set<number>();
 
@@ -106,7 +106,7 @@ function normalizeChoices(value: unknown, fallback: string[] = []) {
       raw = fallback;
     }
   } else if (typeof value === "string") {
-    raw = value.split(/[|；;]/);
+    raw = value.split(/[|；;\n]+/);
   }
   return Array.from(new Set(raw.map((item: unknown) => String(item ?? "").trim()).filter(Boolean))).slice(0, 8);
 }
@@ -151,7 +151,7 @@ function importChoiceValues(row: Record<string, unknown>) {
   return normalizeChoices([
     ...optionValues,
     rowValue(row, ["options", "Options", "选项", "候选项"])
-  ].flatMap((value) => String(value ?? "").split(/[|；;]/)));
+  ].flatMap((value) => String(value ?? "").split(/[|；;\n]+/)));
 }
 
 function inferCardType(row: Record<string, unknown>, front: string, choices: string[]): CardType {
@@ -1005,6 +1005,7 @@ app.get("/api/settings", (_req, res) => {
     dailyNewGoal: getDailyGoal(userId),
     studyTextScale: clampStudyTextScale(getUserSetting(userId, "studyTextScale", "1")),
     studyTextAlign: getUserSetting(userId, "studyTextAlign", "center") === "left" ? "left" : "center",
+    studyChoiceLayout: ["one", "two"].includes(getUserSetting(userId, "studyChoiceLayout", "auto")) ? getUserSetting(userId, "studyChoiceLayout", "auto") : "auto",
     studyLineHeight: clampStudyLineHeight(getUserSetting(userId, "studyLineHeight", "1.5")),
     studyFontFamily: normalizeStudyFontFamily(getUserSetting(userId, "studyFontFamily", "system"))
   });
@@ -1012,7 +1013,7 @@ app.get("/api/settings", (_req, res) => {
 
 app.put("/api/settings", (req, res) => {
   const userId = currentUserId(res);
-  for (const key of ["theme", "voiceLanguage", "notifications", "autoSpeak", "dailyNewGoal", "studyTextScale", "studyTextAlign", "studyLineHeight", "studyFontFamily"]) {
+  for (const key of ["theme", "voiceLanguage", "notifications", "autoSpeak", "dailyNewGoal", "studyTextScale", "studyTextAlign", "studyChoiceLayout", "studyLineHeight", "studyFontFamily"]) {
     if (key === "studyTextScale" && (typeof req.body[key] === "string" || typeof req.body[key] === "number")) {
       setUserSetting(userId, key, String(clampStudyTextScale(req.body[key])));
       continue;
@@ -1022,6 +1023,10 @@ app.put("/api/settings", (req, res) => {
       continue;
     }
     if (key === "studyTextAlign" && (req.body[key] === "left" || req.body[key] === "center")) {
+      setUserSetting(userId, key, req.body[key]);
+      continue;
+    }
+    if (key === "studyChoiceLayout" && ["auto", "one", "two"].includes(req.body[key])) {
       setUserSetting(userId, key, req.body[key]);
       continue;
     }
