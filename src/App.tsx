@@ -22,6 +22,8 @@ import {
   MoreHorizontal,
   Moon,
   MoveRight,
+  PanelLeftClose,
+  PanelLeftOpen,
   Plus,
   RefreshCw,
   RotateCcw,
@@ -49,7 +51,7 @@ import type { Card, CardType, DailyTask, Deck, ReviewRating, ReviewSnapshot, Set
 type View = "home" | "deck" | "study" | "import" | "settings" | "about";
 type SyncState = "idle" | "syncing" | "success" | "error" | "conflict";
 
-const version = "0.2.8";
+const version = "0.2.9";
 
 const cardTypeLabels: Record<CardType, string> = {
   basic: "普通卡",
@@ -1017,6 +1019,7 @@ function DeckView(props: {
   const [detailCard, setDetailCard] = useState<Card | null>(null);
   const [selectedCardIds, setSelectedCardIds] = useState<number[]>([]);
   const [batchTargetDeckId, setBatchTargetDeckId] = useState<number | null>(props.selectedDeckId);
+  const [deckPanelCollapsed, setDeckPanelCollapsed] = useState(false);
   const [busy, setBusy] = useState("");
 
   const allVisibleSelected = props.cards.length > 0 && props.cards.every((card) => selectedCardIds.includes(card.id));
@@ -1094,10 +1097,18 @@ function DeckView(props: {
     }
   }
 
+  function selectDeck(id: number) {
+    props.onSelectDeck(id);
+    setDeckPanelCollapsed(true);
+  }
+
   return (
-    <section className="two-column">
-      <div className="panel">
-        <h2>卡组</h2>
+    <section className={`two-column deck-workspace ${deckPanelCollapsed ? "deck-panel-collapsed" : ""}`}>
+      <div className="panel deck-sidebar-panel">
+        <div className="panel-heading">
+          <h2>卡组</h2>
+          <button className="mini-button" title="隐藏卡组列表" onClick={() => setDeckPanelCollapsed(true)}><PanelLeftClose /></button>
+        </div>
         <form className="inline-form" onSubmit={addDeck}>
           <input value={deckName} onChange={(event) => setDeckName(event.target.value)} placeholder="新卡组名称" />
           <select value={parentDeckId ?? ""} onChange={(event) => setParentDeckId(event.target.value ? Number(event.target.value) : null)}>
@@ -1111,7 +1122,7 @@ function DeckView(props: {
         <div className="deck-list">
           {props.decks.map((deck) => (
             <div className={`deck-list-row depth-${Math.min(deck.depth, 5)}`} key={deck.id}>
-              <button className={`deck-list-item ${deck.id === props.selectedDeckId ? "active" : ""}`} onClick={() => props.onSelectDeck(deck.id)}>
+              <button className={`deck-list-item ${deck.id === props.selectedDeckId ? "active" : ""}`} onClick={() => selectDeck(deck.id)}>
                 <span className="deck-name">{deck.depth > 1 && <i />}<strong>{deck.name}</strong></span>
                 <span className="deck-count">{deck.total_card_count || deck.card_count || 0} 张</span>
               </button>
@@ -1139,6 +1150,9 @@ function DeckView(props: {
 
       <div className="panel wide-panel">
         <div className="toolbar">
+          {deckPanelCollapsed && (
+            <button className="mini-button" title="显示卡组列表" onClick={() => setDeckPanelCollapsed(false)}><PanelLeftOpen /></button>
+          )}
           <div className="search"><Search /><input value={props.search} onChange={(event) => props.onSearch(event.target.value)} placeholder="搜索题目、答案、选项、例句" /></div>
         </div>
         <CardEditor onSubmit={props.onCreateCard} />
@@ -1587,9 +1601,9 @@ function StudyView(props: {
               {Array.from({ length: 12 }, (_, index) => <i key={index} />)}
             </div>
           )}
-          <div className="progress-line">
+          <div className="progress-line" style={{ "--progress-ratio": String(Math.min(completed / Math.max(total, 1), 1)) } as CSSProperties}>
             <span>{completed}</span>
-            <div><i style={{ width: `${Math.min((completed / Math.max(total, 1)) * 100, 100)}%` }} /></div>
+            <div><i /></div>
             <span>{total}</span>
           </div>
           <div className="study-actions">
@@ -1662,7 +1676,7 @@ function StudyView(props: {
             </button>
           )}
           {card.card_type === "choice" && (
-            <div className="question-box">
+            <div className={`question-box choice-question ${choiceLayoutClass(choices, props.studyChoiceLayout)}`}>
               <MarkdownText value={card.front} className="question-text" />
               <ChoiceArea choices={choices} answer={card.back} selected={selectedChoice} checked={checked} layout={props.studyChoiceLayout} onChoose={checkChoice}>
                 {checked && <AnswerFeedback checked={checked} correct={displayCorrect} explanation={explanation} selected={selectedChoice} />}
@@ -1878,6 +1892,7 @@ function AboutView(props: { syncStatus: SyncStatus | null }) {
       <div className="about-title"><Info /><div><p className="eyebrow">闪记</p><h2>版本 {version}</h2></div></div>
       <div className="schedule-box changelog-box">
         <h3>更新日志</h3>
+        <div className="changelog-row"><strong>0.2.9</strong><span>2026-06-27</span><p>修复手机端布局挤压；卡组列表支持点击后隐藏和手动展开；选择题一列时题干与选项对齐；优化学习进度条动画流畅度。</p></div>
         <div className="changelog-row"><strong>0.2.8</strong><span>2026-06-27</span><p>支持 Markdown 文本展示；选项和解析保留换行；长文本编辑自动展开；选择题可手动切换一列或两列；解析宽度与选项区域一致。</p></div>
         <div className="changelog-row"><strong>0.2.7</strong><span>2026-06-27</span><p>编辑学习中卡片后即时刷新本轮内容；选择题选项跟随左对齐；字体支持读取和输入系统字体；升级打卡完成感和项目名称。</p></div>
         <div className="changelog-row"><strong>0.2.6</strong><span>2026-06-27</span><p>升级学习页排版控制，新增字号、行距、对齐和字体按钮选择；修正左对齐语义；优化全屏和竖屏手机体验；新增整组完成动画音效和自适应选择题选项布局。</p></div>
