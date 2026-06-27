@@ -39,7 +39,7 @@ type CardType = "basic" | "word" | "choice" | "blank";
 const maxDeckDepth = 5;
 const sessionCookieName = "flashcards_session";
 const sessionDays = 30;
-const appVersion = "0.2.5";
+const appVersion = "0.2.6";
 const timeZone = "Asia/Shanghai";
 const normalizedUsers = new Set<number>();
 
@@ -171,6 +171,17 @@ function clampStudyTextScale(value: unknown) {
   const scale = Number(value);
   if (!Number.isFinite(scale)) return 1;
   return Math.min(1.35, Math.max(0.85, Math.round(scale * 100) / 100));
+}
+
+function clampStudyLineHeight(value: unknown) {
+  const lineHeight = Number(value);
+  if (!Number.isFinite(lineHeight)) return 1.5;
+  const options = [1.2, 1.4, 1.5, 1.6, 1.8, 2];
+  return options.reduce((closest, option) => Math.abs(option - lineHeight) < Math.abs(closest - lineHeight) ? option : closest, 1.6);
+}
+
+function normalizeStudyFontFamily(value: unknown) {
+  return ["system", "rounded", "serif", "mono"].includes(String(value)) ? String(value) : "system";
 }
 
 function parseCookies(header: string | undefined) {
@@ -990,18 +1001,28 @@ app.get("/api/settings", (_req, res) => {
     autoSpeak: getUserSetting(userId, "autoSpeak", "off"),
     dailyNewGoal: getDailyGoal(userId),
     studyTextScale: clampStudyTextScale(getUserSetting(userId, "studyTextScale", "1")),
-    studyTextAlign: getUserSetting(userId, "studyTextAlign", "center") === "left" ? "left" : "center"
+    studyTextAlign: getUserSetting(userId, "studyTextAlign", "center") === "left" ? "left" : "center",
+    studyLineHeight: clampStudyLineHeight(getUserSetting(userId, "studyLineHeight", "1.5")),
+    studyFontFamily: normalizeStudyFontFamily(getUserSetting(userId, "studyFontFamily", "system"))
   });
 });
 
 app.put("/api/settings", (req, res) => {
   const userId = currentUserId(res);
-  for (const key of ["theme", "voiceLanguage", "notifications", "autoSpeak", "dailyNewGoal", "studyTextScale", "studyTextAlign"]) {
+  for (const key of ["theme", "voiceLanguage", "notifications", "autoSpeak", "dailyNewGoal", "studyTextScale", "studyTextAlign", "studyLineHeight", "studyFontFamily"]) {
     if (key === "studyTextScale" && (typeof req.body[key] === "string" || typeof req.body[key] === "number")) {
       setUserSetting(userId, key, String(clampStudyTextScale(req.body[key])));
       continue;
     }
+    if (key === "studyLineHeight" && (typeof req.body[key] === "string" || typeof req.body[key] === "number")) {
+      setUserSetting(userId, key, String(clampStudyLineHeight(req.body[key])));
+      continue;
+    }
     if (key === "studyTextAlign" && (req.body[key] === "left" || req.body[key] === "center")) {
+      setUserSetting(userId, key, req.body[key]);
+      continue;
+    }
+    if (key === "studyFontFamily" && ["system", "rounded", "serif", "mono"].includes(req.body[key])) {
       setUserSetting(userId, key, req.body[key]);
       continue;
     }

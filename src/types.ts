@@ -64,6 +64,8 @@ export type Settings = {
   dailyNewGoal: number;
   studyTextScale: number;
   studyTextAlign: "center" | "left";
+  studyLineHeight: number;
+  studyFontFamily: "system" | "rounded" | "serif" | "mono";
 };
 
 export type User = {

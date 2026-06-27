@@ -35,18 +35,19 @@ import {
   Sun,
   Target,
   Trash2,
+  Type,
   User as UserIcon,
   Volume2,
   XCircle
 } from "lucide-react";
-import { CSSProperties, FormEvent, useEffect, useMemo, useState } from "react";
+import { CSSProperties, FormEvent, ReactNode, useEffect, useMemo, useState } from "react";
 import { api, type CardPayload, type ConflictError } from "./api";
 import type { Card, CardType, DailyTask, Deck, ReviewRating, ReviewSnapshot, Settings, Stats, SyncStatus, ThemeMode, User } from "./types";
 
 type View = "home" | "deck" | "study" | "import" | "settings" | "about";
 type SyncState = "idle" | "syncing" | "success" | "error" | "conflict";
 
-const version = "0.2.5";
+const version = "0.2.6";
 
 const cardTypeLabels: Record<CardType, string> = {
   basic: "普通卡",
@@ -205,8 +206,66 @@ function playAnswerSound(result: "right" | "wrong") {
   }
 }
 
+function playCompletionSound() {
+  try {
+    const AudioContextClass = window.AudioContext || (window as typeof window & { webkitAudioContext?: typeof AudioContext }).webkitAudioContext;
+    if (!AudioContextClass) return;
+    const context = new AudioContextClass();
+    const master = context.createGain();
+    master.connect(context.destination);
+    master.gain.setValueAtTime(0.0001, context.currentTime);
+    master.gain.exponentialRampToValueAtTime(0.18, context.currentTime + 0.02);
+    master.gain.exponentialRampToValueAtTime(0.0001, context.currentTime + 1.25);
+
+    [392, 523.25, 659.25, 783.99, 1046.5].forEach((frequency, index) => {
+      const oscillator = context.createOscillator();
+      const gain = context.createGain();
+      oscillator.type = index % 2 === 0 ? "sine" : "triangle";
+      oscillator.frequency.setValueAtTime(frequency, context.currentTime + index * 0.09);
+      gain.gain.setValueAtTime(0.0001, context.currentTime + index * 0.09);
+      gain.gain.exponentialRampToValueAtTime(0.08, context.currentTime + 0.04 + index * 0.09);
+      gain.gain.exponentialRampToValueAtTime(0.0001, context.currentTime + 0.32 + index * 0.09);
+      oscillator.connect(gain).connect(master);
+      oscillator.start(context.currentTime + index * 0.09);
+      oscillator.stop(context.currentTime + 0.38 + index * 0.09);
+    });
+
+    [1568, 2093, 2637, 3136].forEach((frequency, index) => {
+      const sparkle = context.createOscillator();
+      const gain = context.createGain();
+      sparkle.type = "triangle";
+      sparkle.frequency.setValueAtTime(frequency, context.currentTime + 0.45 + index * 0.07);
+      gain.gain.setValueAtTime(0.0001, context.currentTime + 0.45 + index * 0.07);
+      gain.gain.exponentialRampToValueAtTime(0.035, context.currentTime + 0.47 + index * 0.07);
+      gain.gain.exponentialRampToValueAtTime(0.0001, context.currentTime + 0.62 + index * 0.07);
+      sparkle.connect(gain).connect(master);
+      sparkle.start(context.currentTime + 0.45 + index * 0.07);
+      sparkle.stop(context.currentTime + 0.68 + index * 0.07);
+    });
+    window.setTimeout(() => context.close().catch(() => undefined), 1500);
+  } catch {
+    // Completion animation still gives feedback when audio is unavailable.
+  }
+}
+
 function delay(ms: number) {
   return new Promise((resolve) => window.setTimeout(resolve, ms));
+}
+
+const studyFontOptions: Array<{ value: Settings["studyFontFamily"]; label: string }> = [
+  { value: "system", label: "系统" },
+  { value: "rounded", label: "圆体" },
+  { value: "serif", label: "宋体" },
+  { value: "mono", label: "等宽" }
+];
+
+function studyFontStack(value: Settings["studyFontFamily"]) {
+  return {
+    system: "Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, \"Segoe UI\", \"Microsoft YaHei\", sans-serif",
+    rounded: "ui-rounded, \"PingFang SC\", \"Microsoft YaHei\", \"Hiragino Sans GB\", sans-serif",
+    serif: "\"Noto Serif CJK SC\", \"Songti SC\", SimSun, serif",
+    mono: "\"SFMono-Regular\", Consolas, \"Liberation Mono\", \"Microsoft YaHei Mono\", monospace"
+  }[value];
 }
 
 export default function App() {
@@ -227,7 +286,9 @@ export default function App() {
     autoSpeak: "off",
     dailyNewGoal: 20,
     studyTextScale: 1,
-    studyTextAlign: "center"
+    studyTextAlign: "center",
+    studyLineHeight: 1.5,
+    studyFontFamily: "system"
   });
   const [dailyTask, setDailyTask] = useState<DailyTask>(emptyDailyTask);
   const [syncStatus, setSyncStatus] = useState<SyncStatus | null>(null);
@@ -565,6 +626,8 @@ export default function App() {
             selectedDeck={studyRootDeck}
             studyTextScale={settings.studyTextScale}
             studyTextAlign={settings.studyTextAlign}
+            studyLineHeight={settings.studyLineHeight}
+            studyFontFamily={settings.studyFontFamily}
             onStudyTextScale={async (studyTextScale) => {
               await api.saveSettings({ studyTextScale });
               setSettings((current) => ({ ...current, studyTextScale }));
@@ -572,6 +635,14 @@ export default function App() {
             onStudyTextAlign={async (studyTextAlign) => {
               await api.saveSettings({ studyTextAlign });
               setSettings((current) => ({ ...current, studyTextAlign }));
+            }}
+            onStudyLineHeight={async (studyLineHeight) => {
+              await api.saveSettings({ studyLineHeight });
+              setSettings((current) => ({ ...current, studyLineHeight }));
+            }}
+            onStudyFontFamily={async (studyFontFamily) => {
+              await api.saveSettings({ studyFontFamily });
+              setSettings((current) => ({ ...current, studyFontFamily }));
             }}
             autoSpeak={settings.autoSpeak === "on"}
             onAnswer={handleAnswer}
@@ -1093,8 +1164,12 @@ function StudyView(props: {
   selectedDeck?: Deck;
   studyTextScale: number;
   studyTextAlign: Settings["studyTextAlign"];
+  studyLineHeight: number;
+  studyFontFamily: Settings["studyFontFamily"];
   onStudyTextScale: (scale: number) => Promise<void>;
   onStudyTextAlign: (align: Settings["studyTextAlign"]) => Promise<void>;
+  onStudyLineHeight: (lineHeight: number) => Promise<void>;
+  onStudyFontFamily: (fontFamily: Settings["studyFontFamily"]) => Promise<void>;
   autoSpeak: boolean;
   onAnswer: (card: Card, rating: ReviewRating) => Promise<{ stage: number; dueAt: string; previous: ReviewSnapshot }>;
   onUndoAnswer: (card: Card, snapshot: ReviewSnapshot) => Promise<void>;
@@ -1124,9 +1199,11 @@ function StudyView(props: {
   const [busy, setBusy] = useState("");
   const [scaleDraft, setScaleDraft] = useState(props.studyTextScale);
   const [scaleSaving, setScaleSaving] = useState(false);
+  const [activeTextTool, setActiveTextTool] = useState<"scale" | "lineHeight" | "align" | "font" | null>(null);
   const [immersive, setImmersive] = useState(false);
   const [cardMotion, setCardMotion] = useState<"entering" | "leaving" | "idle">("entering");
   const [celebrationKey, setCelebrationKey] = useState(0);
+  const [completionPlayed, setCompletionPlayed] = useState(false);
   const card = queue[0];
 
   useEffect(() => {
@@ -1145,6 +1222,13 @@ function StudyView(props: {
     if (props.autoSpeak && card && isWordCard(card)) props.onSpeak(card.front, card.language ?? props.selectedDeck?.language);
     return () => window.clearTimeout(timer);
   }, [card?.id, props.autoSpeak]);
+
+  useEffect(() => {
+    if (sessionCards.length > 0 && !card && !completionPlayed) {
+      playCompletionSound();
+      setCompletionPlayed(true);
+    }
+  }, [card, completionPlayed, sessionCards.length]);
 
   useEffect(() => {
     setScaleDraft(props.studyTextScale);
@@ -1175,6 +1259,7 @@ function StudyView(props: {
       setChecked(null);
       setSelectedChoice("");
       setCelebrationKey(0);
+      setCompletionPlayed(false);
       setEditingStudyCard(null);
       setCardMotion("entering");
     } finally {
@@ -1225,6 +1310,7 @@ function StudyView(props: {
       setAnswer(previous.answer);
       setChecked(previous.checked);
       setSelectedChoice(previous.selectedChoice);
+      setCompletionPlayed(false);
     } finally {
       setBusy("");
     }
@@ -1277,7 +1363,9 @@ function StudyView(props: {
     "--study-question-size": `${Math.round(24 * scale)}px`,
     "--study-choice-size": `${Math.round(16 * scale)}px`,
     "--study-result-size": `${Math.round(16 * scale)}px`,
-    "--study-text-align": props.studyTextAlign
+    "--study-text-align": props.studyTextAlign,
+    "--study-line-height": String(props.studyLineHeight),
+    "--study-font-family": studyFontStack(props.studyFontFamily)
   } as CSSProperties & Record<string, string>;
 
   async function saveScale(nextScale: number) {
@@ -1293,6 +1381,16 @@ function StudyView(props: {
   async function saveTextAlign(nextAlign: Settings["studyTextAlign"]) {
     if (nextAlign === props.studyTextAlign) return;
     await props.onStudyTextAlign(nextAlign);
+  }
+
+  async function saveLineHeight(nextLineHeight: number) {
+    if (Math.abs(nextLineHeight - props.studyLineHeight) < 0.01) return;
+    await props.onStudyLineHeight(nextLineHeight);
+  }
+
+  async function saveFontFamily(nextFontFamily: Settings["studyFontFamily"]) {
+    if (nextFontFamily === props.studyFontFamily) return;
+    await props.onStudyFontFamily(nextFontFamily);
   }
 
   async function toggleImmersive() {
@@ -1331,7 +1429,9 @@ function StudyView(props: {
         </div>
       </div>
 
-      {!card ? <EmptyState text={total > 0 ? "本轮已完成。" : studyKind === "new" ? "这个大卡组暂无可新学卡片。" : "这个大卡组暂无到期复习卡片。"} /> : (
+      {!card ? total > 0 ? (
+        <StudyComplete total={total} completed={completed} onRestart={() => startSession()} busy={busy === "session"} />
+      ) : <EmptyState text={studyKind === "new" ? "这个大卡组暂无可新学卡片。" : "这个大卡组暂无到期复习卡片。"} /> : (
         <div className={`study-panel ${cardMotion} align-${props.studyTextAlign} ${checked === "right" ? "celebrating" : ""}`} style={studyStyle}>
           {checked === "right" && (
             <div className="answer-celebration" key={celebrationKey} aria-hidden="true">
@@ -1348,15 +1448,41 @@ function StudyView(props: {
           <div className="study-actions">
             <span className="type-pill">{cardTypeLabels[card.card_type]}</span>
             <span className="type-pill">待掌握 {queue.length}</span>
-            <label className="study-scale-control" title="学习字号">
-              <SlidersHorizontal />
-              <input type="range" min={0.85} max={1.35} step={0.05} value={scaleDraft} onChange={(event) => saveScale(Number(event.target.value))} />
-              <strong>{scaleSaving ? "保存中" : `${Math.round(scaleDraft * 100)}%`}</strong>
-            </label>
-            <div className="mode-tabs align-tabs" title="学习文本对齐">
-              <button className={props.studyTextAlign === "left" ? "active" : ""} onClick={() => saveTextAlign("left")}><AlignLeft /></button>
-              <button className={props.studyTextAlign === "center" ? "active" : ""} onClick={() => saveTextAlign("center")}><AlignCenter /></button>
-            </div>
+            <TextToolButton icon={<SlidersHorizontal />} title="学习字号" active={activeTextTool === "scale"} onClick={() => setActiveTextTool(activeTextTool === "scale" ? null : "scale")}>
+              {activeTextTool === "scale" && (
+                <div className="text-tool-popover">
+                  {[0.85, 1, 1.15, 1.25, 1.35].map((value) => (
+                    <button key={value} className={Math.abs(scaleDraft - value) < 0.01 ? "active" : ""} onClick={() => saveScale(value)}>{scaleSaving && Math.abs(scaleDraft - value) < 0.01 ? "保存中" : `${Math.round(value * 100)}%`}</button>
+                  ))}
+                </div>
+              )}
+            </TextToolButton>
+            <TextToolButton icon={<MoreHorizontal />} title="学习行距" active={activeTextTool === "lineHeight"} onClick={() => setActiveTextTool(activeTextTool === "lineHeight" ? null : "lineHeight")}>
+              {activeTextTool === "lineHeight" && (
+                <div className="text-tool-popover compact">
+                  {[1.2, 1.4, 1.5, 1.6, 1.8, 2].map((value) => (
+                    <button key={value} className={Math.abs(props.studyLineHeight - value) < 0.01 ? "active" : ""} onClick={() => saveLineHeight(value)}>{value.toFixed(value === 2 ? 0 : 1)}</button>
+                  ))}
+                </div>
+              )}
+            </TextToolButton>
+            <TextToolButton icon={props.studyTextAlign === "left" ? <AlignLeft /> : <AlignCenter />} title="学习文本对齐" active={activeTextTool === "align"} onClick={() => setActiveTextTool(activeTextTool === "align" ? null : "align")}>
+              {activeTextTool === "align" && (
+                <div className="text-tool-popover compact">
+                  <button className={props.studyTextAlign === "left" ? "active" : ""} onClick={() => saveTextAlign("left")}><AlignLeft />左对齐</button>
+                  <button className={props.studyTextAlign === "center" ? "active" : ""} onClick={() => saveTextAlign("center")}><AlignCenter />居中</button>
+                </div>
+              )}
+            </TextToolButton>
+            <TextToolButton icon={<Type />} title="学习字体" active={activeTextTool === "font"} onClick={() => setActiveTextTool(activeTextTool === "font" ? null : "font")}>
+              {activeTextTool === "font" && (
+                <div className="text-tool-popover font-popover">
+                  {studyFontOptions.map((option) => (
+                    <button key={option.value} className={props.studyFontFamily === option.value ? "active" : ""} onClick={() => saveFontFamily(option.value)}>{option.label}</button>
+                  ))}
+                </div>
+              )}
+            </TextToolButton>
             <button className="mini-button" title={immersive ? "退出沉浸学习" : "沉浸学习"} onClick={toggleImmersive}>{immersive ? <Minimize2 /> : <Maximize2 />}</button>
             <button className="mini-button" title="撤销上一张" disabled={history.length === 0 || Boolean(busy)} onClick={undo}><ArrowLeft /></button>
             <button className="mini-button" title="编辑当前卡片" onClick={() => setEditingStudyCard(card)}><Edit3 /></button>
@@ -1400,6 +1526,32 @@ function StudyView(props: {
   );
 }
 
+function TextToolButton(props: { icon: ReactNode; title: string; active: boolean; onClick: () => void; children: ReactNode }) {
+  return (
+    <div className="text-tool">
+      <button className={`mini-button ${props.active ? "active" : ""}`} title={props.title} onClick={props.onClick}>
+        {props.icon}
+      </button>
+      {props.children}
+    </div>
+  );
+}
+
+function StudyComplete(props: { total: number; completed: number; onRestart: () => void; busy: boolean }) {
+  return (
+    <section className="study-complete-panel">
+      <div className="finish-burst" aria-hidden="true">
+        <span className="finish-orbit" />
+        {Array.from({ length: 18 }, (_, index) => <i key={index} />)}
+      </div>
+      <p className="eyebrow">本轮完成</p>
+      <h2>{props.completed}/{props.total}</h2>
+      <p>这一组已经全部掌握，今天的脑力很亮。</p>
+      <button className="primary-button" disabled={props.busy} onClick={props.onRestart}><Sparkles />{props.busy ? "载入中" : "再来一轮"}</button>
+    </section>
+  );
+}
+
 function CardFront(props: { card: Card }) {
   if (props.card.card_type === "blank") return <span>{blankPrompt(props.card.front)}</span>;
   if (props.card.card_type === "choice") return <span>{props.card.front}</span>;
@@ -1423,8 +1575,15 @@ function CardBack(props: { card: Card }) {
 }
 
 function ChoiceGrid(props: { choices: string[]; answer: string; selected: string; checked: "right" | "wrong" | null; onChoose: (choice: string) => void }) {
+  const maxLength = Math.max(0, ...props.choices.map((choice) => choice.length));
+  const totalLength = props.choices.reduce((sum, choice) => sum + choice.length, 0);
+  const layout = maxLength > 34 || totalLength > 120 || props.choices.length > 5
+    ? "long"
+    : maxLength > 16 || totalLength > 64
+      ? "medium"
+      : "short";
   return (
-    <div className="choice-grid">
+    <div className={`choice-grid ${layout}`}>
       {props.choices.map((choice, index) => {
         const isSelected = choice === props.selected;
         const isAnswer = answersMatch(choice, props.answer);
@@ -1536,6 +1695,7 @@ function AboutView(props: { syncStatus: SyncStatus | null }) {
       <div className="about-title"><Info /><div><p className="eyebrow">Xian 闪记卡</p><h2>版本 {version}</h2></div></div>
       <div className="schedule-box changelog-box">
         <h3>更新日志</h3>
+        <div className="changelog-row"><strong>0.2.6</strong><span>2026-06-27</span><p>升级学习页排版控制，新增字号、行距、对齐和字体按钮选择；修正左对齐语义；优化全屏和竖屏手机体验；新增整组完成动画音效和自适应选择题选项布局。</p></div>
         <div className="changelog-row"><strong>0.2.5</strong><span>2026-06-27</span><p>新增答题音效、卡片翻转和切题动效；评级后不再弹出右下角提示；强化连续打卡展示；学习页支持文本左对齐或居中。</p></div>
         <div className="changelog-row"><strong>0.2.4</strong><span>2026-06-26</span><p>修复选择题答案标签匹配和第五选项问题；学习页按卡片类型自动显示；字号调整移入学习页；新增沉浸式学习并移除卡片悬停倾斜。</p></div>
         <div className="changelog-row"><strong>0.2.3</strong><span>2026-06-26</span><p>修复填写判定、每日新学统计、重复提交、单卡删除确认、设置保存、自动发音开关、导入模板、移动端导航和开发端口冲突等体验问题。</p></div>
