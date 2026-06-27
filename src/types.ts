@@ -56,6 +56,11 @@ export type Stats = {
   due_cards: number;
 };
 
+export type ReviewRemaining = {
+  newRemaining: number;
+  reviewRemaining: number;
+};
+
 export type Settings = {
   theme: ThemeMode;
   voiceLanguage: string;

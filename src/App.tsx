@@ -46,12 +46,12 @@ import {
 } from "lucide-react";
 import { CSSProperties, FormEvent, ReactNode, useEffect, useMemo, useState } from "react";
 import { api, type CardPayload, type ConflictError } from "./api";
-import type { Card, CardType, DailyTask, Deck, ReviewRating, ReviewSnapshot, Settings, Stats, SyncStatus, ThemeMode, User } from "./types";
+import type { Card, CardType, DailyTask, Deck, ReviewRating, ReviewRemaining, ReviewSnapshot, Settings, Stats, SyncStatus, ThemeMode, User } from "./types";
 
 type View = "home" | "deck" | "study" | "import" | "settings" | "about";
 type SyncState = "idle" | "syncing" | "success" | "error" | "conflict";
 
-const version = "0.2.10";
+const version = "0.2.11";
 
 const cardTypeLabels: Record<CardType, string> = {
   basic: "普通卡",
@@ -197,6 +197,16 @@ function MarkdownText(props: { value: string; className?: string }) {
         );
       })}
     </span>
+  );
+}
+
+function FeedbackBlock(props: { label: string; value: string; kind: "explanation" | "other" }) {
+  if (!props.value.trim()) return null;
+  return (
+    <div className={`feedback-block ${props.kind}`}>
+      <span>{props.label}</span>
+      <MarkdownText value={props.value} />
+    </div>
   );
 }
 
@@ -375,7 +385,7 @@ function studyFontStack(value: string) {
 
 async function queryInstalledFonts() {
   const queryLocalFonts = (window as Window & { queryLocalFonts?: () => Promise<LocalFontData[]> }).queryLocalFonts;
-  if (!queryLocalFonts) return [];
+  if (!queryLocalFonts) throw new Error("当前浏览器不支持读取系统字体");
   const fonts = await queryLocalFonts();
   return Array.from(new Set(fonts.map((font) => font.family).filter(Boolean))).sort((a, b) => a.localeCompare(b));
 }
@@ -1365,7 +1375,8 @@ function StudyView(props: {
   const [activeTextTool, setActiveTextTool] = useState<"scale" | "lineHeight" | "align" | "choiceLayout" | "font" | null>(null);
   const [installedFonts, setInstalledFonts] = useState<string[]>([]);
   const [fontLoading, setFontLoading] = useState(false);
-  const [fontDraft, setFontDraft] = useState("");
+  const [fontStatus, setFontStatus] = useState("点击读取系统字体");
+  const [remaining, setRemaining] = useState<ReviewRemaining>({ newRemaining: 0, reviewRemaining: 0 });
   const [immersive, setImmersive] = useState(false);
   const [answerDockOpen, setAnswerDockOpen] = useState(true);
   const [cardMotion, setCardMotion] = useState<"entering" | "leaving" | "idle">("entering");
@@ -1376,6 +1387,10 @@ function StudyView(props: {
   useEffect(() => {
     startSession().catch((error) => console.error(error));
   }, [studyKind, props.selectedRootDeckId]);
+
+  useEffect(() => {
+    loadRemaining().catch((error) => console.error(error));
+  }, [props.selectedRootDeckId]);
 
   useEffect(() => {
     setFlipped(false);
@@ -1431,9 +1446,18 @@ function StudyView(props: {
       setCompletionPlayed(false);
       setEditingStudyCard(null);
       setCardMotion("entering");
+      await loadRemaining();
     } finally {
       setBusy("");
     }
+  }
+
+  async function loadRemaining() {
+    if (!props.selectedRootDeckId) {
+      setRemaining({ newRemaining: 0, reviewRemaining: 0 });
+      return;
+    }
+    setRemaining(await api.reviewRemaining(props.selectedRootDeckId));
   }
 
   async function rate(rating: ReviewRating) {
@@ -1461,6 +1485,7 @@ function StudyView(props: {
       setChecked(null);
       setSelectedChoice("");
       setCelebrationKey(0);
+      await loadRemaining();
     } finally {
       setBusy("");
     }
@@ -1480,6 +1505,7 @@ function StudyView(props: {
       setChecked(previous.checked);
       setSelectedChoice(previous.selectedChoice);
       setCompletionPlayed(false);
+      await loadRemaining();
     } finally {
       setBusy("");
     }
@@ -1516,8 +1542,10 @@ function StudyView(props: {
 
   const completed = masteredIds.length;
   const total = sessionCards.length;
-  const explanation = card ? [card.example, card.note].filter(Boolean).join(" · ") : "";
-  const explanationIsLong = explanation.length > 80 || /\n|```|\$\$/.test(explanation);
+  const explanation = card?.example ?? "";
+  const otherNote = card?.note ?? "";
+  const explanationText = [explanation, otherNote].filter(Boolean).join("\n\n");
+  const explanationIsLong = explanationText.length > 80 || /\n|```|\$\$/.test(explanationText);
   const showAnswerDock = Boolean(card && checked && explanationIsLong && answerDockOpen);
   const showManualRatings = card ? card.card_type !== "choice" && card.card_type !== "blank" || checked !== null : false;
   const scale = scaleDraft;
@@ -1571,8 +1599,14 @@ function StudyView(props: {
 
   async function loadFonts() {
     setFontLoading(true);
+    setFontStatus("读取中");
     try {
-      setInstalledFonts(await queryInstalledFonts());
+      const fonts = await queryInstalledFonts();
+      setInstalledFonts(fonts);
+      setFontStatus(fonts.length > 0 ? `已读取 ${fonts.length} 个系统字体` : "没有读取到可用字体");
+    } catch (error) {
+      setInstalledFonts([]);
+      setFontStatus((error as Error).message);
     } finally {
       setFontLoading(false);
     }
@@ -1616,6 +1650,10 @@ function StudyView(props: {
           </select>
         </label>
         <div className="study-session-controls">
+          <div className="study-remaining" aria-label="剩余卡片">
+            <span>新学剩余 {remaining.newRemaining}</span>
+            <span>复习剩余 {remaining.reviewRemaining}</span>
+          </div>
           <div className="mode-tabs compact-tabs">
             <button className={studyKind === "review" ? "active" : ""} onClick={() => setStudyKind("review")}>复习</button>
             <button className={studyKind === "new" ? "active" : ""} onClick={() => setStudyKind("new")}>新学</button>
@@ -1642,118 +1680,119 @@ function StudyView(props: {
               {Array.from({ length: 12 }, (_, index) => <i key={index} />)}
             </div>
           )}
-          <div className="progress-line" style={{ "--progress-ratio": String(Math.min(completed / Math.max(total, 1), 1)) } as CSSProperties}>
-            <span>{completed}</span>
-            <div><i /></div>
-            <span>{total}</span>
-          </div>
-          <div className="study-actions">
-            <span className="type-pill">{cardTypeLabels[card.card_type]}</span>
-            <span className="type-pill">待掌握 {queue.length}</span>
-            <TextToolButton icon={<SlidersHorizontal />} title="学习字号" active={activeTextTool === "scale"} onClick={() => setActiveTextTool(activeTextTool === "scale" ? null : "scale")}>
-              {activeTextTool === "scale" && (
-                <div className="text-tool-popover">
-                  {[0.85, 1, 1.15, 1.25, 1.35].map((value) => (
-                    <button key={value} className={Math.abs(scaleDraft - value) < 0.01 ? "active" : ""} onClick={() => saveScale(value)}>{scaleSaving && Math.abs(scaleDraft - value) < 0.01 ? "保存中" : `${Math.round(value * 100)}%`}</button>
-                  ))}
-                </div>
-              )}
-            </TextToolButton>
-            <TextToolButton icon={<MoreHorizontal />} title="学习行距" active={activeTextTool === "lineHeight"} onClick={() => setActiveTextTool(activeTextTool === "lineHeight" ? null : "lineHeight")}>
-              {activeTextTool === "lineHeight" && (
-                <div className="text-tool-popover compact">
-                  {[1.2, 1.4, 1.5, 1.6, 1.8, 2].map((value) => (
-                    <button key={value} className={Math.abs(props.studyLineHeight - value) < 0.01 ? "active" : ""} onClick={() => saveLineHeight(value)}>{value.toFixed(value === 2 ? 0 : 1)}</button>
-                  ))}
-                </div>
-              )}
-            </TextToolButton>
-            <TextToolButton icon={props.studyTextAlign === "left" ? <AlignLeft /> : <AlignCenter />} title="学习文本对齐" active={activeTextTool === "align"} onClick={() => setActiveTextTool(activeTextTool === "align" ? null : "align")}>
-              {activeTextTool === "align" && (
-                <div className="text-tool-popover compact">
-                  <button className={props.studyTextAlign === "left" ? "active" : ""} onClick={() => saveTextAlign("left")}><AlignLeft />左对齐</button>
-                  <button className={props.studyTextAlign === "center" ? "active" : ""} onClick={() => saveTextAlign("center")}><AlignCenter />居中</button>
-                </div>
-              )}
-            </TextToolButton>
-            <TextToolButton icon={props.studyChoiceLayout === "one" ? <Rows2 /> : <Columns2 />} title="选项列数" active={activeTextTool === "choiceLayout"} onClick={() => setActiveTextTool(activeTextTool === "choiceLayout" ? null : "choiceLayout")}>
-              {activeTextTool === "choiceLayout" && (
-                <div className="text-tool-popover compact">
-                  <button className={props.studyChoiceLayout === "auto" ? "active" : ""} onClick={() => saveChoiceLayout("auto")}><SlidersHorizontal />自动</button>
-                  <button className={props.studyChoiceLayout === "one" ? "active" : ""} onClick={() => saveChoiceLayout("one")}><Rows2 />一列</button>
-                  <button className={props.studyChoiceLayout === "two" ? "active" : ""} onClick={() => saveChoiceLayout("two")}><Columns2 />两列</button>
-                </div>
-              )}
-            </TextToolButton>
-            <TextToolButton icon={<Type />} title="学习字体" active={activeTextTool === "font"} onClick={() => setActiveTextTool(activeTextTool === "font" ? null : "font")}>
-              {activeTextTool === "font" && (
-                <div className="text-tool-popover font-popover">
-                  {studyFontOptions.map((option) => (
-                    <button key={option.value} className={props.studyFontFamily === option.value ? "active" : ""} onClick={() => saveFontFamily(option.value)}>{option.label}</button>
-                  ))}
-                  <button onClick={loadFonts}>{fontLoading ? "读取中" : "系统字体"}</button>
-                  {installedFonts.slice(0, 16).map((font) => (
-                    <button key={font} className={props.studyFontFamily === font ? "active" : ""} style={{ fontFamily: studyFontStack(font) }} onClick={() => saveFontFamily(font)}>{font}</button>
-                  ))}
-                  <form className="font-custom-form" onSubmit={(event) => { event.preventDefault(); if (fontDraft.trim()) saveFontFamily(fontDraft.trim()); }}>
-                    <input value={fontDraft} onChange={(event) => setFontDraft(event.target.value)} placeholder="输入字体名" />
-                    <button>应用</button>
-                  </form>
-                </div>
-              )}
-            </TextToolButton>
-            <button className="mini-button" title={immersive ? "退出沉浸学习" : "沉浸学习"} onClick={toggleImmersive}>{immersive ? <Minimize2 /> : <Maximize2 />}</button>
-            <button className="mini-button" title="撤销上一张" disabled={history.length === 0 || Boolean(busy)} onClick={undo}><ArrowLeft /></button>
-            <button className="mini-button" title="编辑当前卡片" onClick={() => setEditingStudyCard(card)}><Edit3 /></button>
-            <button className="mini-button" title="发音" onClick={() => props.onSpeak(card.front, card.language ?? props.selectedDeck?.language)}><Volume2 /></button>
-          </div>
-          {editingStudyCard && <CardEditor card={editingStudyCard} onCancel={() => setEditingStudyCard(null)} onSubmit={saveStudyCard} />}
-          {card.card_type !== "choice" && card.card_type !== "blank" && (
-            <button className={`flip-card ${flipped ? "flipped" : ""}`} onClick={() => setFlipped((value) => !value)}>
-              <span className="flip-card-inner">
-                <span className="flip-card-face flip-card-front"><CardFront card={card} /></span>
-                <span className="flip-card-face flip-card-back"><CardBack card={card} /></span>
-              </span>
-            </button>
-          )}
-          {card.card_type === "choice" && (
-            <div className={`answer-layout ${showAnswerDock ? "with-dock" : ""}`}>
-              <div className={`question-box choice-question ${choiceLayoutClass(choices, props.studyChoiceLayout)}`}>
-                <MarkdownText value={card.front} className="question-text" />
-                <ChoiceArea choices={choices} answer={card.back} selected={selectedChoice} checked={checked} layout={props.studyChoiceLayout} onChoose={checkChoice}>
-                  {checked && <AnswerFeedback checked={checked} correct={displayCorrect} explanation={explanation} selected={selectedChoice} />}
-                </ChoiceArea>
-              </div>
-              {showAnswerDock && (
-                <QuestionDock
-                  card={card}
-                  choices={choices}
-                  selected={selectedChoice}
-                  answer={card.back}
-                  onClose={() => setAnswerDockOpen(false)}
-                />
-              )}
+          <div className="study-scroll">
+            <div className="progress-line" style={{ "--progress-ratio": String(Math.min(completed / Math.max(total, 1), 1)) } as CSSProperties}>
+              <span>{completed}</span>
+              <div><i /></div>
+              <span>{total}</span>
             </div>
-          )}
-          {card.card_type === "blank" && (
-            <div className={`answer-layout ${showAnswerDock ? "with-dock" : ""}`}>
-              <div className="question-box">
-                <MarkdownText value={blankPrompt(card.front)} className="question-text" />
-                {card.example && <MarkdownText value={card.example} className="question-note" />}
-                <input value={answer} onChange={(event) => { setAnswer(event.target.value); setChecked(null); }} placeholder="输入答案" />
-                <button className="primary-button" disabled={Boolean(busy)} onClick={checkWritten}>检查</button>
-                {checked && <AnswerFeedback checked={checked} correct={correctAnswer(card)} explanation={explanation} selected={answer} />}
-              </div>
-              {showAnswerDock && (
-                <QuestionDock
-                  card={card}
-                  selected={answer}
-                  answer={correctAnswer(card)}
-                  onClose={() => setAnswerDockOpen(false)}
-                />
-              )}
+            <div className="study-actions">
+              <span className="type-pill">{cardTypeLabels[card.card_type]}</span>
+              <span className="type-pill">待掌握 {queue.length}</span>
+              <span className="type-pill">新学剩余 {remaining.newRemaining}</span>
+              <span className="type-pill">复习剩余 {remaining.reviewRemaining}</span>
+              <TextToolButton icon={<SlidersHorizontal />} title="学习字号" active={activeTextTool === "scale"} onClick={() => setActiveTextTool(activeTextTool === "scale" ? null : "scale")}>
+                {activeTextTool === "scale" && (
+                  <div className="text-tool-popover">
+                    {[0.85, 1, 1.15, 1.25, 1.35].map((value) => (
+                      <button key={value} className={Math.abs(scaleDraft - value) < 0.01 ? "active" : ""} onClick={() => saveScale(value)}>{scaleSaving && Math.abs(scaleDraft - value) < 0.01 ? "保存中" : `${Math.round(value * 100)}%`}</button>
+                    ))}
+                  </div>
+                )}
+              </TextToolButton>
+              <TextToolButton icon={<MoreHorizontal />} title="学习行距" active={activeTextTool === "lineHeight"} onClick={() => setActiveTextTool(activeTextTool === "lineHeight" ? null : "lineHeight")}>
+                {activeTextTool === "lineHeight" && (
+                  <div className="text-tool-popover compact">
+                    {[1.2, 1.4, 1.5, 1.6, 1.8, 2].map((value) => (
+                      <button key={value} className={Math.abs(props.studyLineHeight - value) < 0.01 ? "active" : ""} onClick={() => saveLineHeight(value)}>{value.toFixed(value === 2 ? 0 : 1)}</button>
+                    ))}
+                  </div>
+                )}
+              </TextToolButton>
+              <TextToolButton icon={props.studyTextAlign === "left" ? <AlignLeft /> : <AlignCenter />} title="学习文本对齐" active={activeTextTool === "align"} onClick={() => setActiveTextTool(activeTextTool === "align" ? null : "align")}>
+                {activeTextTool === "align" && (
+                  <div className="text-tool-popover compact">
+                    <button className={props.studyTextAlign === "left" ? "active" : ""} onClick={() => saveTextAlign("left")}><AlignLeft />左对齐</button>
+                    <button className={props.studyTextAlign === "center" ? "active" : ""} onClick={() => saveTextAlign("center")}><AlignCenter />居中</button>
+                  </div>
+                )}
+              </TextToolButton>
+              <TextToolButton icon={props.studyChoiceLayout === "one" ? <Rows2 /> : <Columns2 />} title="选项列数" active={activeTextTool === "choiceLayout"} onClick={() => setActiveTextTool(activeTextTool === "choiceLayout" ? null : "choiceLayout")}>
+                {activeTextTool === "choiceLayout" && (
+                  <div className="text-tool-popover compact">
+                    <button className={props.studyChoiceLayout === "auto" ? "active" : ""} onClick={() => saveChoiceLayout("auto")}><SlidersHorizontal />自动</button>
+                    <button className={props.studyChoiceLayout === "one" ? "active" : ""} onClick={() => saveChoiceLayout("one")}><Rows2 />一列</button>
+                    <button className={props.studyChoiceLayout === "two" ? "active" : ""} onClick={() => saveChoiceLayout("two")}><Columns2 />两列</button>
+                  </div>
+                )}
+              </TextToolButton>
+              <TextToolButton icon={<Type />} title="学习字体" active={activeTextTool === "font"} onClick={() => setActiveTextTool(activeTextTool === "font" ? null : "font")}>
+                {activeTextTool === "font" && (
+                  <div className="text-tool-popover font-popover">
+                    {studyFontOptions.map((option) => (
+                      <button key={option.value} className={props.studyFontFamily === option.value ? "active" : ""} onClick={() => saveFontFamily(option.value)}>{option.label}</button>
+                    ))}
+                    <button onClick={loadFonts}>{fontLoading ? "读取中" : "读取系统字体"}</button>
+                    <small>{fontStatus}</small>
+                    {installedFonts.map((font) => (
+                      <button key={font} className={props.studyFontFamily === font ? "active" : ""} style={{ fontFamily: studyFontStack(font) }} onClick={() => saveFontFamily(font)}>{font}</button>
+                    ))}
+                  </div>
+                )}
+              </TextToolButton>
+              <button className="mini-button" title={immersive ? "退出沉浸学习" : "沉浸学习"} onClick={toggleImmersive}>{immersive ? <Minimize2 /> : <Maximize2 />}</button>
+              <button className="mini-button" title="撤销上一张" disabled={history.length === 0 || Boolean(busy)} onClick={undo}><ArrowLeft /></button>
+              <button className="mini-button" title="编辑当前卡片" onClick={() => setEditingStudyCard(card)}><Edit3 /></button>
+              <button className="mini-button" title="发音" onClick={() => props.onSpeak(card.front, card.language ?? props.selectedDeck?.language)}><Volume2 /></button>
             </div>
-          )}
+            {editingStudyCard && <CardEditor card={editingStudyCard} onCancel={() => setEditingStudyCard(null)} onSubmit={saveStudyCard} />}
+            {card.card_type !== "choice" && card.card_type !== "blank" && (
+              <button className={`flip-card ${flipped ? "flipped" : ""}`} onClick={() => setFlipped((value) => !value)}>
+                <span className="flip-card-inner">
+                  <span className="flip-card-face flip-card-front"><CardFront card={card} /></span>
+                  <span className="flip-card-face flip-card-back"><CardBack card={card} /></span>
+                </span>
+              </button>
+            )}
+            {card.card_type === "choice" && (
+              <div className={`answer-layout ${showAnswerDock ? "with-dock" : ""}`}>
+                <div className={`question-box choice-question ${choiceLayoutClass(choices, props.studyChoiceLayout)}`}>
+                  <MarkdownText value={card.front} className="question-text" />
+                  <ChoiceArea choices={choices} answer={card.back} selected={selectedChoice} checked={checked} layout={props.studyChoiceLayout} onChoose={checkChoice}>
+                    {checked && <AnswerFeedback checked={checked} correct={displayCorrect} explanation={explanation} other={otherNote} selected={selectedChoice} />}
+                  </ChoiceArea>
+                </div>
+                {showAnswerDock && (
+                  <QuestionDock
+                    card={card}
+                    choices={choices}
+                    selected={selectedChoice}
+                    answer={card.back}
+                    onClose={() => setAnswerDockOpen(false)}
+                  />
+                )}
+              </div>
+            )}
+            {card.card_type === "blank" && (
+              <div className={`answer-layout ${showAnswerDock ? "with-dock" : ""}`}>
+                <div className="question-box">
+                  <MarkdownText value={blankPrompt(card.front)} className="question-text" />
+                  {card.example && <MarkdownText value={card.example} className="question-note" />}
+                  <input value={answer} onChange={(event) => { setAnswer(event.target.value); setChecked(null); }} placeholder="输入答案" />
+                  <button className="primary-button" disabled={Boolean(busy)} onClick={checkWritten}>检查</button>
+                  {checked && <AnswerFeedback checked={checked} correct={correctAnswer(card)} explanation={explanation} other={otherNote} selected={answer} />}
+                </div>
+                {showAnswerDock && (
+                  <QuestionDock
+                    card={card}
+                    selected={answer}
+                    answer={correctAnswer(card)}
+                    onClose={() => setAnswerDockOpen(false)}
+                  />
+                )}
+              </div>
+            )}
+          </div>
           {showManualRatings && (
             <div className="rating-row">
               <button className="rating unknown" disabled={Boolean(busy)} onClick={() => rate("unknown")}><XCircle />{busy === "rate-unknown" ? "提交中" : "不认识"}</button>
@@ -1886,14 +1925,15 @@ function ChoiceArea(props: {
   );
 }
 
-function AnswerFeedback(props: { checked: "right" | "wrong"; correct: string; explanation: string; selected: string }) {
+function AnswerFeedback(props: { checked: "right" | "wrong"; correct: string; explanation: string; other: string; selected: string }) {
   const right = props.checked === "right";
   return (
     <div className={`result ${right ? "right" : "wrong"}`}>
       <strong>{right ? "回答正确" : "回答错误"}</strong>
       {!right && props.selected && <span>你的答案：<MarkdownText value={props.selected} /></span>}
       <span>正确答案：<MarkdownText value={props.correct} /></span>
-      {props.explanation && <small>解析：<MarkdownText value={props.explanation} /></small>}
+      <FeedbackBlock label="解析" value={props.explanation} kind="explanation" />
+      <FeedbackBlock label="其他" value={props.other} kind="other" />
     </div>
   );
 }
@@ -1978,6 +2018,7 @@ function AboutView(props: { syncStatus: SyncStatus | null }) {
       <div className="about-title"><Info /><div><p className="eyebrow">闪记</p><h2>版本 {version}</h2></div></div>
       <div className="schedule-box changelog-box">
         <h3>更新日志</h3>
+        <div className="changelog-row"><strong>0.2.11</strong><span>2026-06-27</span><p>修复学习页手机布局、底部评级固定、系统字体选择、解析/其他换行展示和新学/复习剩余数量。</p></div>
         <div className="changelog-row"><strong>0.2.10</strong><span>2026-06-27</span><p>支持 Markdown 代码块和数学公式展示；长解析答题后默认显示右侧题目参考并可隐藏；评级按钮固定在学习面板底部。</p></div>
         <div className="changelog-row"><strong>0.2.9</strong><span>2026-06-27</span><p>修复手机端布局挤压；卡组列表支持点击后隐藏和手动展开；选择题一列时题干与选项对齐；优化学习进度条动画流畅度。</p></div>
         <div className="changelog-row"><strong>0.2.8</strong><span>2026-06-27</span><p>支持 Markdown 文本展示；选项和解析保留换行；长文本编辑自动展开；选择题可手动切换一列或两列；解析宽度与选项区域一致。</p></div>

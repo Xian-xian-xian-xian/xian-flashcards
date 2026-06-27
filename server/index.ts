@@ -39,7 +39,7 @@ type CardType = "basic" | "word" | "choice" | "blank";
 const maxDeckDepth = 5;
 const sessionCookieName = "flashcards_session";
 const sessionDays = 30;
-const appVersion = "0.2.10";
+const appVersion = "0.2.11";
 const timeZone = "Asia/Shanghai";
 const normalizedUsers = new Set<number>();
 
@@ -353,6 +353,27 @@ function descendantDeckIds(userId: number, deckId: number): number[] {
   if (!deck) return [];
   const children = all<{ id: number }>("SELECT id FROM decks WHERE parent_id = ? AND user_id = ?", [deckId, userId]).map((row) => Number(row.id));
   return [deckId, ...children.flatMap((id) => descendantDeckIds(userId, id))];
+}
+
+function reviewRemainingCounts(userId: number, deckId?: number) {
+  const deckIds = deckId ? descendantDeckIds(userId, deckId) : [];
+  if (deckId && deckIds.length === 0) return { newRemaining: 0, reviewRemaining: 0 };
+  const now = nowIso();
+  const deckFilter = deckId && deckIds.length ? `AND c.deck_id IN (${deckIds.map(() => "?").join(",")})` : "";
+  const params = deckId && deckIds.length ? [userId, now, ...deckIds] : [userId, now];
+  const row = get<{ new_remaining: number; review_remaining: number }>(
+    `SELECT
+       COALESCE(SUM(CASE WHEN r.stage = 0 THEN 1 ELSE 0 END), 0) AS new_remaining,
+       COALESCE(SUM(CASE WHEN r.stage > 0 THEN 1 ELSE 0 END), 0) AS review_remaining
+     FROM cards c
+     JOIN reviews r ON r.card_id = c.id
+     WHERE c.user_id = ? AND r.due_at <= ? ${deckFilter}`,
+    params
+  );
+  return {
+    newRemaining: Number(row?.new_remaining ?? 0),
+    reviewRemaining: Number(row?.review_remaining ?? 0)
+  };
 }
 
 function cardRow(userId: number, cardId: number) {
@@ -864,6 +885,12 @@ app.get("/api/reviews/due", (req, res) => {
     params
   );
   res.json(cards);
+});
+
+app.get("/api/reviews/remaining", (req, res) => {
+  const userId = currentUserId(res);
+  const deckId = req.query.deckId ? Number(req.query.deckId) : undefined;
+  res.json(reviewRemainingCounts(userId, deckId));
 });
 
 app.post("/api/reviews/:cardId/answer", (req, res) => {

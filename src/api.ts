@@ -1,4 +1,4 @@
-import type { Card, DailyTask, Deck, ReviewRating, ReviewSnapshot, Settings, Stats, SyncStatus, User } from "./types";
+import type { Card, DailyTask, Deck, ReviewRating, ReviewRemaining, ReviewSnapshot, Settings, Stats, SyncStatus, User } from "./types";
 
 export type CardPayload = {
   card_type?: Card["card_type"];
@@ -55,6 +55,8 @@ export const api = {
     request<{ ok: true; affected: number }>("/api/cards/batch", { method: "POST", body: JSON.stringify(payload) }),
   dueCards: (deckId?: number, limit = 50, kind: "all" | "review" | "new" = "all") =>
     request<Card[]>(`/api/reviews/due?limit=${limit}&kind=${kind}${deckId ? `&deckId=${deckId}` : ""}`),
+  reviewRemaining: (deckId?: number) =>
+    request<ReviewRemaining>(`/api/reviews/remaining${deckId ? `?deckId=${deckId}` : ""}`),
   answer: (cardId: number, rating: ReviewRating) =>
     request<{ stage: number; dueAt: string; previous: ReviewSnapshot }>(`/api/reviews/${cardId}/answer`, {
       method: "POST",
