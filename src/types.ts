@@ -63,6 +63,7 @@ export type Settings = {
   autoSpeak: "on" | "off";
   dailyNewGoal: number;
   studyTextScale: number;
+  studyTextAlign: "center" | "left";
 };
 
 export type User = {

@@ -39,7 +39,7 @@ type CardType = "basic" | "word" | "choice" | "blank";
 const maxDeckDepth = 5;
 const sessionCookieName = "flashcards_session";
 const sessionDays = 30;
-const appVersion = "0.2.4";
+const appVersion = "0.2.5";
 const timeZone = "Asia/Shanghai";
 const normalizedUsers = new Set<number>();
 
@@ -989,15 +989,20 @@ app.get("/api/settings", (_req, res) => {
     notifications: getUserSetting(userId, "notifications", "off"),
     autoSpeak: getUserSetting(userId, "autoSpeak", "off"),
     dailyNewGoal: getDailyGoal(userId),
-    studyTextScale: clampStudyTextScale(getUserSetting(userId, "studyTextScale", "1"))
+    studyTextScale: clampStudyTextScale(getUserSetting(userId, "studyTextScale", "1")),
+    studyTextAlign: getUserSetting(userId, "studyTextAlign", "center") === "left" ? "left" : "center"
   });
 });
 
 app.put("/api/settings", (req, res) => {
   const userId = currentUserId(res);
-  for (const key of ["theme", "voiceLanguage", "notifications", "autoSpeak", "dailyNewGoal", "studyTextScale"]) {
+  for (const key of ["theme", "voiceLanguage", "notifications", "autoSpeak", "dailyNewGoal", "studyTextScale", "studyTextAlign"]) {
     if (key === "studyTextScale" && (typeof req.body[key] === "string" || typeof req.body[key] === "number")) {
       setUserSetting(userId, key, String(clampStudyTextScale(req.body[key])));
+      continue;
+    }
+    if (key === "studyTextAlign" && (req.body[key] === "left" || req.body[key] === "center")) {
+      setUserSetting(userId, key, req.body[key]);
       continue;
     }
     if (typeof req.body[key] === "string") setUserSetting(userId, key, req.body[key]);

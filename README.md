@@ -40,7 +40,7 @@ PORT=8080 pnpm start:remote
 
 ```bash
 git add README.md package.json server src vite.config.ts scripts 模版
-git commit -m "Release 0.2.4"
+git commit -m "Release 0.2.5"
 GIT_SSH_COMMAND="ssh -i ~/.ssh/codex_aliyun_flashcards -o IdentitiesOnly=yes" git push origin main
 ```
 

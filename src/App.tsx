@@ -1,5 +1,7 @@
 import {
   AlertTriangle,
+  AlignCenter,
+  AlignLeft,
   ArrowLeft,
   Bell,
   BookOpen,
@@ -44,19 +46,13 @@ import type { Card, CardType, DailyTask, Deck, ReviewRating, ReviewSnapshot, Set
 type View = "home" | "deck" | "study" | "import" | "settings" | "about";
 type SyncState = "idle" | "syncing" | "success" | "error" | "conflict";
 
-const version = "0.2.4";
+const version = "0.2.5";
 
 const cardTypeLabels: Record<CardType, string> = {
   basic: "普通卡",
   word: "单词卡",
   choice: "选择题卡",
   blank: "填空题卡"
-};
-
-const ratingLabels: Record<ReviewRating, string> = {
-  known: "认识",
-  fuzzy: "模糊",
-  unknown: "不认识"
 };
 
 const emptyDailyTask: DailyTask = {
@@ -159,6 +155,36 @@ function applyTheme(mode: ThemeMode) {
   document.documentElement.dataset.theme = dark ? "dark" : "light";
 }
 
+function playAnswerSound(result: "right" | "wrong") {
+  try {
+    const AudioContextClass = window.AudioContext || (window as typeof window & { webkitAudioContext?: typeof AudioContext }).webkitAudioContext;
+    if (!AudioContextClass) return;
+    const context = new AudioContextClass();
+    const gain = context.createGain();
+    gain.connect(context.destination);
+    gain.gain.setValueAtTime(0.0001, context.currentTime);
+    gain.gain.exponentialRampToValueAtTime(result === "right" ? 0.16 : 0.12, context.currentTime + 0.015);
+    gain.gain.exponentialRampToValueAtTime(0.0001, context.currentTime + (result === "right" ? 0.24 : 0.18));
+
+    const tones = result === "right" ? [660, 880] : [220, 165];
+    tones.forEach((frequency, index) => {
+      const oscillator = context.createOscillator();
+      oscillator.type = result === "right" ? "sine" : "triangle";
+      oscillator.frequency.setValueAtTime(frequency, context.currentTime + index * 0.055);
+      oscillator.connect(gain);
+      oscillator.start(context.currentTime + index * 0.055);
+      oscillator.stop(context.currentTime + index * 0.055 + 0.13);
+    });
+    window.setTimeout(() => context.close().catch(() => undefined), 360);
+  } catch {
+    // Browsers can deny audio startup until a user gesture; feedback still works without sound.
+  }
+}
+
+function delay(ms: number) {
+  return new Promise((resolve) => window.setTimeout(resolve, ms));
+}
+
 export default function App() {
   const [user, setUser] = useState<User | null>(null);
   const [authChecked, setAuthChecked] = useState(false);
@@ -176,7 +202,8 @@ export default function App() {
     notifications: "off",
     autoSpeak: "off",
     dailyNewGoal: 20,
-    studyTextScale: 1
+    studyTextScale: 1,
+    studyTextAlign: "center"
   });
   const [dailyTask, setDailyTask] = useState<DailyTask>(emptyDailyTask);
   const [syncStatus, setSyncStatus] = useState<SyncStatus | null>(null);
@@ -335,7 +362,7 @@ export default function App() {
   async function handleAnswer(card: Card, rating: ReviewRating) {
     try {
       const result = await api.answer(card.id, rating);
-      await afterMutation(`${card.front}：${ratingLabels[rating]}`);
+      await afterMutation();
       return result;
     } catch (error) {
       showToast((error as Error).message, "error");
@@ -513,9 +540,14 @@ export default function App() {
             onSelectRootDeck={setStudyRootDeckId}
             selectedDeck={studyRootDeck}
             studyTextScale={settings.studyTextScale}
+            studyTextAlign={settings.studyTextAlign}
             onStudyTextScale={async (studyTextScale) => {
               await api.saveSettings({ studyTextScale });
               setSettings((current) => ({ ...current, studyTextScale }));
+            }}
+            onStudyTextAlign={async (studyTextAlign) => {
+              await api.saveSettings({ studyTextAlign });
+              setSettings((current) => ({ ...current, studyTextAlign }));
             }}
             autoSpeak={settings.autoSpeak === "on"}
             onAnswer={handleAnswer}
@@ -707,8 +739,11 @@ function HomeView(props: {
       <div className="hero-panel">
         <div>
           <p className="eyebrow">今日打卡</p>
-          <h2>{props.dailyTask.completed ? "已完成" : `${props.dailyTask.new_completed}/${props.dailyTask.daily_new_goal} 新学`}</h2>
-          <p>复习 {props.dailyTask.review_completed}/{props.dailyTask.review_total} · 连续打卡 {props.dailyTask.streak} 天</p>
+          <div className="streak-heading">
+            <h2>{props.dailyTask.completed ? "已完成" : `${props.dailyTask.new_completed}/${props.dailyTask.daily_new_goal} 新学`}</h2>
+            <span className={`streak-badge ${props.dailyTask.completed ? "done" : ""}`}><CheckCircle2 />连续 {props.dailyTask.streak} 天</span>
+          </div>
+          <p>复习 {props.dailyTask.review_completed}/{props.dailyTask.review_total} · {props.dailyTask.completed ? "今日打卡成功" : "完成新学和复习后自动打卡"}</p>
         </div>
         <button className="primary-button" disabled={props.rootDecks.length === 0} onClick={() => props.rootDecks[0] && props.onStudy(props.rootDecks[0].id)}>
           <Sparkles />开始学习
@@ -1033,7 +1068,9 @@ function StudyView(props: {
   onSelectRootDeck: (id: number) => void;
   selectedDeck?: Deck;
   studyTextScale: number;
+  studyTextAlign: Settings["studyTextAlign"];
   onStudyTextScale: (scale: number) => Promise<void>;
+  onStudyTextAlign: (align: Settings["studyTextAlign"]) => Promise<void>;
   autoSpeak: boolean;
   onAnswer: (card: Card, rating: ReviewRating) => Promise<{ stage: number; dueAt: string; previous: ReviewSnapshot }>;
   onUndoAnswer: (card: Card, snapshot: ReviewSnapshot) => Promise<void>;
@@ -1064,6 +1101,7 @@ function StudyView(props: {
   const [scaleDraft, setScaleDraft] = useState(props.studyTextScale);
   const [scaleSaving, setScaleSaving] = useState(false);
   const [immersive, setImmersive] = useState(false);
+  const [cardMotion, setCardMotion] = useState<"entering" | "leaving" | "idle">("entering");
   const card = queue[0];
 
   useEffect(() => {
@@ -1076,7 +1114,10 @@ function StudyView(props: {
     setChecked(null);
     setSelectedChoice("");
     setEditingStudyCard(null);
+    setCardMotion("entering");
+    const timer = window.setTimeout(() => setCardMotion("idle"), 220);
     if (props.autoSpeak && card && isWordCard(card)) props.onSpeak(card.front, card.language ?? props.selectedDeck?.language);
+    return () => window.clearTimeout(timer);
   }, [card?.id, props.autoSpeak]);
 
   useEffect(() => {
@@ -1108,6 +1149,7 @@ function StudyView(props: {
       setChecked(null);
       setSelectedChoice("");
       setEditingStudyCard(null);
+      setCardMotion("entering");
     } finally {
       setBusy("");
     }
@@ -1129,6 +1171,8 @@ function StudyView(props: {
         ? rest
         : [...rest.slice(0, rating === "unknown" ? 1 : 3), repeatCard, ...rest.slice(rating === "unknown" ? 1 : 3)];
       setHistory((items) => [...items, { card, previous: result.previous, queue: beforeQueue, masteredIds: beforeMasteredIds, flipped, answer, checked, selectedChoice }]);
+      setCardMotion("leaving");
+      await delay(140);
       setQueue(nextQueue);
       setMasteredIds(nextMasteredIds);
       setFlipped(false);
@@ -1161,13 +1205,17 @@ function StudyView(props: {
   function checkWritten() {
     if (!card) return;
     setSelectedChoice("");
-    setChecked(isCorrectAnswer(card, answer) ? "right" : "wrong");
+    const result = isCorrectAnswer(card, answer) ? "right" : "wrong";
+    playAnswerSound(result);
+    setChecked(result);
   }
 
   function checkChoice(choice: string) {
     if (!card || checked) return;
     setSelectedChoice(choice);
-    setChecked(answersMatch(choice, card.back) ? "right" : "wrong");
+    const result = answersMatch(choice, card.back) ? "right" : "wrong";
+    playAnswerSound(result);
+    setChecked(result);
   }
 
   const choices = useMemo(() => {
@@ -1198,7 +1246,8 @@ function StudyView(props: {
     "--study-small-size": `${Math.round(16 * scale)}px`,
     "--study-question-size": `${Math.round(24 * scale)}px`,
     "--study-choice-size": `${Math.round(16 * scale)}px`,
-    "--study-result-size": `${Math.round(16 * scale)}px`
+    "--study-result-size": `${Math.round(16 * scale)}px`,
+    "--study-text-align": props.studyTextAlign
   } as CSSProperties & Record<string, string>;
 
   async function saveScale(nextScale: number) {
@@ -1209,6 +1258,11 @@ function StudyView(props: {
     } finally {
       setScaleSaving(false);
     }
+  }
+
+  async function saveTextAlign(nextAlign: Settings["studyTextAlign"]) {
+    if (nextAlign === props.studyTextAlign) return;
+    await props.onStudyTextAlign(nextAlign);
   }
 
   async function toggleImmersive() {
@@ -1248,7 +1302,7 @@ function StudyView(props: {
       </div>
 
       {!card ? <EmptyState text={total > 0 ? "本轮已完成。" : studyKind === "new" ? "这个大卡组暂无可新学卡片。" : "这个大卡组暂无到期复习卡片。"} /> : (
-        <div className="study-panel" style={studyStyle}>
+        <div className={`study-panel ${cardMotion} align-${props.studyTextAlign}`} style={studyStyle}>
           <div className="progress-line">
             <span>{completed}</span>
             <div><i style={{ width: `${Math.min((completed / Math.max(total, 1)) * 100, 100)}%` }} /></div>
@@ -1262,6 +1316,10 @@ function StudyView(props: {
               <input type="range" min={0.85} max={1.35} step={0.05} value={scaleDraft} onChange={(event) => saveScale(Number(event.target.value))} />
               <strong>{scaleSaving ? "保存中" : `${Math.round(scaleDraft * 100)}%`}</strong>
             </label>
+            <div className="mode-tabs align-tabs" title="学习文本对齐">
+              <button className={props.studyTextAlign === "left" ? "active" : ""} onClick={() => saveTextAlign("left")}><AlignLeft /></button>
+              <button className={props.studyTextAlign === "center" ? "active" : ""} onClick={() => saveTextAlign("center")}><AlignCenter /></button>
+            </div>
             <button className="mini-button" title={immersive ? "退出沉浸学习" : "沉浸学习"} onClick={toggleImmersive}>{immersive ? <Minimize2 /> : <Maximize2 />}</button>
             <button className="mini-button" title="撤销上一张" disabled={history.length === 0 || Boolean(busy)} onClick={undo}><ArrowLeft /></button>
             <button className="mini-button" title="编辑当前卡片" onClick={() => setEditingStudyCard(card)}><Edit3 /></button>
@@ -1270,7 +1328,10 @@ function StudyView(props: {
           {editingStudyCard && <CardEditor card={editingStudyCard} onCancel={() => setEditingStudyCard(null)} onSubmit={async (payload) => { await props.onUpdateCard(editingStudyCard.id, { ...payload, baseUpdatedAt: editingStudyCard.updated_at }); setEditingStudyCard(null); }} />}
           {card.card_type !== "choice" && card.card_type !== "blank" && (
             <button className={`flip-card ${flipped ? "flipped" : ""}`} onClick={() => setFlipped((value) => !value)}>
-              {flipped ? <CardBack card={card} /> : <CardFront card={card} />}
+              <span className="flip-card-inner">
+                <span className="flip-card-face flip-card-front"><CardFront card={card} /></span>
+                <span className="flip-card-face flip-card-back"><CardBack card={card} /></span>
+              </span>
             </button>
           )}
           {card.card_type === "choice" && (
@@ -1438,6 +1499,7 @@ function AboutView(props: { syncStatus: SyncStatus | null }) {
       <div className="about-title"><Info /><div><p className="eyebrow">Xian 闪记卡</p><h2>版本 {version}</h2></div></div>
       <div className="schedule-box changelog-box">
         <h3>更新日志</h3>
+        <div className="changelog-row"><strong>0.2.5</strong><span>2026-06-27</span><p>新增答题音效、卡片翻转和切题动效；评级后不再弹出右下角提示；强化连续打卡展示；学习页支持文本左对齐或居中。</p></div>
         <div className="changelog-row"><strong>0.2.4</strong><span>2026-06-26</span><p>修复选择题答案标签匹配和第五选项问题；学习页按卡片类型自动显示；字号调整移入学习页；新增沉浸式学习并移除卡片悬停倾斜。</p></div>
         <div className="changelog-row"><strong>0.2.3</strong><span>2026-06-26</span><p>修复填写判定、每日新学统计、重复提交、单卡删除确认、设置保存、自动发音开关、导入模板、移动端导航和开发端口冲突等体验问题。</p></div>
         <div className="changelog-row"><strong>0.2.2</strong><span>2026-06-26</span><p>导入时自动识别选择题和填空题；选择/填写后先显示对错、正确答案和解析，再手动评级；新增学习卡片字号设置。</p></div>
