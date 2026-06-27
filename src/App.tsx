@@ -51,7 +51,7 @@ import type { Card, CardType, DailyTask, Deck, ReviewRating, ReviewSnapshot, Set
 type View = "home" | "deck" | "study" | "import" | "settings" | "about";
 type SyncState = "idle" | "syncing" | "success" | "error" | "conflict";
 
-const version = "0.2.9";
+const version = "0.2.10";
 
 const cardTypeLabels: Record<CardType, string> = {
   basic: "普通卡",
@@ -111,17 +111,44 @@ function parseChoices(value: string | string[] | undefined) {
   return value.split(separator).map((item) => item.trim()).filter(Boolean);
 }
 
-function markdownBlocks(value: string) {
-  return value.replace(/\r\n/g, "\n").split(/\n{2,}/).map((block) => block.trim()).filter(Boolean);
+type MarkdownBlock =
+  | { type: "code"; language: string; content: string }
+  | { type: "math"; content: string }
+  | { type: "text"; content: string };
+
+function markdownBlocks(value: string): MarkdownBlock[] {
+  const blocks: MarkdownBlock[] = [];
+  const normalized = value.replace(/\r\n/g, "\n");
+  const pattern = /```([\w-]*)\n([\s\S]*?)```|\$\$\n?([\s\S]*?)\n?\$\$/g;
+  let lastIndex = 0;
+
+  normalized.replace(pattern, (match, language, code, math, offset) => {
+    const before = normalized.slice(lastIndex, offset);
+    before.split(/\n{2,}/).map((block) => block.trim()).filter(Boolean).forEach((content) => blocks.push({ type: "text", content }));
+    if (match.startsWith("```")) {
+      blocks.push({ type: "code", language: String(language || "").trim(), content: String(code ?? "").replace(/\n$/, "") });
+    } else {
+      blocks.push({ type: "math", content: String(math ?? "").trim() });
+    }
+    lastIndex = offset + match.length;
+    return match;
+  });
+
+  normalized.slice(lastIndex).split(/\n{2,}/).map((block) => block.trim()).filter(Boolean).forEach((content) => blocks.push({ type: "text", content }));
+  return blocks;
 }
 
 function renderInlineMarkdown(value: string) {
   const nodes: ReactNode[] = [];
-  const pattern = /(\*\*[^*]+\*\*|__[^_]+__|`[^`]+`|\[[^\]]+\]\([^)]+\)|\*[^*]+\*|_[^_]+_)/g;
+  const pattern = /(\$\$[^$]+\$\$|\$[^$\n]+\$|\*\*[^*]+\*\*|__[^_]+__|`[^`]+`|\[[^\]]+\]\([^)]+\)|\*[^*]+\*|_[^_]+_)/g;
   let lastIndex = 0;
   value.replace(pattern, (match, _capture, offset) => {
     if (offset > lastIndex) nodes.push(value.slice(lastIndex, offset));
-    if (match.startsWith("**") || match.startsWith("__")) {
+    if (match.startsWith("$$")) {
+      nodes.push(<span key={nodes.length} className="math-inline">{match.slice(2, -2)}</span>);
+    } else if (match.startsWith("$")) {
+      nodes.push(<span key={nodes.length} className="math-inline">{match.slice(1, -1)}</span>);
+    } else if (match.startsWith("**") || match.startsWith("__")) {
       nodes.push(<strong key={nodes.length}>{match.slice(2, -2)}</strong>);
     } else if (match.startsWith("`")) {
       nodes.push(<code key={nodes.length}>{match.slice(1, -1)}</code>);
@@ -144,14 +171,23 @@ function MarkdownText(props: { value: string; className?: string }) {
   return (
     <span className={`markdown-text ${props.className ?? ""}`}>
       {blocks.map((block, index) => {
-        const lines = block.split("\n");
+        if (block.type === "code") {
+          return (
+            <span key={index} className="code-block">
+              {block.language && <span className="code-language">{block.language}</span>}
+              <code>{block.content}</code>
+            </span>
+          );
+        }
+        if (block.type === "math") return <span key={index} className="math-block">{block.content}</span>;
+        const lines = block.content.split("\n");
         if (lines.every((line) => /^\s*[-*]\s+/.test(line))) {
           return <ul key={index}>{lines.map((line, lineIndex) => <li key={lineIndex}>{renderInlineMarkdown(line.replace(/^\s*[-*]\s+/, ""))}</li>)}</ul>;
         }
         if (lines.every((line) => /^\s*\d+[.)]\s+/.test(line))) {
           return <ol key={index}>{lines.map((line, lineIndex) => <li key={lineIndex}>{renderInlineMarkdown(line.replace(/^\s*\d+[.)]\s+/, ""))}</li>)}</ol>;
         }
-        if (block.startsWith("# ")) return <strong key={index}>{renderInlineMarkdown(block.replace(/^#\s+/, ""))}</strong>;
+        if (block.content.startsWith("# ")) return <strong key={index}>{renderInlineMarkdown(block.content.replace(/^#\s+/, ""))}</strong>;
         return (
           <span key={index} className="markdown-paragraph">
             {lines.map((line, lineIndex) => (
@@ -1331,6 +1367,7 @@ function StudyView(props: {
   const [fontLoading, setFontLoading] = useState(false);
   const [fontDraft, setFontDraft] = useState("");
   const [immersive, setImmersive] = useState(false);
+  const [answerDockOpen, setAnswerDockOpen] = useState(true);
   const [cardMotion, setCardMotion] = useState<"entering" | "leaving" | "idle">("entering");
   const [celebrationKey, setCelebrationKey] = useState(0);
   const [completionPlayed, setCompletionPlayed] = useState(false);
@@ -1346,6 +1383,7 @@ function StudyView(props: {
     setChecked(null);
     setSelectedChoice("");
     setCelebrationKey(0);
+    setAnswerDockOpen(true);
     setEditingStudyCard(null);
     setCardMotion("entering");
     const timer = window.setTimeout(() => setCardMotion("idle"), 220);
@@ -1389,6 +1427,7 @@ function StudyView(props: {
       setChecked(null);
       setSelectedChoice("");
       setCelebrationKey(0);
+      setAnswerDockOpen(true);
       setCompletionPlayed(false);
       setEditingStudyCard(null);
       setCardMotion("entering");
@@ -1478,6 +1517,8 @@ function StudyView(props: {
   const completed = masteredIds.length;
   const total = sessionCards.length;
   const explanation = card ? [card.example, card.note].filter(Boolean).join(" · ") : "";
+  const explanationIsLong = explanation.length > 80 || /\n|```|\$\$/.test(explanation);
+  const showAnswerDock = Boolean(card && checked && explanationIsLong && answerDockOpen);
   const showManualRatings = card ? card.card_type !== "choice" && card.card_type !== "blank" || checked !== null : false;
   const scale = scaleDraft;
   const studyStyle = {
@@ -1676,20 +1717,41 @@ function StudyView(props: {
             </button>
           )}
           {card.card_type === "choice" && (
-            <div className={`question-box choice-question ${choiceLayoutClass(choices, props.studyChoiceLayout)}`}>
-              <MarkdownText value={card.front} className="question-text" />
-              <ChoiceArea choices={choices} answer={card.back} selected={selectedChoice} checked={checked} layout={props.studyChoiceLayout} onChoose={checkChoice}>
-                {checked && <AnswerFeedback checked={checked} correct={displayCorrect} explanation={explanation} selected={selectedChoice} />}
-              </ChoiceArea>
+            <div className={`answer-layout ${showAnswerDock ? "with-dock" : ""}`}>
+              <div className={`question-box choice-question ${choiceLayoutClass(choices, props.studyChoiceLayout)}`}>
+                <MarkdownText value={card.front} className="question-text" />
+                <ChoiceArea choices={choices} answer={card.back} selected={selectedChoice} checked={checked} layout={props.studyChoiceLayout} onChoose={checkChoice}>
+                  {checked && <AnswerFeedback checked={checked} correct={displayCorrect} explanation={explanation} selected={selectedChoice} />}
+                </ChoiceArea>
+              </div>
+              {showAnswerDock && (
+                <QuestionDock
+                  card={card}
+                  choices={choices}
+                  selected={selectedChoice}
+                  answer={card.back}
+                  onClose={() => setAnswerDockOpen(false)}
+                />
+              )}
             </div>
           )}
           {card.card_type === "blank" && (
-            <div className="question-box">
-              <MarkdownText value={blankPrompt(card.front)} className="question-text" />
-              {card.example && <MarkdownText value={card.example} className="question-note" />}
-              <input value={answer} onChange={(event) => { setAnswer(event.target.value); setChecked(null); }} placeholder="输入答案" />
-              <button className="primary-button" disabled={Boolean(busy)} onClick={checkWritten}>检查</button>
-              {checked && <AnswerFeedback checked={checked} correct={correctAnswer(card)} explanation={explanation} selected={answer} />}
+            <div className={`answer-layout ${showAnswerDock ? "with-dock" : ""}`}>
+              <div className="question-box">
+                <MarkdownText value={blankPrompt(card.front)} className="question-text" />
+                {card.example && <MarkdownText value={card.example} className="question-note" />}
+                <input value={answer} onChange={(event) => { setAnswer(event.target.value); setChecked(null); }} placeholder="输入答案" />
+                <button className="primary-button" disabled={Boolean(busy)} onClick={checkWritten}>检查</button>
+                {checked && <AnswerFeedback checked={checked} correct={correctAnswer(card)} explanation={explanation} selected={answer} />}
+              </div>
+              {showAnswerDock && (
+                <QuestionDock
+                  card={card}
+                  selected={answer}
+                  answer={correctAnswer(card)}
+                  onClose={() => setAnswerDockOpen(false)}
+                />
+              )}
             </div>
           )}
           {showManualRatings && (
@@ -1702,6 +1764,30 @@ function StudyView(props: {
         </div>
       )}
     </section>
+  );
+}
+
+function QuestionDock(props: { card: Card; choices?: string[]; selected: string; answer: string; onClose: () => void }) {
+  return (
+    <aside className="question-dock" aria-label="题目参考">
+      <div className="question-dock-title">
+        <strong>题目参考</strong>
+        <button className="mini-button" title="隐藏题目参考" onClick={props.onClose}><XCircle /></button>
+      </div>
+      <div className="question-dock-body">
+        <MarkdownText value={props.card.card_type === "blank" ? blankPrompt(props.card.front) : props.card.front} />
+        {props.choices && props.choices.length > 0 && (
+          <ol>
+            {props.choices.map((choice, index) => (
+              <li key={`${choice}-${index}`} className={answersMatch(choice, props.answer) ? "correct" : choice === props.selected ? "selected" : ""}>
+                <MarkdownText value={choice} />
+              </li>
+            ))}
+          </ol>
+        )}
+        {props.selected && <small>你的答案：<MarkdownText value={props.selected} /></small>}
+      </div>
+    </aside>
   );
 }
 
@@ -1892,6 +1978,7 @@ function AboutView(props: { syncStatus: SyncStatus | null }) {
       <div className="about-title"><Info /><div><p className="eyebrow">闪记</p><h2>版本 {version}</h2></div></div>
       <div className="schedule-box changelog-box">
         <h3>更新日志</h3>
+        <div className="changelog-row"><strong>0.2.10</strong><span>2026-06-27</span><p>支持 Markdown 代码块和数学公式展示；长解析答题后默认显示右侧题目参考并可隐藏；评级按钮固定在学习面板底部。</p></div>
         <div className="changelog-row"><strong>0.2.9</strong><span>2026-06-27</span><p>修复手机端布局挤压；卡组列表支持点击后隐藏和手动展开；选择题一列时题干与选项对齐；优化学习进度条动画流畅度。</p></div>
         <div className="changelog-row"><strong>0.2.8</strong><span>2026-06-27</span><p>支持 Markdown 文本展示；选项和解析保留换行；长文本编辑自动展开；选择题可手动切换一列或两列；解析宽度与选项区域一致。</p></div>
         <div className="changelog-row"><strong>0.2.7</strong><span>2026-06-27</span><p>编辑学习中卡片后即时刷新本轮内容；选择题选项跟随左对齐；字体支持读取和输入系统字体；升级打卡完成感和项目名称。</p></div>
