@@ -44,14 +44,14 @@ import {
   Volume2,
   XCircle
 } from "lucide-react";
-import { CSSProperties, FormEvent, ReactNode, useEffect, useMemo, useState } from "react";
+import { CSSProperties, FormEvent, PointerEvent as ReactPointerEvent, ReactNode, useEffect, useMemo, useState } from "react";
 import { api, type CardPayload, type ConflictError } from "./api";
 import type { Card, CardType, DailyTask, Deck, ReviewRating, ReviewRemaining, ReviewSnapshot, Settings, Stats, SyncStatus, ThemeMode, User } from "./types";
 
 type View = "home" | "deck" | "study" | "import" | "settings" | "about";
 type SyncState = "idle" | "syncing" | "success" | "error" | "conflict";
 
-const version = "0.2.11";
+const version = "0.2.12";
 
 const cardTypeLabels: Record<CardType, string> = {
   basic: "普通卡",
@@ -1379,6 +1379,7 @@ function StudyView(props: {
   const [remaining, setRemaining] = useState<ReviewRemaining>({ newRemaining: 0, reviewRemaining: 0 });
   const [immersive, setImmersive] = useState(false);
   const [answerDockOpen, setAnswerDockOpen] = useState(true);
+  const [answerDockWidth, setAnswerDockWidth] = useState(300);
   const [cardMotion, setCardMotion] = useState<"entering" | "leaving" | "idle">("entering");
   const [celebrationKey, setCelebrationKey] = useState(0);
   const [completionPlayed, setCompletionPlayed] = useState(false);
@@ -1564,7 +1565,8 @@ function StudyView(props: {
     "--study-result-size": `${Math.round(16 * scale)}px`,
     "--study-text-align": props.studyTextAlign,
     "--study-line-height": String(props.studyLineHeight),
-    "--study-font-family": studyFontStack(props.studyFontFamily)
+    "--study-font-family": studyFontStack(props.studyFontFamily),
+    "--answer-dock-width": `${answerDockWidth}px`
   } as CSSProperties & Record<string, string>;
 
   async function saveScale(nextScale: number) {
@@ -1637,6 +1639,33 @@ function StudyView(props: {
     }
     await document.documentElement.requestFullscreen?.().catch(() => undefined);
     setImmersive(true);
+  }
+
+  function resizeAnswerDock(event: ReactPointerEvent<HTMLButtonElement>) {
+    event.preventDefault();
+    const pointerId = event.pointerId;
+    const handle = event.currentTarget;
+    handle.setPointerCapture(pointerId);
+    document.body.classList.add("resizing-answer-dock");
+
+    const updateWidth = (clientX: number) => {
+      const viewportWidth = window.innerWidth;
+      const minWidth = Math.min(240, Math.max(180, viewportWidth - 160));
+      const maxWidth = Math.min(560, Math.max(260, viewportWidth * 0.58));
+      setAnswerDockWidth(Math.round(Math.max(minWidth, Math.min(maxWidth, viewportWidth - clientX - 14))));
+    };
+
+    const onPointerMove = (moveEvent: PointerEvent) => updateWidth(moveEvent.clientX);
+    const onPointerUp = () => {
+      document.removeEventListener("pointermove", onPointerMove);
+      document.removeEventListener("pointerup", onPointerUp);
+      document.body.classList.remove("resizing-answer-dock");
+      if (handle.hasPointerCapture(pointerId)) handle.releasePointerCapture(pointerId);
+    };
+
+    updateWidth(event.clientX);
+    document.addEventListener("pointermove", onPointerMove);
+    document.addEventListener("pointerup", onPointerUp, { once: true });
   }
 
   return (
@@ -1768,6 +1797,7 @@ function StudyView(props: {
                     choices={choices}
                     selected={selectedChoice}
                     answer={card.back}
+                    onResize={resizeAnswerDock}
                     onClose={() => setAnswerDockOpen(false)}
                   />
                 )}
@@ -1787,6 +1817,7 @@ function StudyView(props: {
                     card={card}
                     selected={answer}
                     answer={correctAnswer(card)}
+                    onResize={resizeAnswerDock}
                     onClose={() => setAnswerDockOpen(false)}
                   />
                 )}
@@ -1806,9 +1837,10 @@ function StudyView(props: {
   );
 }
 
-function QuestionDock(props: { card: Card; choices?: string[]; selected: string; answer: string; onClose: () => void }) {
+function QuestionDock(props: { card: Card; choices?: string[]; selected: string; answer: string; onResize: (event: ReactPointerEvent<HTMLButtonElement>) => void; onClose: () => void }) {
   return (
     <aside className="question-dock" aria-label="题目参考">
+      <button className="question-dock-resizer" type="button" aria-label="调整题目参考宽度" onPointerDown={props.onResize} />
       <div className="question-dock-title">
         <strong>题目参考</strong>
         <button className="mini-button" title="隐藏题目参考" onClick={props.onClose}><XCircle /></button>
@@ -2018,6 +2050,7 @@ function AboutView(props: { syncStatus: SyncStatus | null }) {
       <div className="about-title"><Info /><div><p className="eyebrow">闪记</p><h2>版本 {version}</h2></div></div>
       <div className="schedule-box changelog-box">
         <h3>更新日志</h3>
+        <div className="changelog-row"><strong>0.2.12</strong><span>2026-06-27</span><p>答题后的题干选项参考固定在屏幕右侧，支持拖动中间分隔调整左右占比，并修正解析按 Markdown 原文加粗展示。</p></div>
         <div className="changelog-row"><strong>0.2.11</strong><span>2026-06-27</span><p>修复学习页手机布局、底部评级固定、系统字体选择、解析/其他换行展示和新学/复习剩余数量。</p></div>
         <div className="changelog-row"><strong>0.2.10</strong><span>2026-06-27</span><p>支持 Markdown 代码块和数学公式展示；长解析答题后默认显示右侧题目参考并可隐藏；评级按钮固定在学习面板底部。</p></div>
         <div className="changelog-row"><strong>0.2.9</strong><span>2026-06-27</span><p>修复手机端布局挤压；卡组列表支持点击后隐藏和手动展开；选择题一列时题干与选项对齐；优化学习进度条动画流畅度。</p></div>

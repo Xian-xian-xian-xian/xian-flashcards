@@ -51,6 +51,11 @@ body {
     "Microsoft YaHei", sans-serif;
 }
 
+body.resizing-answer-dock {
+  cursor: col-resize;
+  user-select: none;
+}
+
 button,
 input,
 select,
@@ -902,6 +907,7 @@ textarea:focus {
   --study-text-align: center;
   --study-line-height: 1.5;
   --study-font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", "Microsoft YaHei", sans-serif;
+  --answer-dock-width: 300px;
   font-family: var(--study-font-family);
 }
 
@@ -1431,24 +1437,62 @@ textarea:focus {
   grid-template-columns: minmax(0, 1fr);
   gap: 16px;
   align-items: start;
+  width: 100%;
 }
 
 .answer-layout.with-dock {
-  grid-template-columns: minmax(0, 1fr) minmax(230px, 300px);
+  padding-right: calc(var(--answer-dock-width) + 20px);
 }
 
 .question-dock {
-  position: sticky;
+  position: fixed;
   top: 14px;
+  right: 14px;
+  bottom: 14px;
+  z-index: 20;
   display: grid;
   gap: 10px;
-  max-height: min(72vh, 620px);
+  width: var(--answer-dock-width);
+  max-width: calc(100vw - 28px);
+  max-height: calc(100vh - 28px);
   overflow: auto;
   padding: 12px;
   border: 1px solid var(--border);
   border-radius: 8px;
   background: color-mix(in srgb, var(--surface), var(--primary-soft) 44%);
   box-shadow: var(--shadow);
+}
+
+.question-dock-resizer {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: -12px;
+  width: 18px;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  cursor: col-resize;
+  touch-action: none;
+}
+
+.question-dock-resizer::after {
+  content: "";
+  position: absolute;
+  top: 14px;
+  bottom: 14px;
+  left: 7px;
+  width: 4px;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--primary), transparent 62%);
+  opacity: 0;
+  transition: opacity 140ms ease, background 140ms ease;
+}
+
+.question-dock-resizer:hover::after,
+.question-dock-resizer:focus-visible::after,
+body.resizing-answer-dock .question-dock-resizer::after {
+  opacity: 1;
 }
 
 .question-dock-title {
@@ -1739,6 +1783,7 @@ textarea:focus {
 
 .feedback-block .markdown-text {
   gap: 0.7em;
+  font-weight: 400;
 }
 
 .study-complete-panel {
@@ -2427,6 +2472,7 @@ textarea {
 
   .answer-layout.with-dock {
     grid-template-columns: 1fr;
+    padding-right: 0;
   }
 
   .study-panel {
@@ -2436,7 +2482,12 @@ textarea {
 
   .question-dock {
     position: static;
+    width: 100%;
     max-height: none;
+  }
+
+  .question-dock-resizer {
+    display: none;
   }
 
   .card-meta {
