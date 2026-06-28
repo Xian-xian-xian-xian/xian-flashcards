@@ -4,7 +4,7 @@ set -euo pipefail
 ECS_HOST="${ECS_HOST:-root@121.43.195.214}"
 ECS_KEY="${ECS_KEY:-$HOME/.ssh/codex_aliyun_flashcards}"
 REMOTE_DIR="${REMOTE_DIR:-/root/flashcards}"
-CONTROL_PATH="${TMPDIR:-/tmp}/xian-flashcards-ecs-%r@%h:%p"
+CONTROL_PATH="${CONTROL_PATH:-/tmp/xfcecs-%C}"
 
 ssh_base=(
   ssh
