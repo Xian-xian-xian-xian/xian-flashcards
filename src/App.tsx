@@ -52,11 +52,12 @@ import type { Card, CardType, DailyTask, Deck, ReviewRating, ReviewRemaining, Re
 type View = "home" | "deck" | "study" | "import" | "settings" | "about";
 type SyncState = "idle" | "syncing" | "success" | "error" | "conflict";
 
-const version = "0.3.3";
+const version = "0.3.4";
 const logExportPressCount = 6;
 const logExportKey = "a";
 const logExportResetMs = 1800;
 const blankAnswerSeparator = "\u001f";
+const studyRootDeckStoragePrefix = "xian-flashcards-study-root-deck";
 
 const cardTypeLabels: Record<CardType, string> = {
   basic: "普通卡",
@@ -133,6 +134,23 @@ function splitBlankAnswerText(value: string) {
     .split(new RegExp(`[${blankAnswerSeparator}\\n|/／、，,；;]+`))
     .map((item) => item.trim())
     .filter(Boolean);
+}
+
+function splitAlternativeAnswers(value: string) {
+  return value
+    .split(/\s*(?:或者|或|\bor\b)\s*/i)
+    .map((item) => item.trim())
+    .filter(Boolean);
+}
+
+function matchesAnyAlternative(answer: string, correctAnswer: string) {
+  const alternatives = splitAlternativeAnswers(correctAnswer);
+  const candidates = alternatives.length > 0 ? alternatives : [correctAnswer];
+  return candidates.some((candidate) => normalizeAnswer(answer) === normalizeAnswer(candidate));
+}
+
+function blankAnswerPartMatches(answer: string, correctAnswer: string) {
+  return Boolean(answer.trim()) && matchesAnyAlternative(answer, correctAnswer);
 }
 
 function blankOrderlessGroups(front: string, count: number) {
@@ -406,15 +424,20 @@ function isCorrectAnswer(card: Card, answer: string) {
     if (count > 1 && correctAnswers.length === count) {
       const matched = Array.from({ length: count }, () => false);
       for (const group of blankOrderlessGroups(card.front, count)) {
-        const userGroup = group.map((index) => normalizeAnswer(answers[index])).sort();
-        const correctGroup = group.map((index) => normalizeAnswer(correctAnswers[index])).sort();
-        if (userGroup.some((item) => !item) || userGroup.join("\n") !== correctGroup.join("\n")) return false;
+        const remaining = group.map((index) => answers[index]);
+        if (remaining.some((item) => !item.trim())) return false;
+        for (const index of group) {
+          const matchedAnswerIndex = remaining.findIndex((item) => matchesAnyAlternative(item, correctAnswers[index]));
+          if (matchedAnswerIndex === -1) return false;
+          remaining.splice(matchedAnswerIndex, 1);
+        }
         group.forEach((index) => { matched[index] = true; });
       }
-      return answers.every((item, index) => matched[index] || normalizeAnswer(item) === normalizeAnswer(correctAnswers[index]));
+      return answers.every((item, index) => matched[index] || blankAnswerPartMatches(item, correctAnswers[index]));
     }
     if (count > 1) return normalizeAnswer(displayBlankAnswer(answer)) === normalizeAnswer(card.back);
     const userAnswers = splitBlankAnswerText(answer);
+    if (userAnswers.length === 1 && correctAnswers.length === 1) return matchesAnyAlternative(userAnswers[0], correctAnswers[0]);
     if (userAnswers.length > 1 && correctAnswers.length === userAnswers.length) {
       return userAnswers.map(normalizeAnswer).sort().join("\n") === correctAnswers.map(normalizeAnswer).sort().join("\n");
     }
@@ -454,6 +477,20 @@ function applyTheme(mode: ThemeMode) {
   const prefersDark = window.matchMedia("(prefers-color-scheme: dark)").matches;
   const dark = mode === "dark" || (mode === "system" && prefersDark);
   document.documentElement.dataset.theme = dark ? "dark" : "light";
+}
+
+function studyRootDeckStorageKey(userId: number) {
+  return `${studyRootDeckStoragePrefix}:${userId}`;
+}
+
+function readStoredStudyRootDeckId(userId: number, decks: Deck[]) {
+  const storedId = Number(window.localStorage.getItem(studyRootDeckStorageKey(userId)));
+  return Number.isFinite(storedId) && decks.some((deck) => deck.id === storedId && deck.depth === 1) ? storedId : null;
+}
+
+function writeStoredStudyRootDeckId(userId: number | null, deckId: number | null) {
+  if (!userId || !deckId) return;
+  window.localStorage.setItem(studyRootDeckStorageKey(userId), String(deckId));
 }
 
 function playAnswerSound(result: "right" | "wrong") {
@@ -645,8 +682,15 @@ export default function App() {
       setSyncStatus(nextSyncStatus);
       applyTheme(nextSettings.theme);
       setSelectedDeckId((current) => current && nextDecks.some((deck) => deck.id === current) ? current : nextDecks[0]?.id ?? null);
-      setStudyRootDeckId((current) => current && nextDecks.some((deck) => deck.id === current && deck.depth === 1) ? current : nextDecks.find((deck) => deck.depth === 1)?.id ?? null);
-      const rootId = studyRootDeckId ?? nextDecks.find((deck) => deck.depth === 1)?.id;
+      const fallbackRootId = nextDecks.find((deck) => deck.depth === 1)?.id ?? null;
+      const nextRootId = (studyRootDeckId && nextDecks.some((deck) => deck.id === studyRootDeckId && deck.depth === 1))
+        ? studyRootDeckId
+        : user
+          ? readStoredStudyRootDeckId(user.id, nextDecks) ?? fallbackRootId
+          : fallbackRootId;
+      setStudyRootDeckId(nextRootId);
+      writeStoredStudyRootDeckId(user?.id ?? null, nextRootId);
+      const rootId = nextRootId;
       setDueCards(rootId ? await api.dueCards(rootId, 80) : []);
       if (!options.silent) setSyncState("success");
     } catch (error) {
@@ -699,6 +743,11 @@ export default function App() {
     }
     await afterMutation();
     return updatedCard;
+  }
+
+  function selectStudyRootDeck(id: number) {
+    setStudyRootDeckId(id);
+    writeStoredStudyRootDeckId(user?.id ?? null, id);
   }
 
   useEffect(() => {
@@ -906,7 +955,7 @@ export default function App() {
               setView("deck");
             }}
             onStudy={(id) => {
-              setStudyRootDeckId(id);
+              selectStudyRootDeck(id);
               setView("study");
             }}
           />
@@ -995,7 +1044,7 @@ export default function App() {
             cards={dueCards}
             rootDecks={rootDecks}
             selectedRootDeckId={studyRootDeckId}
-            onSelectRootDeck={setStudyRootDeckId}
+            onSelectRootDeck={selectStudyRootDeck}
             selectedDeck={studyRootDeck}
             studyTextScale={settings.studyTextScale}
             studyTextAlign={settings.studyTextAlign}
@@ -1051,6 +1100,7 @@ export default function App() {
         {view === "settings" && (
           <SettingsView
             settings={settings}
+            onThemeChange={saveTheme}
             onSave={async (next) => {
               await withPending("settings", async () => {
                 const previous = settings;
@@ -2319,7 +2369,7 @@ function ImportView(props: { decks: Deck[]; selectedDeckId: number | null; onSel
   );
 }
 
-function SettingsView(props: { settings: Settings; onSave: (settings: Partial<Settings>) => Promise<void>; onNotify: () => Promise<void>; saving: boolean; notifying: boolean }) {
+function SettingsView(props: { settings: Settings; onThemeChange: (theme: ThemeMode) => Promise<void>; onSave: (settings: Partial<Settings>) => Promise<void>; onNotify: () => Promise<void>; saving: boolean; notifying: boolean }) {
   const [draft, setDraft] = useState<Settings>(props.settings);
 
   useEffect(() => {
@@ -2337,9 +2387,14 @@ function SettingsView(props: { settings: Settings; onSave: (settings: Partial<Se
     await props.onSave(draft);
   }
 
+  function changeTheme(theme: ThemeMode) {
+    updateDraft({ theme });
+    props.onThemeChange(theme).catch(() => undefined);
+  }
+
   return (
     <form className="panel settings-panel" onSubmit={save}>
-      <label>主题<select value={draft.theme} onChange={(event) => updateDraft({ theme: event.target.value as ThemeMode })}><option value="system">跟随系统</option><option value="light">浅色</option><option value="dark">暗黑</option></select></label>
+      <label>主题<select value={draft.theme} onChange={(event) => changeTheme(event.target.value as ThemeMode)}><option value="system">跟随系统</option><option value="light">浅色</option><option value="dark">暗黑</option></select></label>
       <label>默认发音语言<select value={draft.voiceLanguage} onChange={(event) => updateDraft({ voiceLanguage: event.target.value })}><option value="en-US">英语 en-US</option><option value="ja-JP">日语 ja-JP</option><option value="ko-KR">韩语 ko-KR</option><option value="fr-FR">法语 fr-FR</option><option value="de-DE">德语 de-DE</option></select></label>
       <label>自动发音<select value={draft.autoSpeak} onChange={(event) => updateDraft({ autoSpeak: event.target.value as Settings["autoSpeak"] })}><option value="off">关闭</option><option value="on">开启</option></select></label>
       <label>每日新学目标<input type="number" min={0} value={draft.dailyNewGoal} onChange={(event) => updateDraft({ dailyNewGoal: Number(event.target.value) })} /></label>
@@ -2358,6 +2413,7 @@ function AboutView(props: { syncStatus: SyncStatus | null }) {
       <div className="about-title"><Info /><div><p className="eyebrow">闪记</p><h2>版本 {version}</h2></div></div>
       <div className="schedule-box changelog-box">
         <h3>更新日志</h3>
+        <div className="changelog-row"><strong>0.3.4</strong><span>2026-06-28</span><p>填空题答案支持“或/或者/or”多候选任一正确；学习页记住上次大卡组；主题下拉会即时保存，避免同步后回到旧主题。</p></div>
         <div className="changelog-row"><strong>0.3.3</strong><span>2026-06-28</span><p>修复浅色模式解析/其他文字颜色、空行间距、填空输入框间距、多空答案分隔和并列空位乱序判定；跟随系统主题会响应系统暗黑模式变化。</p></div>
         <div className="changelog-row"><strong>0.3.2</strong><span>2026-06-28</span><p>填空题解析改为提交后显示；编辑字段在短文本状态也支持换行；填空输入框去掉下划线、占位文字和加粗样式。</p></div>
         <div className="changelog-row"><strong>0.3.1</strong><span>2026-06-28</span><p>填空题学习页改为选择题同款题干版式；题干空位直接替换为输入框，支持 Markdown、回车提交和自动判定。</p></div>
