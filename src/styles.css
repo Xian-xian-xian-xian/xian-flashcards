@@ -1114,6 +1114,12 @@ textarea:focus {
   color: var(--primary-strong);
 }
 
+.study-actions > .mini-button.active {
+  border-color: var(--primary);
+  background: var(--primary-soft);
+  color: var(--primary-strong);
+}
+
 .text-tool-popover {
   position: absolute;
   right: 0;
@@ -1437,6 +1443,11 @@ textarea:focus {
 .markdown-paragraph,
 .markdown-line {
   display: block;
+}
+
+.markdown-blank-line {
+  display: block;
+  min-height: calc(var(--blank-lines, 1) * 0.6em * var(--study-line-height, 1.5));
 }
 
 .markdown-fragment {

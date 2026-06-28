@@ -39,7 +39,7 @@ type CardType = "basic" | "word" | "choice" | "blank";
 const maxDeckDepth = 5;
 const sessionCookieName = "flashcards_session";
 const sessionDays = 30;
-const appVersion = "0.2.15";
+const appVersion = "0.2.16";
 const timeZone = "Asia/Shanghai";
 const normalizedUsers = new Set<number>();
 
@@ -95,6 +95,13 @@ function hasAnyKey(row: Record<string, unknown>, keys: string[]) {
   return keys.some((key) => key in row);
 }
 
+function splitChoiceText(value: string) {
+  return value
+    .split(/[|\n]+|[；;](?=\s*\S)/)
+    .map((item) => item.trim())
+    .filter(Boolean);
+}
+
 function normalizeChoices(value: unknown, fallback: string[] = []) {
   let raw: unknown[] = fallback;
   if (Array.isArray(value)) raw = value;
@@ -106,7 +113,7 @@ function normalizeChoices(value: unknown, fallback: string[] = []) {
       raw = fallback;
     }
   } else if (typeof value === "string") {
-    raw = value.split(/[|；;\n]+/);
+    raw = splitChoiceText(value);
   }
   return Array.from(new Set(raw.map((item: unknown) => String(item ?? "").trim()).filter(Boolean))).slice(0, 8);
 }
@@ -148,10 +155,11 @@ function importChoiceValues(row: Record<string, unknown>) {
     const number = index + 1;
     return rowValue(row, [`option${number}`, `Option${number}`, `选项${number}`, `选项 ${number}`]);
   });
+  const combinedOptions = rowValue(row, ["options", "Options", "选项", "候选项"]);
   return normalizeChoices([
     ...optionValues,
-    rowValue(row, ["options", "Options", "选项", "候选项"])
-  ].flatMap((value) => String(value ?? "").split(/[|；;\n]+/)));
+    ...splitChoiceText(String(combinedOptions ?? ""))
+  ]);
 }
 
 function inferCardType(row: Record<string, unknown>, front: string, choices: string[]): CardType {

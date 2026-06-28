@@ -10,6 +10,7 @@ import {
   Columns2,
   Edit3,
   Eye,
+  EyeOff,
   FileSpreadsheet,
   FolderPlus,
   HelpCircle,
@@ -51,7 +52,7 @@ import type { Card, CardType, DailyTask, Deck, ReviewRating, ReviewRemaining, Re
 type View = "home" | "deck" | "study" | "import" | "settings" | "about";
 type SyncState = "idle" | "syncing" | "success" | "error" | "conflict";
 
-const version = "0.2.15";
+const version = "0.2.16";
 
 const cardTypeLabels: Record<CardType, string> = {
   basic: "普通卡",
@@ -107,14 +108,33 @@ function parseChoices(value: string | string[] | undefined) {
   } catch {
     // Fall through to separator parsing.
   }
-  const separator = value.includes("|") || value.includes("；") || value.includes(";") ? /[|；;]/ : /\n{1,}/;
-  return value.split(separator).map((item) => item.trim()).filter(Boolean);
+  return splitChoiceText(value);
 }
 
 type MarkdownBlock =
   | { type: "code"; language: string; content: string }
   | { type: "math"; content: string }
+  | { type: "blank"; count: number }
   | { type: "text"; content: string };
+
+function splitChoiceText(value: string) {
+  return value
+    .split(/[|\n]+|[；;](?=\s*\S)/)
+    .map((item) => item.trim())
+    .filter(Boolean);
+}
+
+function pushMarkdownTextBlocks(blocks: MarkdownBlock[], value: string) {
+  value.split(/(\n{2,})/).forEach((part) => {
+    if (!part) return;
+    if (/^\n{2,}$/.test(part)) {
+      blocks.push({ type: "blank", count: part.length - 1 });
+      return;
+    }
+    const content = part.replace(/^\n+|\n+$/g, "").trim();
+    if (content) blocks.push({ type: "text", content });
+  });
+}
 
 function markdownBlocks(value: string): MarkdownBlock[] {
   const blocks: MarkdownBlock[] = [];
@@ -126,7 +146,7 @@ function markdownBlocks(value: string): MarkdownBlock[] {
 
   normalized.replace(pattern, (match, language, code, math, offset) => {
     const before = normalized.slice(lastIndex, offset);
-    before.split(/\n{2,}/).map((block) => block.trim()).filter(Boolean).forEach((content) => blocks.push({ type: "text", content }));
+    pushMarkdownTextBlocks(blocks, before);
     if (match.startsWith("```")) {
       blocks.push({ type: "code", language: String(language || "").trim(), content: String(code ?? "").replace(/\n$/, "") });
     } else {
@@ -136,39 +156,54 @@ function markdownBlocks(value: string): MarkdownBlock[] {
     return match;
   });
 
-  normalized.slice(lastIndex).split(/\n{2,}/).map((block) => block.trim()).filter(Boolean).forEach((content) => blocks.push({ type: "text", content }));
+  pushMarkdownTextBlocks(blocks, normalized.slice(lastIndex));
   return blocks;
+}
+
+const escapedMarkdownPattern = /\\([\\`*_[\]()#+\-.!|>~$])/g;
+
+function protectEscapedMarkdown(value: string) {
+  const escaped: string[] = [];
+  const text = value.replace(escapedMarkdownPattern, (_match, char) => {
+    const token = `\uE000${escaped.length}\uE001`;
+    escaped.push(char);
+    return token;
+  });
+  const restore = (part: string) => part.replace(/\uE000(\d+)\uE001/g, (_match, index) => escaped[Number(index)] ?? "");
+  return { text, restore };
 }
 
 function renderInlineMarkdown(value: string) {
   const nodes: ReactNode[] = [];
+  const protectedValue = protectEscapedMarkdown(value);
+  const source = protectedValue.text;
   const pattern = /(!\[[^\]]*]\([^)]+\)|\$\$[^$]+\$\$|\$[^$\n]+\$|\*\*[^*]+\*\*|__[^_]+__|~~[^~]+~~|`[^`]+`|\[[^\]]+\]\([^)]+\)|\*[^*]+\*|_[^_]+_)/g;
   let lastIndex = 0;
-  value.replace(pattern, (match, _capture, offset) => {
-    if (offset > lastIndex) nodes.push(value.slice(lastIndex, offset));
+  source.replace(pattern, (match, _capture, offset) => {
+    if (offset > lastIndex) nodes.push(protectedValue.restore(source.slice(lastIndex, offset)));
     if (match.startsWith("![")) {
       const image = match.match(/^!\[([^\]]*)]\(([^)]+)\)$/);
-      nodes.push(image ? <img key={nodes.length} src={image[2]} alt={image[1]} loading="lazy" /> : match);
+      nodes.push(image ? <img key={nodes.length} src={protectedValue.restore(image[2])} alt={protectedValue.restore(image[1])} loading="lazy" /> : protectedValue.restore(match));
     } else if (match.startsWith("$$")) {
-      nodes.push(<span key={nodes.length} className="math-inline">{match.slice(2, -2)}</span>);
+      nodes.push(<span key={nodes.length} className="math-inline">{protectedValue.restore(match.slice(2, -2))}</span>);
     } else if (match.startsWith("$")) {
-      nodes.push(<span key={nodes.length} className="math-inline">{match.slice(1, -1)}</span>);
+      nodes.push(<span key={nodes.length} className="math-inline">{protectedValue.restore(match.slice(1, -1))}</span>);
     } else if (match.startsWith("**") || match.startsWith("__")) {
-      nodes.push(<strong key={nodes.length}>{match.slice(2, -2)}</strong>);
+      nodes.push(<strong key={nodes.length}>{protectedValue.restore(match.slice(2, -2))}</strong>);
     } else if (match.startsWith("~~")) {
-      nodes.push(<del key={nodes.length}>{match.slice(2, -2)}</del>);
+      nodes.push(<del key={nodes.length}>{protectedValue.restore(match.slice(2, -2))}</del>);
     } else if (match.startsWith("`")) {
-      nodes.push(<code key={nodes.length}>{match.slice(1, -1)}</code>);
+      nodes.push(<code key={nodes.length}>{protectedValue.restore(match.slice(1, -1))}</code>);
     } else if (match.startsWith("[")) {
       const link = match.match(/^\[([^\]]+)\]\(([^)]+)\)$/);
-      nodes.push(link ? <a key={nodes.length} href={link[2]} target="_blank" rel="noreferrer">{link[1]}</a> : match);
+      nodes.push(link ? <a key={nodes.length} href={protectedValue.restore(link[2])} target="_blank" rel="noreferrer">{protectedValue.restore(link[1])}</a> : protectedValue.restore(match));
     } else {
-      nodes.push(<em key={nodes.length}>{match.slice(1, -1)}</em>);
+      nodes.push(<em key={nodes.length}>{protectedValue.restore(match.slice(1, -1))}</em>);
     }
     lastIndex = offset + match.length;
     return match;
   });
-  if (lastIndex < value.length) nodes.push(value.slice(lastIndex));
+  if (lastIndex < source.length) nodes.push(protectedValue.restore(source.slice(lastIndex)));
   return nodes;
 }
 
@@ -241,6 +276,7 @@ function MarkdownText(props: { value: string; className?: string }) {
           );
         }
         if (block.type === "math") return <span key={index} className="math-block">{block.content}</span>;
+        if (block.type === "blank") return <span key={index} className="markdown-blank-line" style={{ "--blank-lines": String(block.count) } as CSSProperties} />;
         return renderMarkdownTextBlock(block.content, index);
       })}
     </span>
@@ -1835,6 +1871,14 @@ function StudyView(props: {
                   </div>
                 )}
               </TextToolButton>
+              <button
+                className={`mini-button ${showAnswerDock ? "active" : ""}`}
+                title={answerDockOpen ? "隐藏题目参考" : "显示题目参考"}
+                disabled={!checked || !explanationIsLong}
+                onClick={() => setAnswerDockOpen((open) => !open)}
+              >
+                {answerDockOpen ? <EyeOff /> : <Eye />}
+              </button>
               <button className="mini-button" title={immersive ? "退出沉浸学习" : "沉浸学习"} onClick={toggleImmersive}>{immersive ? <Minimize2 /> : <Maximize2 />}</button>
               <button className="mini-button" title="撤销上一张" disabled={history.length === 0 || Boolean(busy)} onClick={undo}><ArrowLeft /></button>
               <button className="mini-button" title="编辑当前卡片" onClick={editCurrentStudyCard}><Edit3 /></button>
@@ -2118,6 +2162,7 @@ function AboutView(props: { syncStatus: SyncStatus | null }) {
       <div className="about-title"><Info /><div><p className="eyebrow">闪记</p><h2>版本 {version}</h2></div></div>
       <div className="schedule-box changelog-box">
         <h3>更新日志</h3>
+        <div className="changelog-row"><strong>0.2.16</strong><span>2026-06-28</span><p>增强 Markdown 转义和空行显示；学习页顶部增加题目参考显示开关；修复尾部分号选项被丢弃。</p></div>
         <div className="changelog-row"><strong>0.2.15</strong><span>2026-06-28</span><p>修复加粗包裹代码块时的渲染；编辑时立即回到页面顶部；学习反馈按钮贴底三等分显示。</p></div>
         <div className="changelog-row"><strong>0.2.14</strong><span>2026-06-27</span><p>题目参考改为屏幕固定区域，滚动学习内容时不再跟随；选项改为无序号紧凑显示。</p></div>
         <div className="changelog-row"><strong>0.2.13</strong><span>2026-06-27</span><p>调整学习页评级按钮宽度、题目参考位置和答题反馈字号；补齐 Markdown 分割线、标题、引用、表格等展示，并让换行跟随学习行距。</p></div>
