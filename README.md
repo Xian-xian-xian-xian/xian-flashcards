@@ -44,7 +44,7 @@ git commit -m "Release 0.2.7"
 GIT_SSH_COMMAND="ssh -i ~/.ssh/codex_aliyun_flashcards -o IdentitiesOnly=yes" git push origin main
 ```
 
-推到 GitHub 只更新仓库，不会自动更新 ECS。推荐用部署脚本发布当前 Git 提交；脚本会复用 SSH 连接、只备份数据库、上传已提交文件、在服务器重新构建并重启 PM2：
+推到 GitHub 只更新仓库，不会自动更新 ECS。推荐用部署脚本发布当前 Git 提交；脚本会复用 SSH 连接、只备份数据库、优先增量上传已提交文件、在服务器重新构建并重启 PM2：
 
 ```bash
 pnpm deploy:ecs
