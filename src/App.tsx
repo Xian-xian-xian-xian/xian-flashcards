@@ -52,7 +52,7 @@ import type { Card, CardType, DailyTask, Deck, ReviewRating, ReviewRemaining, Re
 type View = "home" | "deck" | "study" | "import" | "settings" | "about";
 type SyncState = "idle" | "syncing" | "success" | "error" | "conflict";
 
-const version = "0.3.5";
+const version = "0.3.6";
 const logExportPressCount = 6;
 const logExportKey = "a";
 const logExportResetMs = 1800;
@@ -1682,6 +1682,7 @@ function StudyView(props: {
   const [answerDockOpen, setAnswerDockOpen] = useState(true);
   const [answerDockWidth, setAnswerDockWidth] = useState(300);
   const [cardMotion, setCardMotion] = useState<"entering" | "leaving" | "idle">("entering");
+  const [cardRevision, setCardRevision] = useState(0);
   const [celebrationKey, setCelebrationKey] = useState(0);
   const [completionPlayed, setCompletionPlayed] = useState(false);
   const answerLayoutRef = useRef<HTMLDivElement | null>(null);
@@ -1708,7 +1709,7 @@ function StudyView(props: {
     const timer = window.setTimeout(() => setCardMotion("idle"), 220);
     if (props.autoSpeak && card && isWordCard(card)) props.onSpeak(card.front, card.language ?? props.selectedDeck?.language);
     return () => window.clearTimeout(timer);
-  }, [card?.id, props.autoSpeak]);
+  }, [card?.id, cardRevision, props.autoSpeak]);
 
   useEffect(() => {
     if (sessionCards.length > 0 && !card && !completionPlayed) {
@@ -1749,6 +1750,7 @@ function StudyView(props: {
       setAnswerDockOpen(true);
       setCompletionPlayed(false);
       setEditingStudyCard(null);
+      setCardRevision(0);
       setCardMotion("entering");
       await loadRemaining();
     } finally {
@@ -1785,6 +1787,8 @@ function StudyView(props: {
       setChecked(null);
       setSelectedChoice("");
       setCelebrationKey(0);
+      setCardRevision((value) => value + 1);
+      setCardMotion("entering");
       await loadRemaining();
     } finally {
       setBusy("");
@@ -1805,6 +1809,8 @@ function StudyView(props: {
       setChecked(previous.checked);
       setSelectedChoice(previous.selectedChoice);
       setCompletionPlayed(false);
+      setCardRevision((value) => value + 1);
+      setCardMotion("entering");
       await loadRemaining();
     } finally {
       setBusy("");
@@ -2021,7 +2027,7 @@ function StudyView(props: {
       {!card ? total > 0 ? (
         <StudyComplete total={total} completed={completed} onRestart={() => startSession()} busy={busy === "session"} />
       ) : <EmptyState text={studyKind === "new" ? "这个大卡组暂无可新学卡片。" : "这个大卡组暂无到期复习卡片。"} /> : (
-        <div className={`study-panel ${cardMotion} align-${props.studyTextAlign} ${checked === "right" ? "celebrating" : ""}`} style={studyStyle}>
+        <div key={`${card.id}-${cardRevision}`} className={`study-panel ${cardMotion} align-${props.studyTextAlign} ${checked === "right" ? "celebrating" : ""}`} style={studyStyle}>
           {checked === "right" && (
             <div className="answer-celebration" key={celebrationKey} aria-hidden="true">
               <span className="celebration-ring" />
@@ -2416,6 +2422,7 @@ function AboutView(props: { syncStatus: SyncStatus | null }) {
       <div className="about-title"><Info /><div><p className="eyebrow">闪记</p><h2>版本 {version}</h2></div></div>
       <div className="schedule-box changelog-box">
         <h3>更新日志</h3>
+        <div className="changelog-row"><strong>0.3.6</strong><span>2026-06-29</span><p>修复最后一张卡片选择“模糊/不认识”后重复同一张卡时，学习面板停留在离场动画导致黑屏的问题。</p></div>
         <div className="changelog-row"><strong>0.3.5</strong><span>2026-06-28</span><p>修复学习页最后一张选择“不认识/模糊”时可能退出本轮的问题；学习评分不再触发整站刷新，错题会稳定留在当前队列重复。</p></div>
         <div className="changelog-row"><strong>0.3.4</strong><span>2026-06-28</span><p>填空题答案支持“或/或者/or”多候选任一正确；学习页记住上次大卡组；主题下拉会即时保存，避免同步后回到旧主题。</p></div>
         <div className="changelog-row"><strong>0.3.3</strong><span>2026-06-28</span><p>修复浅色模式解析/其他文字颜色、空行间距、填空输入框间距、多空答案分隔和并列空位乱序判定；跟随系统主题会响应系统暗黑模式变化。</p></div>
