@@ -32,6 +32,17 @@ async function request<T>(url: string, options?: RequestInit): Promise<T> {
   return response.json();
 }
 
+async function download(url: string) {
+  const response = await fetch(url, { credentials: "include" });
+  if (!response.ok) {
+    const body = await response.json().catch(() => ({}));
+    throw new Error(body.error ?? `请求失败：${response.status}`);
+  }
+  const disposition = response.headers.get("content-disposition") ?? "";
+  const filename = decodeURIComponent(disposition.match(/filename\*=UTF-8''([^;]+)/)?.[1] ?? "flashcards-recent-logs.ndjson");
+  return { blob: await response.blob(), filename };
+}
+
 export const api = {
   authStatus: () => request<{ authenticated: boolean; user: User | null; canRegister: boolean }>("/api/auth/status"),
   login: (payload: { username: string; password: string }) =>
@@ -73,5 +84,6 @@ export const api = {
     request<{ ok: true }>("/api/daily-task/settings", { method: "PUT", body: JSON.stringify(payload) }),
   syncStatus: () => request<SyncStatus>("/api/sync/status"),
   importCards: (form: FormData) =>
-    request<{ imported: number; skipped: number }>("/api/import", { method: "POST", body: form })
+    request<{ imported: number; skipped: number }>("/api/import", { method: "POST", body: form }),
+  exportRecentLogs: () => download("/api/logs/recent?minutes=10")
 };

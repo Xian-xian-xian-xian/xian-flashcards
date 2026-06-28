@@ -52,7 +52,10 @@ import type { Card, CardType, DailyTask, Deck, ReviewRating, ReviewRemaining, Re
 type View = "home" | "deck" | "study" | "import" | "settings" | "about";
 type SyncState = "idle" | "syncing" | "success" | "error" | "conflict";
 
-const version = "0.2.16";
+const version = "0.2.17";
+const logExportPressCount = 6;
+const logExportKey = "a";
+const logExportResetMs = 1800;
 
 const cardTypeLabels: Record<CardType, string> = {
   basic: "普通卡",
@@ -294,6 +297,16 @@ function FeedbackBlock(props: { label: string; value: string; kind: "explanation
       <span>{props.label}</span>
       <MarkdownText value={props.value} />
     </div>
+  );
+}
+
+function LabeledMarkdown(props: { label: string; value: string }) {
+  if (!props.value.trim()) return null;
+  return (
+    <span className="labeled-markdown">
+      <span className="labeled-markdown-label">{props.label}</span>
+      <MarkdownText value={props.value} />
+    </span>
   );
 }
 
@@ -625,6 +638,48 @@ export default function App() {
   useEffect(() => {
     applyTheme(settings.theme);
   }, [settings.theme]);
+
+  useEffect(() => {
+    let pressCount = 0;
+    let resetTimer = 0;
+    const reset = () => {
+      pressCount = 0;
+      if (resetTimer) window.clearTimeout(resetTimer);
+      resetTimer = 0;
+    };
+    const downloadRecentLogs = async () => {
+      try {
+        const { blob, filename } = await api.exportRecentLogs();
+        const url = URL.createObjectURL(blob);
+        const link = document.createElement("a");
+        link.href = url;
+        link.download = filename;
+        document.body.append(link);
+        link.click();
+        link.remove();
+        URL.revokeObjectURL(url);
+        showToast("已导出最近 10 分钟日志");
+      } catch (error) {
+        showToast((error as Error).message, "error");
+      }
+    };
+    const onKeyDown = (event: KeyboardEvent) => {
+      const target = event.target as HTMLElement | null;
+      if (event.key.toLowerCase() !== logExportKey || event.metaKey || event.ctrlKey || event.altKey) return;
+      if (target && ["INPUT", "TEXTAREA", "SELECT"].includes(target.tagName)) return;
+      pressCount += 1;
+      if (resetTimer) window.clearTimeout(resetTimer);
+      resetTimer = window.setTimeout(reset, logExportResetMs);
+      if (pressCount < logExportPressCount) return;
+      reset();
+      downloadRecentLogs();
+    };
+    window.addEventListener("keydown", onKeyDown);
+    return () => {
+      reset();
+      window.removeEventListener("keydown", onKeyDown);
+    };
+  }, []);
 
   useEffect(() => {
     if (!user) return;
@@ -2018,7 +2073,7 @@ function CardBack(props: { card: Card }) {
       {props.card.phonetic && <em>{props.card.phonetic}</em>}
       <b><MarkdownText value={props.card.back} /></b>
       {props.card.example && <small><MarkdownText value={props.card.example} /></small>}
-      {props.card.mnemonic && <small>助记：<MarkdownText value={props.card.mnemonic} /></small>}
+      <LabeledMarkdown label="助记" value={props.card.mnemonic} />
     </span>
   );
 }
@@ -2162,6 +2217,7 @@ function AboutView(props: { syncStatus: SyncStatus | null }) {
       <div className="about-title"><Info /><div><p className="eyebrow">闪记</p><h2>版本 {version}</h2></div></div>
       <div className="schedule-box changelog-box">
         <h3>更新日志</h3>
+        <div className="changelog-row"><strong>0.2.17</strong><span>2026-06-28</span><p>统一其他和助记字段的 Markdown 换行展示；空行间距改为真实一行的 35%；连续按 6 次 a 可导出最近 10 分钟日志。</p></div>
         <div className="changelog-row"><strong>0.2.16</strong><span>2026-06-28</span><p>增强 Markdown 转义和空行显示；学习页顶部增加题目参考显示开关；修复尾部分号选项被丢弃。</p></div>
         <div className="changelog-row"><strong>0.2.15</strong><span>2026-06-28</span><p>修复加粗包裹代码块时的渲染；编辑时立即回到页面顶部；学习反馈按钮贴底三等分显示。</p></div>
         <div className="changelog-row"><strong>0.2.14</strong><span>2026-06-27</span><p>题目参考改为屏幕固定区域，滚动学习内容时不再跟随；选项改为无序号紧凑显示。</p></div>

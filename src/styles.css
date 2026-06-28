@@ -1447,7 +1447,7 @@ textarea:focus {
 
 .markdown-blank-line {
   display: block;
-  min-height: calc(var(--blank-lines, 1) * 0.6em * var(--study-line-height, 1.5));
+  min-height: calc(var(--blank-lines, 1) * 0.35em * var(--study-line-height, 1.5));
 }
 
 .markdown-fragment {
@@ -1488,6 +1488,19 @@ textarea:focus {
   justify-items: center;
   width: min(720px, 100%);
   font-size: inherit;
+}
+
+.labeled-markdown {
+  display: grid;
+  gap: 0.35em;
+  width: 100%;
+  text-align: inherit;
+}
+
+.labeled-markdown-label {
+  color: var(--muted);
+  font-size: 0.82em;
+  font-weight: 900;
 }
 
 .flip-card .word-face strong,

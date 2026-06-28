@@ -20,6 +20,25 @@ const templateDir = path.resolve(process.cwd(), "模版");
 
 app.use(cors({ origin: true, credentials: true }));
 app.use(express.json({ limit: "10mb" }));
+app.use((req, res, next) => {
+  const startedAt = Date.now();
+  res.on("finish", () => {
+    appendRecentLog({
+      at: nowIso(),
+      level: res.statusCode >= 500 ? "error" : res.statusCode >= 400 ? "warn" : "info",
+      source: "request",
+      message: `${req.method} ${req.originalUrl} ${res.statusCode}`,
+      meta: {
+        method: req.method,
+        path: req.originalUrl,
+        status: res.statusCode,
+        durationMs: Date.now() - startedAt,
+        ip: req.ip
+      }
+    });
+  });
+  next();
+});
 
 type CardInput = {
   card_type?: CardType;
@@ -39,9 +58,71 @@ type CardType = "basic" | "word" | "choice" | "blank";
 const maxDeckDepth = 5;
 const sessionCookieName = "flashcards_session";
 const sessionDays = 30;
-const appVersion = "0.2.16";
+const appVersion = "0.2.17";
 const timeZone = "Asia/Shanghai";
 const normalizedUsers = new Set<number>();
+const recentLogWindowMs = 10 * 60 * 1000;
+const maxRecentLogEntries = 2000;
+
+type RecentLogEntry = {
+  at: string;
+  level: "info" | "warn" | "error";
+  source: "server" | "request";
+  message: string;
+  meta?: Record<string, unknown>;
+};
+
+const recentLogs: RecentLogEntry[] = [];
+const originalConsole = {
+  log: console.log.bind(console),
+  warn: console.warn.bind(console),
+  error: console.error.bind(console)
+};
+
+function stringifyLogPart(part: unknown) {
+  if (part instanceof Error) return `${part.name}: ${part.message}\n${part.stack ?? ""}`.trim();
+  if (typeof part === "string") return part;
+  try {
+    return JSON.stringify(part);
+  } catch {
+    return String(part);
+  }
+}
+
+function pruneRecentLogs(now = Date.now()) {
+  const cutoff = now - recentLogWindowMs;
+  while (recentLogs.length > 0 && new Date(recentLogs[0].at).getTime() < cutoff) recentLogs.shift();
+  while (recentLogs.length > maxRecentLogEntries) recentLogs.shift();
+}
+
+function appendRecentLog(entry: RecentLogEntry) {
+  recentLogs.push(entry);
+  pruneRecentLogs(new Date(entry.at).getTime());
+}
+
+function captureConsole(level: RecentLogEntry["level"], args: unknown[]) {
+  appendRecentLog({
+    at: nowIso(),
+    level,
+    source: "server",
+    message: args.map(stringifyLogPart).join(" ")
+  });
+}
+
+console.log = (...args: unknown[]) => {
+  captureConsole("info", args);
+  originalConsole.log(...args);
+};
+
+console.warn = (...args: unknown[]) => {
+  captureConsole("warn", args);
+  originalConsole.warn(...args);
+};
+
+console.error = (...args: unknown[]) => {
+  captureConsole("error", args);
+  originalConsole.error(...args);
+};
 
 function requireText(value: unknown, name: string) {
   if (typeof value !== "string" || !value.trim()) throw new Error(`${name}不能为空`);
@@ -526,6 +607,20 @@ function dailyTaskSummary(userId: number) {
 
 app.get("/api/health", (_req, res) => {
   res.json({ ok: true, now: nowIso(), version: appVersion });
+});
+
+app.get("/api/logs/recent", requireUser, (req, res) => {
+  const minutes = Math.min(60, Math.max(1, Number(req.query.minutes ?? 10) || 10));
+  const cutoff = Date.now() - minutes * 60 * 1000;
+  pruneRecentLogs();
+  const lines = recentLogs
+    .filter((entry) => new Date(entry.at).getTime() >= cutoff)
+    .map((entry) => JSON.stringify(entry))
+    .join("\n");
+  const filename = `flashcards-recent-${minutes}m-${shanghaiDateKey()}-${new Date().toISOString().slice(11, 19).replace(/:/g, "")}.ndjson`;
+  res.setHeader("Content-Type", "application/x-ndjson; charset=utf-8");
+  res.setHeader("Content-Disposition", `attachment; filename*=UTF-8''${encodeURIComponent(filename)}`);
+  res.send(lines ? `${lines}\n` : "");
 });
 
 app.get("/api/auth/status", (req, res) => {
