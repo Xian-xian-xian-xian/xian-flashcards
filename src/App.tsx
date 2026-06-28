@@ -52,7 +52,7 @@ import type { Card, CardType, DailyTask, Deck, ReviewRating, ReviewRemaining, Re
 type View = "home" | "deck" | "study" | "import" | "settings" | "about";
 type SyncState = "idle" | "syncing" | "success" | "error" | "conflict";
 
-const version = "0.3.1";
+const version = "0.3.2";
 const logExportPressCount = 6;
 const logExportKey = "a";
 const logExportResetMs = 1800;
@@ -1513,19 +1513,16 @@ function CardEditor(props: { card?: Card; onSubmit: (payload: CardPayload) => Pr
 
 function SmartTextField(props: { value: string; onChange: (value: string) => void; placeholder: string; required?: boolean; multilineThreshold?: number }) {
   const expanded = props.value.length > (props.multilineThreshold ?? 42) || props.value.includes("\n");
-  if (expanded) {
-    return (
-      <textarea
-        className="smart-textarea"
-        value={props.value}
-        onChange={(event) => props.onChange(event.target.value)}
-        placeholder={props.placeholder}
-        rows={Math.min(8, Math.max(3, props.value.split("\n").length + 1))}
-        required={props.required}
-      />
-    );
-  }
-  return <input value={props.value} onChange={(event) => props.onChange(event.target.value)} placeholder={props.placeholder} required={props.required} />;
+  return (
+    <textarea
+      className={`smart-textarea ${expanded ? "expanded" : "compact"}`}
+      value={props.value}
+      onChange={(event) => props.onChange(event.target.value)}
+      placeholder={props.placeholder}
+      rows={expanded ? Math.min(8, Math.max(3, props.value.split("\n").length + 1)) : 1}
+      required={props.required}
+    />
+  );
 }
 
 function StudyView(props: {
@@ -2053,7 +2050,6 @@ function StudyView(props: {
                             setAnswer(setBlankAnswerPart(answer, currentBlankCount, blankIndexFromKey(key), event.target.value));
                             setChecked(null);
                           }}
-                          placeholder="填写"
                           aria-label="填空答案"
                           autoComplete="off"
                           disabled={Boolean(busy)}
@@ -2065,13 +2061,11 @@ function StudyView(props: {
                         className={`blank-inline-input standalone ${checked ?? ""}`}
                         value={answer}
                         onChange={(event) => { setAnswer(event.target.value); setChecked(null); }}
-                        placeholder="输入答案"
                         aria-label="填空答案"
                         autoComplete="off"
                         disabled={Boolean(busy)}
                       />
                     )}
-                    {card.example && <MarkdownText value={card.example} className="question-note" />}
                     <button className="primary-button blank-submit-button" disabled={Boolean(busy) || !displayedBlankAnswer}>{busy ? "提交中" : "提交"}</button>
                   </form>
                   {checked && <AnswerFeedback checked={checked} correct={correctAnswer(card)} explanation={explanation} other={otherNote} selected={displayedBlankAnswer} />}
@@ -2318,6 +2312,7 @@ function AboutView(props: { syncStatus: SyncStatus | null }) {
       <div className="about-title"><Info /><div><p className="eyebrow">闪记</p><h2>版本 {version}</h2></div></div>
       <div className="schedule-box changelog-box">
         <h3>更新日志</h3>
+        <div className="changelog-row"><strong>0.3.2</strong><span>2026-06-28</span><p>填空题解析改为提交后显示；编辑字段在短文本状态也支持换行；填空输入框去掉下划线、占位文字和加粗样式。</p></div>
         <div className="changelog-row"><strong>0.3.1</strong><span>2026-06-28</span><p>填空题学习页改为选择题同款题干版式；题干空位直接替换为输入框，支持 Markdown、回车提交和自动判定。</p></div>
         <div className="changelog-row"><strong>0.2.17</strong><span>2026-06-28</span><p>统一其他和助记字段的 Markdown 换行展示；空行间距改为真实一行的 35%；连续按 6 次 a 可导出最近 10 分钟日志。</p></div>
         <div className="changelog-row"><strong>0.2.16</strong><span>2026-06-28</span><p>增强 Markdown 转义和空行显示；学习页顶部增加题目参考显示开关；修复尾部分号选项被丢弃。</p></div>
