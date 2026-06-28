@@ -52,10 +52,11 @@ import type { Card, CardType, DailyTask, Deck, ReviewRating, ReviewRemaining, Re
 type View = "home" | "deck" | "study" | "import" | "settings" | "about";
 type SyncState = "idle" | "syncing" | "success" | "error" | "conflict";
 
-const version = "0.2.17";
+const version = "0.3.1";
 const logExportPressCount = 6;
 const logExportKey = "a";
 const logExportResetMs = 1800;
+const blankAnswerSeparator = "\u001f";
 
 const cardTypeLabels: Record<CardType, string> = {
   basic: "普通卡",
@@ -176,6 +177,8 @@ function protectEscapedMarkdown(value: string) {
   return { text, restore };
 }
 
+const blankMarkerPattern = /(\[\s*\]|_{2,}|（\s*）|\(\s*\))/g;
+
 function renderInlineMarkdown(value: string) {
   const nodes: ReactNode[] = [];
   const protectedValue = protectEscapedMarkdown(value);
@@ -210,11 +213,28 @@ function renderInlineMarkdown(value: string) {
   return nodes;
 }
 
-function renderMarkdownLines(lines: string[]) {
-  return lines.map((line, lineIndex) => <span key={lineIndex} className="markdown-line">{renderInlineMarkdown(line)}</span>);
+function renderInlineMarkdownWithBlanks(value: string, renderBlank?: (key: string) => ReactNode) {
+  if (!renderBlank) return renderInlineMarkdown(value);
+  const nodes: ReactNode[] = [];
+  value.split(blankMarkerPattern).forEach((part, index) => {
+    if (!part) return;
+    if (blankMarkerPattern.test(part)) {
+      blankMarkerPattern.lastIndex = 0;
+      nodes.push(renderBlank(`blank-${index}`));
+      return;
+    }
+    blankMarkerPattern.lastIndex = 0;
+    nodes.push(...renderInlineMarkdown(part));
+  });
+  blankMarkerPattern.lastIndex = 0;
+  return nodes;
 }
 
-function renderMarkdownTextBlock(content: string, index: number) {
+function renderMarkdownLines(lines: string[], renderBlank?: (key: string) => ReactNode) {
+  return lines.map((line, lineIndex) => <span key={lineIndex} className="markdown-line">{renderInlineMarkdownWithBlanks(line, renderBlank)}</span>);
+}
+
+function renderMarkdownTextBlock(content: string, index: number, renderBlank?: (key: string) => ReactNode) {
   if (/^\s*(-{3,}|\*{3,}|_{3,})\s*$/.test(content)) return <hr key={index} className="markdown-divider" />;
   const lines = content.split("\n");
   if (lines.some((line) => /^\s*(-{3,}|\*{3,}|_{3,})\s*$/.test(line))) {
@@ -222,7 +242,7 @@ function renderMarkdownTextBlock(content: string, index: number) {
     let paragraph: string[] = [];
     const flushParagraph = () => {
       if (paragraph.length === 0) return;
-      nodes.push(renderMarkdownTextBlock(paragraph.join("\n"), nodes.length));
+      nodes.push(renderMarkdownTextBlock(paragraph.join("\n"), nodes.length, renderBlank));
       paragraph = [];
     };
     lines.forEach((line) => {
@@ -239,32 +259,32 @@ function renderMarkdownTextBlock(content: string, index: number) {
   const heading = content.match(/^(#{1,6})\s+(.+)$/);
   if (heading) {
     const level = heading[1].length;
-    return <strong key={index} className={`markdown-heading level-${level}`}>{renderInlineMarkdown(heading[2])}</strong>;
+    return <strong key={index} className={`markdown-heading level-${level}`}>{renderInlineMarkdownWithBlanks(heading[2], renderBlank)}</strong>;
   }
   if (lines.every((line) => /^\s*> ?/.test(line))) {
-    return <blockquote key={index}>{renderMarkdownLines(lines.map((line) => line.replace(/^\s*> ?/, "")))}</blockquote>;
+    return <blockquote key={index}>{renderMarkdownLines(lines.map((line) => line.replace(/^\s*> ?/, "")), renderBlank)}</blockquote>;
   }
   if (lines.every((line) => /^\s*[-+*]\s+/.test(line))) {
-    return <ul key={index}>{lines.map((line, lineIndex) => <li key={lineIndex}>{renderInlineMarkdown(line.replace(/^\s*[-+*]\s+/, ""))}</li>)}</ul>;
+    return <ul key={index}>{lines.map((line, lineIndex) => <li key={lineIndex}>{renderInlineMarkdownWithBlanks(line.replace(/^\s*[-+*]\s+/, ""), renderBlank)}</li>)}</ul>;
   }
   if (lines.every((line) => /^\s*\d+[.)]\s+/.test(line))) {
-    return <ol key={index}>{lines.map((line, lineIndex) => <li key={lineIndex}>{renderInlineMarkdown(line.replace(/^\s*\d+[.)]\s+/, ""))}</li>)}</ol>;
+    return <ol key={index}>{lines.map((line, lineIndex) => <li key={lineIndex}>{renderInlineMarkdownWithBlanks(line.replace(/^\s*\d+[.)]\s+/, ""), renderBlank)}</li>)}</ol>;
   }
   if (lines.length >= 2 && lines.every((line) => /^\s*\|.*\|\s*$/.test(line)) && /^\s*\|?(?:\s*:?-{3,}:?\s*\|)+\s*$/.test(lines[1])) {
     const rows = lines.filter((_, rowIndex) => rowIndex !== 1).map((line) => line.trim().replace(/^\||\|$/g, "").split("|").map((cell) => cell.trim()));
     return (
       <span key={index} className="markdown-table-wrap">
         <table>
-          <thead><tr>{rows[0].map((cell, cellIndex) => <th key={cellIndex}>{renderInlineMarkdown(cell)}</th>)}</tr></thead>
-          <tbody>{rows.slice(1).map((row, rowIndex) => <tr key={rowIndex}>{row.map((cell, cellIndex) => <td key={cellIndex}>{renderInlineMarkdown(cell)}</td>)}</tr>)}</tbody>
+          <thead><tr>{rows[0].map((cell, cellIndex) => <th key={cellIndex}>{renderInlineMarkdownWithBlanks(cell, renderBlank)}</th>)}</tr></thead>
+          <tbody>{rows.slice(1).map((row, rowIndex) => <tr key={rowIndex}>{row.map((cell, cellIndex) => <td key={cellIndex}>{renderInlineMarkdownWithBlanks(cell, renderBlank)}</td>)}</tr>)}</tbody>
         </table>
       </span>
     );
   }
-  return <span key={index} className="markdown-paragraph">{renderMarkdownLines(lines)}</span>;
+  return <span key={index} className="markdown-paragraph">{renderMarkdownLines(lines, renderBlank)}</span>;
 }
 
-function MarkdownText(props: { value: string; className?: string }) {
+function MarkdownText(props: { value: string; className?: string; renderBlank?: (key: string) => ReactNode }) {
   const blocks = markdownBlocks(props.value);
   if (blocks.length === 0) return null;
   return (
@@ -280,7 +300,7 @@ function MarkdownText(props: { value: string; className?: string }) {
         }
         if (block.type === "math") return <span key={index} className="math-block">{block.content}</span>;
         if (block.type === "blank") return <span key={index} className="markdown-blank-line" style={{ "--blank-lines": String(block.count) } as CSSProperties} />;
-        return renderMarkdownTextBlock(block.content, index);
+        return renderMarkdownTextBlock(block.content, index, props.renderBlank);
       })}
     </span>
   );
@@ -310,8 +330,38 @@ function LabeledMarkdown(props: { label: string; value: string }) {
   );
 }
 
-function blankPrompt(value: string) {
-  return value.replace(/_{2,}|\[\s*\]/g, "[]");
+function hasBlankMarker(value: string) {
+  blankMarkerPattern.lastIndex = 0;
+  const found = blankMarkerPattern.test(value);
+  blankMarkerPattern.lastIndex = 0;
+  return found;
+}
+
+function blankMarkerCount(value: string) {
+  blankMarkerPattern.lastIndex = 0;
+  const count = Array.from(value.matchAll(blankMarkerPattern)).length;
+  blankMarkerPattern.lastIndex = 0;
+  return count;
+}
+
+function blankIndexFromKey(key: string) {
+  const sourceIndex = Number(key.replace("blank-", ""));
+  return Number.isFinite(sourceIndex) ? Math.floor(sourceIndex / 2) : 0;
+}
+
+function splitBlankAnswers(value: string, count: number) {
+  const parts = value.split(blankAnswerSeparator);
+  return Array.from({ length: Math.max(1, count) }, (_, index) => parts[index] ?? "");
+}
+
+function setBlankAnswerPart(value: string, count: number, index: number, nextPart: string) {
+  const parts = splitBlankAnswers(value, count);
+  parts[index] = nextPart;
+  return parts.join(blankAnswerSeparator);
+}
+
+function displayBlankAnswer(value: string) {
+  return value.split(blankAnswerSeparator).map((part) => part.trim()).filter(Boolean).join(" / ");
 }
 
 function isWordCard(card: Card) {
@@ -323,6 +373,15 @@ function correctAnswer(card: Card) {
 }
 
 function isCorrectAnswer(card: Card, answer: string) {
+  if (card.card_type === "blank") {
+    const count = blankMarkerCount(card.front);
+    const answers = splitBlankAnswers(answer, count).map((item) => item.trim());
+    const correctAnswers = splitChoiceText(card.back);
+    if (count > 1 && correctAnswers.length === count) {
+      return answers.every((item, index) => normalizeAnswer(item) === normalizeAnswer(correctAnswers[index]));
+    }
+    if (count > 1) return normalizeAnswer(displayBlankAnswer(answer)) === normalizeAnswer(card.back);
+  }
   const normalized = normalizeAnswer(answer);
   return normalized === normalizeAnswer(correctAnswer(card));
 }
@@ -1665,6 +1724,12 @@ function StudyView(props: {
     setChecked(result);
   }
 
+  function submitBlankAnswer(event: FormEvent) {
+    event.preventDefault();
+    if (!displayBlankAnswer(answer) || busy) return;
+    checkWritten();
+  }
+
   function checkChoice(choice: string) {
     if (!card || checked) return;
     setSelectedChoice(choice);
@@ -1693,6 +1758,8 @@ function StudyView(props: {
   const explanationIsLong = explanationText.length > 80 || /\n|```|\$\$/.test(explanationText);
   const showAnswerDock = Boolean(card && checked && explanationIsLong && answerDockOpen);
   const showManualRatings = card ? card.card_type !== "choice" && card.card_type !== "blank" || checked !== null : false;
+  const currentBlankCount = card?.card_type === "blank" ? blankMarkerCount(card.front) : 1;
+  const displayedBlankAnswer = displayBlankAnswer(answer);
 
   const scale = scaleDraft;
   const studyStyle = {
@@ -1972,17 +2039,47 @@ function StudyView(props: {
             )}
             {card.card_type === "blank" && (
               <div ref={answerLayoutRef} className={`answer-layout ${showAnswerDock ? "with-dock" : ""}`}>
-                <div className="question-box">
-                  <MarkdownText value={blankPrompt(card.front)} className="question-text" />
-                  {card.example && <MarkdownText value={card.example} className="question-note" />}
-                  <input value={answer} onChange={(event) => { setAnswer(event.target.value); setChecked(null); }} placeholder="输入答案" />
-                  <button className="primary-button" disabled={Boolean(busy)} onClick={checkWritten}>检查</button>
-                  {checked && <AnswerFeedback checked={checked} correct={correctAnswer(card)} explanation={explanation} other={otherNote} selected={answer} />}
+                <div className={`question-box choice-question blank-question ${choiceLayoutClass([card.front, card.example], props.studyChoiceLayout)}`}>
+                  <form className="blank-answer-form" onSubmit={submitBlankAnswer}>
+                    <MarkdownText
+                      value={card.front}
+                      className="question-text blank-question-text"
+                      renderBlank={(key) => (
+                        <input
+                          key={key}
+                          className={`blank-inline-input ${checked ?? ""}`}
+                          value={splitBlankAnswers(answer, currentBlankCount)[blankIndexFromKey(key)] ?? ""}
+                          onChange={(event) => {
+                            setAnswer(setBlankAnswerPart(answer, currentBlankCount, blankIndexFromKey(key), event.target.value));
+                            setChecked(null);
+                          }}
+                          placeholder="填写"
+                          aria-label="填空答案"
+                          autoComplete="off"
+                          disabled={Boolean(busy)}
+                        />
+                      )}
+                    />
+                    {!hasBlankMarker(card.front) && (
+                      <input
+                        className={`blank-inline-input standalone ${checked ?? ""}`}
+                        value={answer}
+                        onChange={(event) => { setAnswer(event.target.value); setChecked(null); }}
+                        placeholder="输入答案"
+                        aria-label="填空答案"
+                        autoComplete="off"
+                        disabled={Boolean(busy)}
+                      />
+                    )}
+                    {card.example && <MarkdownText value={card.example} className="question-note" />}
+                    <button className="primary-button blank-submit-button" disabled={Boolean(busy) || !displayedBlankAnswer}>{busy ? "提交中" : "提交"}</button>
+                  </form>
+                  {checked && <AnswerFeedback checked={checked} correct={correctAnswer(card)} explanation={explanation} other={otherNote} selected={displayedBlankAnswer} />}
                 </div>
                 {showAnswerDock && (
                   <QuestionDock
                     card={card}
-                    selected={answer}
+                    selected={displayedBlankAnswer}
                     answer={correctAnswer(card)}
                     onResize={resizeAnswerDock}
                     onClose={() => setAnswerDockOpen(false)}
@@ -2013,7 +2110,11 @@ function QuestionDock(props: { card: Card; choices?: string[]; selected: string;
         <button className="mini-button" title="隐藏题目参考" onClick={props.onClose}><XCircle /></button>
       </div>
       <div className="question-dock-body">
-        <MarkdownText value={props.card.card_type === "blank" ? blankPrompt(props.card.front) : props.card.front} className="question-dock-prompt" />
+        <MarkdownText
+          value={props.card.front}
+          className="question-dock-prompt"
+          renderBlank={props.card.card_type === "blank" ? (key) => <span key={key} className="blank-dock-gap" /> : undefined}
+        />
         {props.choices && props.choices.length > 0 && (
           <div className="question-dock-options">
             {props.choices.map((choice, index) => (
@@ -2057,7 +2158,7 @@ function StudyComplete(props: { total: number; completed: number; onRestart: () 
 }
 
 function CardFront(props: { card: Card }) {
-  if (props.card.card_type === "blank") return <MarkdownText value={blankPrompt(props.card.front)} />;
+  if (props.card.card_type === "blank") return <MarkdownText value={props.card.front} renderBlank={(key) => <span key={key} className="blank-dock-gap" />} />;
   if (props.card.card_type === "choice") return <MarkdownText value={props.card.front} />;
   if (!isWordCard(props.card)) return <MarkdownText value={props.card.front} />;
   return <span className="word-face"><strong><MarkdownText value={props.card.front} /></strong>{props.card.phonetic && <em>{props.card.phonetic}</em>}</span>;
@@ -2217,6 +2318,7 @@ function AboutView(props: { syncStatus: SyncStatus | null }) {
       <div className="about-title"><Info /><div><p className="eyebrow">闪记</p><h2>版本 {version}</h2></div></div>
       <div className="schedule-box changelog-box">
         <h3>更新日志</h3>
+        <div className="changelog-row"><strong>0.3.1</strong><span>2026-06-28</span><p>填空题学习页改为选择题同款题干版式；题干空位直接替换为输入框，支持 Markdown、回车提交和自动判定。</p></div>
         <div className="changelog-row"><strong>0.2.17</strong><span>2026-06-28</span><p>统一其他和助记字段的 Markdown 换行展示；空行间距改为真实一行的 35%；连续按 6 次 a 可导出最近 10 分钟日志。</p></div>
         <div className="changelog-row"><strong>0.2.16</strong><span>2026-06-28</span><p>增强 Markdown 转义和空行显示；学习页顶部增加题目参考显示开关；修复尾部分号选项被丢弃。</p></div>
         <div className="changelog-row"><strong>0.2.15</strong><span>2026-06-28</span><p>修复加粗包裹代码块时的渲染；编辑时立即回到页面顶部；学习反馈按钮贴底三等分显示。</p></div>
