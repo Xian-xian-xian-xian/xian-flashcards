@@ -885,8 +885,8 @@ textarea:focus {
 
 .study-panel {
   position: relative;
-  display: flex;
-  flex-direction: column;
+  display: grid;
+  grid-template-rows: auto minmax(0, 1fr) auto;
   max-height: calc(100vh - 150px);
   min-height: min(680px, calc(100vh - 150px));
   overflow: hidden;
@@ -908,7 +908,14 @@ textarea:focus {
   --study-line-height: 1.5;
   --study-font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", "Microsoft YaHei", sans-serif;
   --answer-dock-width: 300px;
+  --answer-dock-gap: clamp(28px, 2.2vw, 40px);
   font-family: var(--study-font-family);
+}
+
+.study-fixed-top {
+  display: grid;
+  gap: 12px;
+  padding: 0 2px 12px;
 }
 
 .study-scroll {
@@ -1094,7 +1101,6 @@ textarea:focus {
   align-items: center;
   justify-content: flex-end;
   gap: 8px;
-  margin: -6px 0 12px;
   flex-wrap: wrap;
 }
 
@@ -1284,7 +1290,7 @@ textarea:focus {
 
 .markdown-text {
   display: grid;
-  gap: 0.42em;
+  gap: 0.78em;
   line-height: inherit;
   white-space: normal;
   overflow-wrap: anywhere;
@@ -1435,7 +1441,7 @@ textarea:focus {
 
 .markdown-fragment {
   display: grid;
-  gap: 0.42em;
+  gap: 0.78em;
 }
 
 .markdown-table-wrap {
@@ -1513,27 +1519,26 @@ textarea:focus {
   position: relative;
   display: grid;
   grid-template-columns: minmax(0, 1fr);
-  gap: 16px;
+  gap: var(--answer-dock-gap);
   align-items: start;
   width: 100%;
 }
 
 .answer-layout.with-dock {
-  padding-right: calc(var(--answer-dock-width) + 20px);
+  grid-template-columns: minmax(0, 1fr) minmax(240px, var(--answer-dock-width));
 }
 
 .question-dock {
-  position: fixed;
-  top: var(--answer-dock-top, 14px);
-  right: var(--answer-dock-right, 14px);
-  bottom: var(--answer-dock-bottom, 96px);
-  z-index: 20;
+  position: sticky;
+  top: 0;
+  align-self: start;
+  z-index: 1;
   display: grid;
   grid-template-rows: auto minmax(0, 1fr);
   gap: 8px;
-  width: var(--answer-dock-width);
-  max-width: calc(100vw - 28px);
-  max-height: calc(100vh - var(--answer-dock-top, 14px) - var(--answer-dock-bottom, 96px));
+  width: 100%;
+  max-width: 100%;
+  max-height: 100%;
   overflow: hidden;
   padding: 10px;
   border: 1px solid var(--border);
@@ -1546,8 +1551,8 @@ textarea:focus {
   position: absolute;
   top: 0;
   bottom: 0;
-  left: -12px;
-  width: 18px;
+  left: calc((var(--answer-dock-gap) * -1) - 9px);
+  width: calc(var(--answer-dock-gap) + 18px);
   border: 0;
   border-radius: 0;
   background: transparent;
@@ -1560,7 +1565,7 @@ textarea:focus {
   position: absolute;
   top: 14px;
   bottom: 14px;
-  left: 7px;
+  left: calc(50% - 2px);
   width: 4px;
   border-radius: 999px;
   background: color-mix(in srgb, var(--primary), transparent 62%);
@@ -1597,7 +1602,7 @@ body.resizing-answer-dock .question-dock-resizer::after {
 }
 
 .question-dock-prompt {
-  gap: 0.28em;
+  gap: 0.72em;
   font-weight: 800;
 }
 
@@ -1744,21 +1749,18 @@ body.resizing-answer-dock .question-dock-resizer::after {
   position: sticky;
   bottom: 0;
   z-index: 3;
-  width: min(940px, 100%);
+  width: 100%;
   flex: 0 0 auto;
-  align-self: center;
-  margin: 12px 0 -10px;
-  padding: 10px;
-  border: 1px solid var(--border);
-  border-radius: 8px;
-  background: color-mix(in srgb, var(--surface), transparent 5%);
-  box-shadow: 0 -12px 28px color-mix(in srgb, var(--bg), transparent 28%);
-  backdrop-filter: blur(10px);
+  align-self: stretch;
+  gap: 10px;
+  margin: 12px 0 0;
+  padding: 0;
 }
 
 .rating-row .rating {
   width: 100%;
   min-width: 0;
+  border-radius: 8px;
 }
 
 .study-scale-control {
@@ -2680,7 +2682,6 @@ textarea {
     width: 100%;
     margin-right: 0;
     margin-left: 0;
-    padding: 8px;
     gap: 8px;
   }
 

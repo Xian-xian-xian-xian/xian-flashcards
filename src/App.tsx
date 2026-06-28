@@ -44,14 +44,14 @@ import {
   Volume2,
   XCircle
 } from "lucide-react";
-import { CSSProperties, FormEvent, PointerEvent as ReactPointerEvent, ReactNode, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
+import { CSSProperties, FormEvent, PointerEvent as ReactPointerEvent, ReactNode, useEffect, useMemo, useRef, useState } from "react";
 import { api, type CardPayload, type ConflictError } from "./api";
 import type { Card, CardType, DailyTask, Deck, ReviewRating, ReviewRemaining, ReviewSnapshot, Settings, Stats, SyncStatus, ThemeMode, User } from "./types";
 
 type View = "home" | "deck" | "study" | "import" | "settings" | "about";
 type SyncState = "idle" | "syncing" | "success" | "error" | "conflict";
 
-const version = "0.2.14";
+const version = "0.2.15";
 
 const cardTypeLabels: Record<CardType, string> = {
   basic: "普通卡",
@@ -118,8 +118,10 @@ type MarkdownBlock =
 
 function markdownBlocks(value: string): MarkdownBlock[] {
   const blocks: MarkdownBlock[] = [];
-  const normalized = value.replace(/\r\n/g, "\n");
-  const pattern = /```([\w-]*)\n([\s\S]*?)```|\$\$\n?([\s\S]*?)\n?\$\$/g;
+  const normalized = value
+    .replace(/\r\n/g, "\n")
+    .replace(/(^|\n)([*_]{2})[ \t]*(```[\w-]*\n[\s\S]*?\n?```)[ \t]*\2(?=\n|$)/g, "$1$3");
+  const pattern = /```([\w-]*)[ \t]*\n([\s\S]*?)\n?```|\$\$\n?([\s\S]*?)\n?\$\$/g;
   let lastIndex = 0;
 
   normalized.replace(pattern, (match, language, code, math, offset) => {
@@ -243,6 +245,10 @@ function MarkdownText(props: { value: string; className?: string }) {
       })}
     </span>
   );
+}
+
+function scrollToPageTop() {
+  window.scrollTo({ top: 0, behavior: "auto" });
 }
 
 function FeedbackBlock(props: { label: string; value: string; kind: "explanation" | "other" }) {
@@ -1222,7 +1228,7 @@ function DeckView(props: {
                 {openDeckMenuId === deck.id && (
                   <div className="deck-menu-popover">
                     <button disabled={deck.depth >= 5} onClick={() => { setParentDeckId(deck.id); setDeckName(`${deck.name} / `); setOpenDeckMenuId(null); }}><FolderPlus /><span>子卡组</span></button>
-                    <button onClick={() => { setEditingDeckId(deck.id); setEditingDeckName(deck.name); setOpenDeckMenuId(null); }}><Edit3 /><span>编辑</span></button>
+                    <button onClick={() => { setEditingDeckId(deck.id); setEditingDeckName(deck.name); setOpenDeckMenuId(null); scrollToPageTop(); }}><Edit3 /><span>编辑</span></button>
                     <button className="danger" disabled={Boolean(busy)} onClick={async () => { setOpenDeckMenuId(null); if (window.confirm(`删除「${deck.name}」及其子卡组和卡片？`)) { setBusy(`delete-deck-${deck.id}`); try { await props.onDeleteDeck(deck.id); } finally { setBusy(""); } } }}><Trash2 /><span>删除</span></button>
                   </div>
                 )}
@@ -1270,7 +1276,7 @@ function DeckView(props: {
                   <button className="mini-button" title="发音" onClick={() => props.onSpeak(card.front)}><Volume2 /></button>
                   <button className={`mini-button ${card.favorite ? "starred" : ""}`} title="收藏" disabled={busy === `favorite-${card.id}`} onClick={() => toggleFavorite(card)}><Star /></button>
                   <button className="mini-button" title="详情" onClick={() => setDetailCard(card)}><Eye /></button>
-                  <button className="mini-button" title="编辑" onClick={() => setEditingCard(card)}><Edit3 /></button>
+                  <button className="mini-button" title="编辑" onClick={() => { setEditingCard(card); scrollToPageTop(); }}><Edit3 /></button>
                 </div>
                 <p>{card.back}</p>
                 {card.example && <small>{card.example}</small>}
@@ -1429,8 +1435,7 @@ function StudyView(props: {
   const [celebrationKey, setCelebrationKey] = useState(0);
   const [completionPlayed, setCompletionPlayed] = useState(false);
   const answerLayoutRef = useRef<HTMLDivElement | null>(null);
-  const ratingRowRef = useRef<HTMLDivElement | null>(null);
-  const [answerDockFrame, setAnswerDockFrame] = useState({ top: 14, right: 14, bottom: 96 });
+  const studyScrollRef = useRef<HTMLDivElement | null>(null);
   const card = queue[0];
 
   useEffect(() => {
@@ -1598,27 +1603,6 @@ function StudyView(props: {
   const showAnswerDock = Boolean(card && checked && explanationIsLong && answerDockOpen);
   const showManualRatings = card ? card.card_type !== "choice" && card.card_type !== "blank" || checked !== null : false;
 
-  useLayoutEffect(() => {
-    if (!showAnswerDock) return;
-
-    const updateFrame = () => {
-      const layoutRect = answerLayoutRef.current?.getBoundingClientRect();
-      const ratingRect = ratingRowRef.current?.getBoundingClientRect();
-      if (!layoutRect) return;
-      const viewportWidth = window.innerWidth;
-      const viewportHeight = window.innerHeight;
-      setAnswerDockFrame({
-        top: Math.max(14, Math.round(layoutRect.top)),
-        right: Math.max(14, Math.round(viewportWidth - layoutRect.right)),
-        bottom: Math.max(14, Math.round(viewportHeight - (ratingRect?.top ?? layoutRect.bottom)))
-      });
-    };
-
-    updateFrame();
-    window.addEventListener("resize", updateFrame);
-    return () => window.removeEventListener("resize", updateFrame);
-  }, [showAnswerDock, answerDockWidth, card?.id, checked, immersive]);
-
   const scale = scaleDraft;
   const studyStyle = {
     "--study-face-min": `${Math.round(32 * scale)}px`,
@@ -1636,10 +1620,7 @@ function StudyView(props: {
     "--study-text-align": props.studyTextAlign,
     "--study-line-height": String(props.studyLineHeight),
     "--study-font-family": studyFontStack(props.studyFontFamily),
-    "--answer-dock-width": `${answerDockWidth}px`,
-    "--answer-dock-top": `${answerDockFrame.top}px`,
-    "--answer-dock-right": `${answerDockFrame.right}px`,
-    "--answer-dock-bottom": `${answerDockFrame.bottom}px`
+    "--answer-dock-width": `${answerDockWidth}px`
   } as CSSProperties & Record<string, string>;
 
   async function saveScale(nextScale: number) {
@@ -1714,6 +1695,15 @@ function StudyView(props: {
     setImmersive(true);
   }
 
+  function editCurrentStudyCard() {
+    if (!card) return;
+    setEditingStudyCard(card);
+    window.requestAnimationFrame(() => {
+      studyScrollRef.current?.scrollTo({ top: 0, behavior: "auto" });
+      scrollToPageTop();
+    });
+  }
+
   function resizeAnswerDock(event: ReactPointerEvent<HTMLButtonElement>) {
     event.preventDefault();
     const pointerId = event.pointerId;
@@ -1723,9 +1713,12 @@ function StudyView(props: {
 
     const updateWidth = (clientX: number) => {
       const viewportWidth = window.innerWidth;
+      const layoutRect = answerLayoutRef.current?.getBoundingClientRect();
+      const layoutRight = layoutRect?.right ?? viewportWidth;
+      const layoutWidth = layoutRect?.width ?? viewportWidth;
       const minWidth = Math.min(240, Math.max(180, viewportWidth - 160));
-      const maxWidth = Math.min(560, Math.max(260, viewportWidth * 0.58));
-      setAnswerDockWidth(Math.round(Math.max(minWidth, Math.min(maxWidth, viewportWidth - clientX - 14))));
+      const maxWidth = Math.min(560, Math.max(260, layoutWidth * 0.58));
+      setAnswerDockWidth(Math.round(Math.max(minWidth, Math.min(maxWidth, layoutRight - clientX))));
     };
 
     const onPointerMove = (moveEvent: PointerEvent) => updateWidth(moveEvent.clientX);
@@ -1782,7 +1775,7 @@ function StudyView(props: {
               {Array.from({ length: 12 }, (_, index) => <i key={index} />)}
             </div>
           )}
-          <div className="study-scroll">
+          <div className="study-fixed-top">
             <div className="progress-line" style={{ "--progress-ratio": String(Math.min(completed / Math.max(total, 1), 1)) } as CSSProperties}>
               <span>{completed}</span>
               <div><i /></div>
@@ -1844,9 +1837,11 @@ function StudyView(props: {
               </TextToolButton>
               <button className="mini-button" title={immersive ? "退出沉浸学习" : "沉浸学习"} onClick={toggleImmersive}>{immersive ? <Minimize2 /> : <Maximize2 />}</button>
               <button className="mini-button" title="撤销上一张" disabled={history.length === 0 || Boolean(busy)} onClick={undo}><ArrowLeft /></button>
-              <button className="mini-button" title="编辑当前卡片" onClick={() => setEditingStudyCard(card)}><Edit3 /></button>
+              <button className="mini-button" title="编辑当前卡片" onClick={editCurrentStudyCard}><Edit3 /></button>
               <button className="mini-button" title="发音" onClick={() => props.onSpeak(card.front, card.language ?? props.selectedDeck?.language)}><Volume2 /></button>
             </div>
+          </div>
+          <div className="study-scroll" ref={studyScrollRef}>
             {editingStudyCard && <CardEditor card={editingStudyCard} onCancel={() => setEditingStudyCard(null)} onSubmit={saveStudyCard} />}
             {card.card_type !== "choice" && card.card_type !== "blank" && (
               <button className={`flip-card ${flipped ? "flipped" : ""}`} onClick={() => setFlipped((value) => !value)}>
@@ -1898,7 +1893,7 @@ function StudyView(props: {
             )}
           </div>
           {showManualRatings && (
-            <div ref={ratingRowRef} className="rating-row">
+            <div className="rating-row">
               <button className="rating unknown" disabled={Boolean(busy)} onClick={() => rate("unknown")}><XCircle />{busy === "rate-unknown" ? "提交中" : "不认识"}</button>
               <button className="rating fuzzy" disabled={Boolean(busy)} onClick={() => rate("fuzzy")}><RotateCcw />{busy === "rate-fuzzy" ? "提交中" : "模糊"}</button>
               <button className="rating known" disabled={Boolean(busy)} onClick={() => rate("known")}><CheckCircle2 />{busy === "rate-known" ? "提交中" : "认识"}</button>
@@ -2123,6 +2118,7 @@ function AboutView(props: { syncStatus: SyncStatus | null }) {
       <div className="about-title"><Info /><div><p className="eyebrow">闪记</p><h2>版本 {version}</h2></div></div>
       <div className="schedule-box changelog-box">
         <h3>更新日志</h3>
+        <div className="changelog-row"><strong>0.2.15</strong><span>2026-06-28</span><p>修复加粗包裹代码块时的渲染；编辑时立即回到页面顶部；学习反馈按钮贴底三等分显示。</p></div>
         <div className="changelog-row"><strong>0.2.14</strong><span>2026-06-27</span><p>题目参考改为屏幕固定区域，滚动学习内容时不再跟随；选项改为无序号紧凑显示。</p></div>
         <div className="changelog-row"><strong>0.2.13</strong><span>2026-06-27</span><p>调整学习页评级按钮宽度、题目参考位置和答题反馈字号；补齐 Markdown 分割线、标题、引用、表格等展示，并让换行跟随学习行距。</p></div>
         <div className="changelog-row"><strong>0.2.12</strong><span>2026-06-27</span><p>答题后的题干选项参考固定在屏幕右侧，支持拖动中间分隔调整左右占比，并修正解析按 Markdown 原文加粗展示。</p></div>
