@@ -52,7 +52,7 @@ import type { Card, CardType, DailyTask, Deck, ReviewRating, ReviewRemaining, Re
 type View = "home" | "deck" | "study" | "import" | "settings" | "about";
 type SyncState = "idle" | "syncing" | "success" | "error" | "conflict";
 
-const version = "0.3.2";
+const version = "0.3.3";
 const logExportPressCount = 6;
 const logExportKey = "a";
 const logExportResetMs = 1800;
@@ -126,6 +126,32 @@ function splitChoiceText(value: string) {
     .split(/[|\n]+|[；;](?=\s*\S)/)
     .map((item) => item.trim())
     .filter(Boolean);
+}
+
+function splitBlankAnswerText(value: string) {
+  return value
+    .split(new RegExp(`[${blankAnswerSeparator}\\n|/／、，,；;]+`))
+    .map((item) => item.trim())
+    .filter(Boolean);
+}
+
+function blankOrderlessGroups(front: string, count: number) {
+  const groups: number[][] = [];
+  let currentGroup = [0];
+  const parts = front.split(blankMarkerPattern);
+
+  for (let index = 0; index < count - 1; index += 1) {
+    const separator = parts[index * 2 + 2] ?? "";
+    if (/[和与及、，,；;\/／]/.test(separator)) {
+      currentGroup.push(index + 1);
+      continue;
+    }
+    if (currentGroup.length > 1) groups.push(currentGroup);
+    currentGroup = [index + 1];
+  }
+
+  if (currentGroup.length > 1) groups.push(currentGroup);
+  return groups;
 }
 
 function pushMarkdownTextBlocks(blocks: MarkdownBlock[], value: string) {
@@ -361,7 +387,7 @@ function setBlankAnswerPart(value: string, count: number, index: number, nextPar
 }
 
 function displayBlankAnswer(value: string) {
-  return value.split(blankAnswerSeparator).map((part) => part.trim()).filter(Boolean).join(" / ");
+  return value.split(blankAnswerSeparator).map((part) => part.trim()).filter(Boolean).join("、");
 }
 
 function isWordCard(card: Card) {
@@ -376,11 +402,22 @@ function isCorrectAnswer(card: Card, answer: string) {
   if (card.card_type === "blank") {
     const count = blankMarkerCount(card.front);
     const answers = splitBlankAnswers(answer, count).map((item) => item.trim());
-    const correctAnswers = splitChoiceText(card.back);
+    const correctAnswers = splitBlankAnswerText(card.back);
     if (count > 1 && correctAnswers.length === count) {
-      return answers.every((item, index) => normalizeAnswer(item) === normalizeAnswer(correctAnswers[index]));
+      const matched = Array.from({ length: count }, () => false);
+      for (const group of blankOrderlessGroups(card.front, count)) {
+        const userGroup = group.map((index) => normalizeAnswer(answers[index])).sort();
+        const correctGroup = group.map((index) => normalizeAnswer(correctAnswers[index])).sort();
+        if (userGroup.some((item) => !item) || userGroup.join("\n") !== correctGroup.join("\n")) return false;
+        group.forEach((index) => { matched[index] = true; });
+      }
+      return answers.every((item, index) => matched[index] || normalizeAnswer(item) === normalizeAnswer(correctAnswers[index]));
     }
     if (count > 1) return normalizeAnswer(displayBlankAnswer(answer)) === normalizeAnswer(card.back);
+    const userAnswers = splitBlankAnswerText(answer);
+    if (userAnswers.length > 1 && correctAnswers.length === userAnswers.length) {
+      return userAnswers.map(normalizeAnswer).sort().join("\n") === correctAnswers.map(normalizeAnswer).sort().join("\n");
+    }
   }
   const normalized = normalizeAnswer(answer);
   return normalized === normalizeAnswer(correctAnswer(card));
@@ -696,6 +733,15 @@ export default function App() {
 
   useEffect(() => {
     applyTheme(settings.theme);
+  }, [settings.theme]);
+
+  useEffect(() => {
+    const media = window.matchMedia("(prefers-color-scheme: dark)");
+    const updateSystemTheme = () => {
+      if (settings.theme === "system") applyTheme("system");
+    };
+    media.addEventListener("change", updateSystemTheme);
+    return () => media.removeEventListener("change", updateSystemTheme);
   }, [settings.theme]);
 
   useEffect(() => {
@@ -2312,6 +2358,7 @@ function AboutView(props: { syncStatus: SyncStatus | null }) {
       <div className="about-title"><Info /><div><p className="eyebrow">闪记</p><h2>版本 {version}</h2></div></div>
       <div className="schedule-box changelog-box">
         <h3>更新日志</h3>
+        <div className="changelog-row"><strong>0.3.3</strong><span>2026-06-28</span><p>修复浅色模式解析/其他文字颜色、空行间距、填空输入框间距、多空答案分隔和并列空位乱序判定；跟随系统主题会响应系统暗黑模式变化。</p></div>
         <div className="changelog-row"><strong>0.3.2</strong><span>2026-06-28</span><p>填空题解析改为提交后显示；编辑字段在短文本状态也支持换行；填空输入框去掉下划线、占位文字和加粗样式。</p></div>
         <div className="changelog-row"><strong>0.3.1</strong><span>2026-06-28</span><p>填空题学习页改为选择题同款题干版式；题干空位直接替换为输入框，支持 Markdown、回车提交和自动判定。</p></div>
         <div className="changelog-row"><strong>0.2.17</strong><span>2026-06-28</span><p>统一其他和助记字段的 Markdown 换行展示；空行间距改为真实一行的 35%；连续按 6 次 a 可导出最近 10 分钟日志。</p></div>

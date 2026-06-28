@@ -3,7 +3,7 @@
   --bg: #fff7ed;
   --surface: #ffffff;
   --surface-2: #ffedd5;
-  --text: #1f2937;
+  --text: #000000;
   --muted: #6b7280;
   --border: #fed7aa;
   --primary: #f97316;
@@ -1456,7 +1456,7 @@ textarea:focus {
 
 .markdown-blank-line {
   display: block;
-  min-height: calc(var(--blank-lines, 1) * 0.35em * var(--study-line-height, 1.5));
+  min-height: calc(var(--blank-lines, 1) * 0.17em * var(--study-line-height, 1.5));
 }
 
 .markdown-fragment {
@@ -1721,7 +1721,7 @@ body.resizing-answer-dock .question-dock-resizer::after {
   width: min(11em, 100%);
   min-width: min(9em, 100%);
   min-height: 1.9em;
-  margin: 0 0.16em;
+  margin: 0 0.34em;
   padding: 0.08em 0.42em;
   border: 1px solid var(--border);
   border-radius: 6px;
@@ -1771,7 +1771,7 @@ body.resizing-answer-dock .question-dock-resizer::after {
   display: inline-block;
   width: 5.8em;
   height: 1.1em;
-  margin: 0 0.16em;
+  margin: 0 0.34em;
   border-bottom: 2px solid currentColor;
   opacity: 0.72;
   vertical-align: baseline;
@@ -1940,6 +1940,7 @@ body.resizing-answer-dock .question-dock-resizer::after {
   gap: 6px;
   padding: 12px;
   border-radius: 8px;
+  color: var(--text);
   font-size: var(--study-small-size);
   text-align: var(--study-text-align);
   line-height: var(--study-line-height);
@@ -1976,7 +1977,7 @@ body.resizing-answer-dock .question-dock-resizer::after {
 }
 
 .feedback-block > span {
-  color: var(--primary-strong);
+  color: var(--text);
   font-size: inherit;
   font-weight: 900;
 }
