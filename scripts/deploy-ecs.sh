@@ -78,6 +78,17 @@ upload_committed_files() {
   remote "printf '%s\n' '$current_revision' > '$REMOTE_DIR/.deploy-revision'"
 }
 
+verify_health() {
+  local attempt
+  for attempt in {1..10}; do
+    if remote "curl -sS http://127.0.0.1:4174/api/health"; then
+      return 0
+    fi
+    sleep 1
+  done
+  return 1
+}
+
 trap close_master EXIT
 
 step "open ssh control connection" open_master
@@ -86,4 +97,4 @@ step "upload committed files" upload_committed_files
 step "install dependencies" remote "cd '$REMOTE_DIR'; pnpm install"
 step "build production assets" remote "cd '$REMOTE_DIR'; pnpm build"
 step "restart pm2" remote "cd '$REMOTE_DIR'; pm2 restart flashcards --update-env; pm2 save"
-step "verify health" remote "curl -sS http://127.0.0.1:4174/api/health"
+step "verify health" verify_health
