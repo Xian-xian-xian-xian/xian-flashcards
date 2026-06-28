@@ -44,18 +44,13 @@ git commit -m "Release 0.2.7"
 GIT_SSH_COMMAND="ssh -i ~/.ssh/codex_aliyun_flashcards -o IdentitiesOnly=yes" git push origin main
 ```
 
-推到 GitHub 只更新仓库，不会自动更新 ECS。推荐用本地当前提交直接覆盖 ECS 代码，再在服务器重新构建并重启 PM2；这样不依赖服务器上的 Git 工作区是否干净：
+推到 GitHub 只更新仓库，不会自动更新 ECS。推荐用部署脚本发布当前 Git 提交；脚本会复用 SSH 连接、只备份数据库、上传已提交文件、在服务器重新构建并重启 PM2：
 
 ```bash
-# 先备份线上代码和数据库
-ssh -i ~/.ssh/codex_aliyun_flashcards root@121.43.195.214 'set -e; ts=$(date +%Y%m%d%H%M%S); cd /root; tar --exclude=flashcards/node_modules --exclude=flashcards/dist --exclude=flashcards/dist-server --exclude=flashcards/.git -czf flashcards.pre-release.$ts.tar.gz flashcards; cp flashcards/data/flashcards.sqlite flashcards.sqlite.pre-release.$ts'
-
-# 从本机把当前 Git 提交展开到 ECS，保留服务器上的 data/、node_modules、dist、dist-server 和 .git
-git archive HEAD | ssh -i ~/.ssh/codex_aliyun_flashcards root@121.43.195.214 "tar -x -C /root/flashcards"
-
-# 在服务器重新构建、重启服务
-ssh -i ~/.ssh/codex_aliyun_flashcards root@121.43.195.214 'set -e; cd /root/flashcards; pnpm install; pnpm build; pm2 restart flashcards --update-env; pm2 save'
+pnpm deploy:ecs
 ```
+
+如果部署变慢，看脚本输出的分步耗时。当前实测 SSH 空连接约 5 秒，慢点主要来自本机到 ECS 的 SSH 往返；脚本通过 ControlMaster 复用连接，避免每一步都重新握手。
 
 验证线上版本：
 

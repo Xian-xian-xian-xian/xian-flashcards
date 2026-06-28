@@ -52,7 +52,7 @@ import type { Card, CardType, DailyTask, Deck, ReviewRating, ReviewRemaining, Re
 type View = "home" | "deck" | "study" | "import" | "settings" | "about";
 type SyncState = "idle" | "syncing" | "success" | "error" | "conflict";
 
-const version = "0.3.4";
+const version = "0.3.5";
 const logExportPressCount = 6;
 const logExportKey = "a";
 const logExportResetMs = 1800;
@@ -493,6 +493,14 @@ function writeStoredStudyRootDeckId(userId: number | null, deckId: number | null
   window.localStorage.setItem(studyRootDeckStorageKey(userId), String(deckId));
 }
 
+function nextStudyQueue(queue: Card[], card: Card, rating: ReviewRating, result: { stage: number; dueAt: string }) {
+  const rest = queue.slice(1);
+  if (rating === "known") return rest;
+  const repeatCard = { ...card, stage: result.stage, due_at: result.dueAt, last_rating: rating };
+  const repeatIndex = Math.min(rating === "unknown" ? 1 : 3, rest.length);
+  return [...rest.slice(0, repeatIndex), repeatCard, ...rest.slice(repeatIndex)];
+}
+
 function playAnswerSound(result: "right" | "wrong") {
   try {
     const AudioContextClass = window.AudioContext || (window as typeof window & { webkitAudioContext?: typeof AudioContext }).webkitAudioContext;
@@ -869,7 +877,6 @@ export default function App() {
   async function handleAnswer(card: Card, rating: ReviewRating) {
     try {
       const result = await api.answer(card.id, rating);
-      await afterMutation();
       return result;
     } catch (error) {
       showToast((error as Error).message, "error");
@@ -1764,14 +1771,10 @@ function StudyView(props: {
     const beforeMasteredIds = masteredIds;
     try {
       const result = await props.onAnswer(card, rating);
-      const rest = beforeQueue.slice(1);
       const nextMasteredIds = rating === "known" && !beforeMasteredIds.includes(card.id)
         ? [...beforeMasteredIds, card.id]
         : beforeMasteredIds;
-      const repeatCard = { ...card, stage: result.stage, due_at: result.dueAt, last_rating: rating };
-      const nextQueue = rating === "known"
-        ? rest
-        : [...rest.slice(0, rating === "unknown" ? 1 : 3), repeatCard, ...rest.slice(rating === "unknown" ? 1 : 3)];
+      const nextQueue = nextStudyQueue(beforeQueue, card, rating, result);
       setHistory((items) => [...items, { card, previous: result.previous, queue: beforeQueue, masteredIds: beforeMasteredIds, flipped, answer, checked, selectedChoice }]);
       setCardMotion("leaving");
       await delay(140);
@@ -2413,6 +2416,7 @@ function AboutView(props: { syncStatus: SyncStatus | null }) {
       <div className="about-title"><Info /><div><p className="eyebrow">闪记</p><h2>版本 {version}</h2></div></div>
       <div className="schedule-box changelog-box">
         <h3>更新日志</h3>
+        <div className="changelog-row"><strong>0.3.5</strong><span>2026-06-28</span><p>修复学习页最后一张选择“不认识/模糊”时可能退出本轮的问题；学习评分不再触发整站刷新，错题会稳定留在当前队列重复。</p></div>
         <div className="changelog-row"><strong>0.3.4</strong><span>2026-06-28</span><p>填空题答案支持“或/或者/or”多候选任一正确；学习页记住上次大卡组；主题下拉会即时保存，避免同步后回到旧主题。</p></div>
         <div className="changelog-row"><strong>0.3.3</strong><span>2026-06-28</span><p>修复浅色模式解析/其他文字颜色、空行间距、填空输入框间距、多空答案分隔和并列空位乱序判定；跟随系统主题会响应系统暗黑模式变化。</p></div>
         <div className="changelog-row"><strong>0.3.2</strong><span>2026-06-28</span><p>填空题解析改为提交后显示；编辑字段在短文本状态也支持换行；填空输入框去掉下划线、占位文字和加粗样式。</p></div>

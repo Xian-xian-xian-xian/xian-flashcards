@@ -1,6 +1,6 @@
 {
   "name": "xian-flashcards",
-  "version": "0.3.4",
+  "version": "0.3.5",
   "private": true,
   "type": "module",
   "scripts": {
@@ -13,6 +13,7 @@
     "start": "NODE_ENV=production node dist-server/server/index.js",
     "start:remote": "HOST=0.0.0.0 NODE_ENV=production node dist-server/server/index.js",
     "remote": "pnpm build && pnpm start:remote",
+    "deploy:ecs": "bash scripts/deploy-ecs.sh",
     "test": "vitest run"
   },
   "dependencies": {
