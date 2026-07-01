@@ -52,7 +52,7 @@ import type { Card, CardType, DailyTask, Deck, ReviewRating, ReviewRemaining, Re
 type View = "home" | "deck" | "study" | "import" | "settings" | "about";
 type SyncState = "idle" | "syncing" | "success" | "error" | "conflict";
 
-const version = "0.3.6";
+const version = "0.3.7";
 const logExportPressCount = 6;
 const logExportKey = "a";
 const logExportResetMs = 1800;
@@ -2433,6 +2433,7 @@ function AboutView(props: { syncStatus: SyncStatus | null }) {
       <div className="about-title"><Info /><div><p className="eyebrow">闪记</p><h2>版本 {version}</h2></div></div>
       <div className="schedule-box changelog-box">
         <h3>更新日志</h3>
+        <div className="changelog-row"><strong>0.3.7</strong><span>2026-07-01</span><p>修复单词卡导入时助记/注记误填相邻列、学习页例句编辑同步、例句注记字重和默认英式英语发音选项。</p></div>
         <div className="changelog-row"><strong>0.3.6</strong><span>2026-06-29</span><p>修复最后一张卡片选择“模糊/不认识”后重复同一张卡时，学习面板停留在离场动画导致黑屏的问题。</p></div>
         <div className="changelog-row"><strong>0.3.5</strong><span>2026-06-28</span><p>修复学习页最后一张选择“不认识/模糊”时可能退出本轮的问题；学习评分不再触发整站刷新，错题会稳定留在当前队列重复。</p></div>
         <div className="changelog-row"><strong>0.3.4</strong><span>2026-06-28</span><p>填空题答案支持“或/或者/or”多候选任一正确；学习页记住上次大卡组；主题下拉会即时保存，避免同步后回到旧主题。</p></div>
