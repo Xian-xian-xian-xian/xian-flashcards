@@ -1,7 +1,10 @@
 import cors from "cors";
 import express from "express";
 import multer from "multer";
+import fs from "node:fs";
+import { spawn } from "node:child_process";
 import crypto from "node:crypto";
+import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { parse } from "csv-parse/sync";
@@ -58,8 +61,12 @@ type CardType = "basic" | "word" | "choice" | "blank";
 const maxDeckDepth = 5;
 const sessionCookieName = "flashcards_session";
 const sessionDays = 30;
-const appVersion = "0.3.7";
+const appVersion = "0.3.8";
 const timeZone = "Asia/Shanghai";
+const piperDir = process.env.PIPER_DIR ?? path.resolve(process.cwd(), "runtime/piper");
+const piperBin = process.env.PIPER_BIN ?? path.join(piperDir, "piper", "piper");
+const piperVoiceModel = process.env.PIPER_VOICE_MODEL ?? path.join(piperDir, "voices", "en_GB-cori-medium.onnx");
+const piperVoiceConfig = process.env.PIPER_VOICE_CONFIG ?? `${piperVoiceModel}.json`;
 const normalizedUsers = new Set<number>();
 const recentLogWindowMs = 10 * 60 * 1000;
 const maxRecentLogEntries = 2000;
@@ -278,6 +285,65 @@ function normalizeStudyFontFamily(value: unknown) {
   if (!fontFamily) return "system";
   if (fontFamily.length > 80 || /[\u0000-\u001f;]/.test(fontFamily)) return "system";
   return fontFamily;
+}
+
+function normalizeVoiceLanguage(value: unknown) {
+  const text = String(value ?? "").trim();
+  if (text.toLowerCase().startsWith("en")) return "en-GB";
+  return text || "en-GB";
+}
+
+function isEnglishVoiceLanguage(language: unknown) {
+  return normalizeVoiceLanguage(language).toLowerCase().startsWith("en");
+}
+
+function isPiperReady() {
+  return fs.existsSync(piperBin) && fs.existsSync(piperVoiceModel) && fs.existsSync(piperVoiceConfig);
+}
+
+function synthesizeWithPiper(text: string) {
+  return new Promise<Buffer>((resolve, reject) => {
+    const outputPath = path.join(os.tmpdir(), `flashcards-tts-${crypto.randomUUID()}.wav`);
+    const piperLibraryPath = path.dirname(piperBin);
+    const child = spawn(piperBin, ["--model", piperVoiceModel, "--config", piperVoiceConfig, "--output_file", outputPath], {
+      cwd: piperLibraryPath,
+      env: {
+        ...process.env,
+        LD_LIBRARY_PATH: [piperLibraryPath, process.env.LD_LIBRARY_PATH].filter(Boolean).join(":")
+      }
+    });
+    let stderr = "";
+    const timer = windowlessTimeout(() => {
+      child.kill("SIGKILL");
+      reject(new Error("Piper synthesis timed out"));
+    }, 12000);
+
+    child.stderr.on("data", (chunk: Buffer) => {
+      stderr += chunk.toString();
+    });
+    child.on("error", (error) => {
+      clearTimeout(timer);
+      fs.promises.unlink(outputPath).catch(() => undefined);
+      reject(error);
+    });
+    child.on("close", async (code) => {
+      clearTimeout(timer);
+      try {
+        if (code !== 0) throw new Error(stderr || `Piper exited with code ${code}`);
+        const audio = await fs.promises.readFile(outputPath);
+        resolve(audio);
+      } catch (error) {
+        reject(error);
+      } finally {
+        fs.promises.unlink(outputPath).catch(() => undefined);
+      }
+    });
+    child.stdin.end(text);
+  });
+}
+
+function windowlessTimeout(callback: () => void, ms: number) {
+  return setTimeout(callback, ms);
 }
 
 function parseCookies(header: string | undefined) {
@@ -637,6 +703,15 @@ app.get("/api/auth/status", (req, res) => {
   });
 });
 
+app.get("/api/auth/gate", (req, res) => {
+  const user = userFromRequest(req);
+  if (!user) {
+    res.status(401).end();
+    return;
+  }
+  res.status(204).end();
+});
+
 app.post("/api/auth/register", (req, res) => {
   try {
     const username = requireText(req.body.username, "username");
@@ -684,6 +759,22 @@ app.post("/api/auth/logout", (req, res) => {
 
 app.use("/api", requireUser);
 
+app.get("/api/tomatoes/state", (_req, res) => {
+  const userId = currentUserId(res);
+  const row = get<{ value: string }>("SELECT value FROM user_settings WHERE user_id = ? AND key = ?", [userId, "tomatoes.state.v1"]);
+  res.json({ state: row?.value ? JSON.parse(row.value) : null });
+});
+
+app.put("/api/tomatoes/state", (req, res) => {
+  const userId = currentUserId(res);
+  if (!req.body || typeof req.body.state !== "object" || Array.isArray(req.body.state)) {
+    res.status(400).json({ error: "state must be an object" });
+    return;
+  }
+  setUserSetting(userId, "tomatoes.state.v1", JSON.stringify(req.body.state));
+  res.json({ ok: true, updatedAt: nowIso() });
+});
+
 app.get("/api/templates/:name", (req, res) => {
   const allowed = new Set(["普通卡导入模板.xlsx", "单词卡导入模板.xlsx", "选择题卡导入模板.xlsx", "填空题卡导入模板.xlsx"]);
   const name = path.basename(req.params.name);
@@ -692,6 +783,36 @@ app.get("/api/templates/:name", (req, res) => {
     return;
   }
   res.download(path.join(templateDir, name), name);
+});
+
+app.post("/api/tts", async (req, res) => {
+  const text = String(req.body.text ?? "").trim();
+  if (!text) {
+    res.status(400).json({ error: "朗读文本不能为空" });
+    return;
+  }
+  if (!isEnglishVoiceLanguage(req.body.language)) {
+    res.status(422).json({ error: "离线语音包当前仅支持英语发音" });
+    return;
+  }
+  if (text.length > 600) {
+    res.status(400).json({ error: "离线发音单次最多支持 600 个字符" });
+    return;
+  }
+  if (!isPiperReady()) {
+    res.status(503).json({ error: "离线英式语音包尚未安装" });
+    return;
+  }
+
+  try {
+    const audio = await synthesizeWithPiper(text);
+    res.setHeader("Content-Type", "audio/wav");
+    res.setHeader("Cache-Control", "no-store");
+    res.send(audio);
+  } catch (error) {
+    console.warn("Offline TTS failed", error);
+    res.status(502).json({ error: "离线发音暂时不可用，已回退到浏览器发音" });
+  }
 });
 
 app.get("/api/decks", (_req, res) => {
@@ -1132,7 +1253,7 @@ app.get("/api/settings", (_req, res) => {
   const userId = currentUserId(res);
   res.json({
     theme: getUserSetting(userId, "theme", "system"),
-    voiceLanguage: getUserSetting(userId, "voiceLanguage", "en-US"),
+    voiceLanguage: normalizeVoiceLanguage(getUserSetting(userId, "voiceLanguage", "en-GB")),
     notifications: getUserSetting(userId, "notifications", "off"),
     autoSpeak: getUserSetting(userId, "autoSpeak", "off"),
     dailyNewGoal: getDailyGoal(userId),
@@ -1165,6 +1286,10 @@ app.put("/api/settings", (req, res) => {
     }
     if (key === "studyFontFamily" && typeof req.body[key] === "string") {
       setUserSetting(userId, key, req.body[key]);
+      continue;
+    }
+    if (key === "voiceLanguage" && typeof req.body[key] === "string") {
+      setUserSetting(userId, key, normalizeVoiceLanguage(req.body[key]));
       continue;
     }
     if (typeof req.body[key] === "string") setUserSetting(userId, key, req.body[key]);

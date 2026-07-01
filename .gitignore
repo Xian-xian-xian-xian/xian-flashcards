@@ -2,6 +2,7 @@ node_modules/
 dist/
 dist-server/
 data/
+runtime/
 .env
 .DS_Store
 *.tar.gz

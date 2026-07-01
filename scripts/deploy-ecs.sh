@@ -95,6 +95,7 @@ step "open ssh control connection" open_master
 step "backup sqlite database" remote "set -e; ts=\$(date +%Y%m%d%H%M%S); if [ -f '$REMOTE_DIR/data/flashcards.sqlite' ]; then cp '$REMOTE_DIR/data/flashcards.sqlite' /root/flashcards.sqlite.pre-release.\$ts; fi; echo backup_ts=\$ts"
 step "upload committed files" upload_committed_files
 step "install dependencies" remote "cd '$REMOTE_DIR'; pnpm install"
+step "install piper voice" remote "cd '$REMOTE_DIR'; bash scripts/setup-piper.sh"
 step "build production assets" remote "cd '$REMOTE_DIR'; pnpm build"
 step "restart pm2" remote "cd '$REMOTE_DIR'; pm2 restart flashcards --update-env; pm2 save"
 step "verify health" verify_health

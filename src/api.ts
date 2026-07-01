@@ -43,6 +43,20 @@ async function download(url: string) {
   return { blob: await response.blob(), filename };
 }
 
+async function audioRequest(url: string, payload: unknown) {
+  const response = await fetch(url, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    credentials: "include",
+    body: JSON.stringify(payload)
+  });
+  if (!response.ok) {
+    const body = await response.json().catch(() => ({}));
+    throw new Error(body.error ?? `请求失败：${response.status}`);
+  }
+  return response.blob();
+}
+
 export const api = {
   authStatus: () => request<{ authenticated: boolean; user: User | null; canRegister: boolean }>("/api/auth/status"),
   login: (payload: { username: string; password: string }) =>
@@ -85,5 +99,6 @@ export const api = {
   syncStatus: () => request<SyncStatus>("/api/sync/status"),
   importCards: (form: FormData) =>
     request<{ imported: number; skipped: number }>("/api/import", { method: "POST", body: form }),
+  synthesizeSpeech: (payload: { text: string; language?: string }) => audioRequest("/api/tts", payload),
   exportRecentLogs: () => download("/api/logs/recent?minutes=10")
 };

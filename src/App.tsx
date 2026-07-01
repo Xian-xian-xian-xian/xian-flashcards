@@ -52,7 +52,7 @@ import type { Card, CardType, DailyTask, Deck, ReviewRating, ReviewRemaining, Re
 type View = "home" | "deck" | "study" | "import" | "settings" | "about";
 type SyncState = "idle" | "syncing" | "success" | "error" | "conflict";
 
-const version = "0.3.7";
+const version = "0.3.8";
 const logExportPressCount = 6;
 const logExportKey = "a";
 const logExportResetMs = 1800;
@@ -79,6 +79,12 @@ const emptyDailyTask: DailyTask = {
 
 function normalizeAnswer(value: string) {
   return value.trim().toLowerCase().replace(/\s+/g, " ");
+}
+
+function normalizeSpeechLanguage(value?: string) {
+  const language = String(value ?? "").trim();
+  if (language.toLowerCase().startsWith("en")) return "en-GB";
+  return language || "en-GB";
 }
 
 function optionKey(value: string) {
@@ -644,7 +650,7 @@ export default function App() {
   const [stats, setStats] = useState<Stats>({ total_cards: 0, mastered_cards: 0, due_cards: 0 });
   const [settings, setSettings] = useState<Settings>({
     theme: "system",
-    voiceLanguage: "en-US",
+    voiceLanguage: "en-GB",
     notifications: "off",
     autoSpeak: "off",
     dailyNewGoal: 20,
@@ -661,6 +667,7 @@ export default function App() {
   const [toast, setToast] = useState<{ message: string; kind: "success" | "error" } | null>(null);
   const [pending, setPending] = useState<Record<string, boolean>>({});
   const [conflict, setConflict] = useState<{ id: number; payload: CardPayload; serverCard: Card } | null>(null);
+  const speechAudioRef = useRef<HTMLAudioElement | null>(null);
 
   const rootDecks = useMemo(() => decks.filter((deck) => deck.depth === 1), [decks]);
   const selectedDeck = decks.find((deck) => deck.id === selectedDeckId) ?? decks[0];
@@ -866,12 +873,35 @@ export default function App() {
     return () => window.clearTimeout(timer);
   }, [dueCards.length, settings.notifications, studyRootDeck?.name]);
 
-  function speak(text: string, language?: string) {
+  function speakWithBrowser(text: string, language?: string) {
     window.speechSynthesis.cancel();
     const utterance = new SpeechSynthesisUtterance(text);
-    utterance.lang = language ?? selectedDeck?.language ?? settings.voiceLanguage;
+    utterance.lang = normalizeSpeechLanguage(language ?? selectedDeck?.language ?? settings.voiceLanguage);
     utterance.rate = 0.9;
     window.speechSynthesis.speak(utterance);
+  }
+
+  async function speak(text: string, language?: string) {
+    const speechLanguage = normalizeSpeechLanguage(language ?? selectedDeck?.language ?? settings.voiceLanguage);
+    speechAudioRef.current?.pause();
+    speechAudioRef.current = null;
+    window.speechSynthesis.cancel();
+    if (!speechLanguage.toLowerCase().startsWith("en")) {
+      speakWithBrowser(text, speechLanguage);
+      return;
+    }
+    try {
+      const blob = await api.synthesizeSpeech({ text, language: speechLanguage });
+      const url = URL.createObjectURL(blob);
+      const audio = new Audio(url);
+      speechAudioRef.current = audio;
+      audio.addEventListener("ended", () => URL.revokeObjectURL(url), { once: true });
+      audio.addEventListener("error", () => URL.revokeObjectURL(url), { once: true });
+      await audio.play();
+    } catch (error) {
+      console.warn("离线英式发音不可用，回退到浏览器发音", error);
+      speakWithBrowser(text, speechLanguage);
+    }
   }
 
   async function handleAnswer(card: Card, rating: ReviewRating) {
@@ -2415,7 +2445,7 @@ function SettingsView(props: { settings: Settings; onThemeChange: (theme: ThemeM
   return (
     <form className="panel settings-panel" onSubmit={save}>
       <label>主题<select value={draft.theme} onChange={(event) => changeTheme(event.target.value as ThemeMode)}><option value="system">跟随系统</option><option value="light">浅色</option><option value="dark">暗黑</option></select></label>
-      <label>默认发音语言<select value={draft.voiceLanguage} onChange={(event) => updateDraft({ voiceLanguage: event.target.value })}><option value="en-US">英语-美国 en-US</option><option value="en-GB">英语-英国 en-GB</option><option value="ja-JP">日语 ja-JP</option><option value="ko-KR">韩语 ko-KR</option><option value="fr-FR">法语 fr-FR</option><option value="de-DE">德语 de-DE</option></select></label>
+      <label>默认发音语言<select value={normalizeSpeechLanguage(draft.voiceLanguage)} onChange={(event) => updateDraft({ voiceLanguage: event.target.value })}><option value="en-GB">英语-英国 en-GB</option><option value="ja-JP">日语 ja-JP</option><option value="ko-KR">韩语 ko-KR</option><option value="fr-FR">法语 fr-FR</option><option value="de-DE">德语 de-DE</option></select></label>
       <label>自动发音<select value={draft.autoSpeak} onChange={(event) => updateDraft({ autoSpeak: event.target.value as Settings["autoSpeak"] })}><option value="off">关闭</option><option value="on">开启</option></select></label>
       <label>每日新学目标<input type="number" min={0} value={draft.dailyNewGoal} onChange={(event) => updateDraft({ dailyNewGoal: Number(event.target.value) })} /></label>
       <div className="settings-actions">
@@ -2433,6 +2463,7 @@ function AboutView(props: { syncStatus: SyncStatus | null }) {
       <div className="about-title"><Info /><div><p className="eyebrow">闪记</p><h2>版本 {version}</h2></div></div>
       <div className="schedule-box changelog-box">
         <h3>更新日志</h3>
+        <div className="changelog-row"><strong>0.3.8</strong><span>2026-07-01</span><p>发音升级为后端离线 Piper 英式英语语音包；英语朗读统一使用 en-GB，离线包不可用时自动回退浏览器发音。</p></div>
         <div className="changelog-row"><strong>0.3.7</strong><span>2026-07-01</span><p>修复单词卡导入时助记/注记误填相邻列、学习页例句编辑同步、例句注记字重和默认英式英语发音选项。</p></div>
         <div className="changelog-row"><strong>0.3.6</strong><span>2026-06-29</span><p>修复最后一张卡片选择“模糊/不认识”后重复同一张卡时，学习面板停留在离场动画导致黑屏的问题。</p></div>
         <div className="changelog-row"><strong>0.3.5</strong><span>2026-06-28</span><p>修复学习页最后一张选择“不认识/模糊”时可能退出本轮的问题；学习评分不再触发整站刷新，错题会稳定留在当前队列重复。</p></div>
