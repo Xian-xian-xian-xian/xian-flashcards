@@ -2,9 +2,7 @@ import cors from "cors";
 import express from "express";
 import multer from "multer";
 import fs from "node:fs";
-import { spawn } from "node:child_process";
 import crypto from "node:crypto";
-import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { parse } from "csv-parse/sync";
@@ -61,12 +59,9 @@ type CardType = "basic" | "word" | "choice" | "blank";
 const maxDeckDepth = 5;
 const sessionCookieName = "flashcards_session";
 const sessionDays = 30;
-const appVersion = "0.3.8";
+const appVersion = "0.3.9";
 const timeZone = "Asia/Shanghai";
-const piperDir = process.env.PIPER_DIR ?? path.resolve(process.cwd(), "runtime/piper");
-const piperBin = process.env.PIPER_BIN ?? path.join(piperDir, "piper", "piper");
-const piperVoiceModel = process.env.PIPER_VOICE_MODEL ?? path.join(piperDir, "voices", "en_GB-cori-medium.onnx");
-const piperVoiceConfig = process.env.PIPER_VOICE_CONFIG ?? `${piperVoiceModel}.json`;
+const pronunciationCacheDir = process.env.PRONUNCIATION_CACHE_DIR ?? path.resolve(process.cwd(), "runtime/pronunciations");
 const normalizedUsers = new Set<number>();
 const recentLogWindowMs = 10 * 60 * 1000;
 const maxRecentLogEntries = 2000;
@@ -297,53 +292,88 @@ function isEnglishVoiceLanguage(language: unknown) {
   return normalizeVoiceLanguage(language).toLowerCase().startsWith("en");
 }
 
-function isPiperReady() {
-  return fs.existsSync(piperBin) && fs.existsSync(piperVoiceModel) && fs.existsSync(piperVoiceConfig);
+function normalizePronunciationWord(value: unknown) {
+  const text = String(value ?? "")
+    .trim()
+    .replace(/[’‘]/g, "'")
+    .toLowerCase();
+  const match = text.match(/^[a-z][a-z'-]{0,79}$/);
+  return match ? text : null;
 }
 
-function synthesizeWithPiper(text: string) {
-  return new Promise<Buffer>((resolve, reject) => {
-    const outputPath = path.join(os.tmpdir(), `flashcards-tts-${crypto.randomUUID()}.wav`);
-    const piperLibraryPath = path.dirname(piperBin);
-    const child = spawn(piperBin, ["--model", piperVoiceModel, "--config", piperVoiceConfig, "--output_file", outputPath], {
-      cwd: piperLibraryPath,
-      env: {
-        ...process.env,
-        LD_LIBRARY_PATH: [piperLibraryPath, process.env.LD_LIBRARY_PATH].filter(Boolean).join(":")
-      }
-    });
-    let stderr = "";
-    const timer = windowlessTimeout(() => {
-      child.kill("SIGKILL");
-      reject(new Error("Piper synthesis timed out"));
-    }, 12000);
+function pronunciationCacheName(word: string, extension: string) {
+  return `${word.replace(/[^a-z0-9'-]/g, "_")}.${extension}`;
+}
 
-    child.stderr.on("data", (chunk: Buffer) => {
-      stderr += chunk.toString();
-    });
-    child.on("error", (error) => {
-      clearTimeout(timer);
-      fs.promises.unlink(outputPath).catch(() => undefined);
-      reject(error);
-    });
-    child.on("close", async (code) => {
-      clearTimeout(timer);
-      try {
-        if (code !== 0) throw new Error(stderr || `Piper exited with code ${code}`);
-        const audio = await fs.promises.readFile(outputPath);
-        resolve(audio);
-      } catch (error) {
-        reject(error);
-      } finally {
-        fs.promises.unlink(outputPath).catch(() => undefined);
-      }
-    });
-    child.stdin.end(text);
+function pronunciationContentType(filePath: string) {
+  const extension = path.extname(filePath).toLowerCase();
+  if (extension === ".mp3") return "audio/mpeg";
+  if (extension === ".ogg" || extension === ".oga") return "audio/ogg";
+  if (extension === ".wav") return "audio/wav";
+  return "application/octet-stream";
+}
+
+async function cachedPronunciationPath(word: string) {
+  await fs.promises.mkdir(pronunciationCacheDir, { recursive: true });
+  const entries = await fs.promises.readdir(pronunciationCacheDir).catch(() => []);
+  const prefix = pronunciationCacheName(word, "").slice(0, -1);
+  const match = entries.find((entry) => entry === `${prefix}.mp3` || entry === `${prefix}.ogg` || entry === `${prefix}.oga` || entry === `${prefix}.wav`);
+  return match ? path.join(pronunciationCacheDir, match) : null;
+}
+
+function audioExtension(audioUrl: string, contentType: string | null) {
+  const pathname = new URL(audioUrl).pathname.toLowerCase();
+  if (contentType?.includes("mpeg") || pathname.endsWith(".mp3")) return "mp3";
+  if (contentType?.includes("ogg") || pathname.endsWith(".ogg")) return "ogg";
+  if (contentType?.includes("wav") || pathname.endsWith(".wav")) return "wav";
+  return "mp3";
+}
+
+type DictionaryPhonetic = {
+  text?: string;
+  audio?: string;
+  sourceUrl?: string;
+};
+
+type DictionaryEntry = {
+  phonetics?: DictionaryPhonetic[];
+};
+
+function scorePronunciation(candidate: DictionaryPhonetic) {
+  const haystack = `${candidate.text ?? ""} ${candidate.audio ?? ""} ${candidate.sourceUrl ?? ""}`.toLowerCase();
+  let score = 0;
+  if (haystack.includes("-uk") || haystack.includes("_uk") || haystack.includes("uk.")) score += 100;
+  if (haystack.includes("gb") || haystack.includes("british") || haystack.includes("received_pronunciation")) score += 80;
+  if (haystack.includes("us") || haystack.includes("-us") || haystack.includes("_us")) score -= 50;
+  if (haystack.includes("au") || haystack.includes("-au") || haystack.includes("_au")) score -= 20;
+  if ((candidate.text ?? "").includes("əʊ")) score += 15;
+  return score;
+}
+
+async function findDictionaryPronunciation(word: string) {
+  const response = await fetch(`https://api.dictionaryapi.dev/api/v2/entries/en/${encodeURIComponent(word)}`, {
+    headers: { "User-Agent": `xian-flashcards/${appVersion} pronunciation-cache` }
   });
+  if (!response.ok) return null;
+  const entries = await response.json() as DictionaryEntry[];
+  const candidates = entries
+    .flatMap((entry) => entry.phonetics ?? [])
+    .filter((phonetic) => typeof phonetic.audio === "string" && phonetic.audio.trim());
+  candidates.sort((a, b) => scorePronunciation(b) - scorePronunciation(a));
+  return candidates[0] ?? null;
 }
 
-function windowlessTimeout(callback: () => void, ms: number) {
-  return setTimeout(callback, ms);
+async function downloadPronunciation(word: string, audioUrl: string) {
+  const response = await fetch(audioUrl, {
+    headers: { "User-Agent": `xian-flashcards/${appVersion} pronunciation-cache` }
+  });
+  if (!response.ok) throw new Error(`音频下载失败：${response.status}`);
+  const contentType = response.headers.get("content-type");
+  const extension = audioExtension(audioUrl, contentType);
+  await fs.promises.mkdir(pronunciationCacheDir, { recursive: true });
+  const filePath = path.join(pronunciationCacheDir, pronunciationCacheName(word, extension));
+  await fs.promises.writeFile(filePath, Buffer.from(await response.arrayBuffer()));
+  return filePath;
 }
 
 function parseCookies(header: string | undefined) {
@@ -786,32 +816,32 @@ app.get("/api/templates/:name", (req, res) => {
 });
 
 app.post("/api/tts", async (req, res) => {
-  const text = String(req.body.text ?? "").trim();
-  if (!text) {
+  const word = normalizePronunciationWord(req.body.text);
+  if (!word) {
     res.status(400).json({ error: "朗读文本不能为空" });
     return;
   }
   if (!isEnglishVoiceLanguage(req.body.language)) {
-    res.status(422).json({ error: "离线语音包当前仅支持英语发音" });
-    return;
-  }
-  if (text.length > 600) {
-    res.status(400).json({ error: "离线发音单次最多支持 600 个字符" });
-    return;
-  }
-  if (!isPiperReady()) {
-    res.status(503).json({ error: "离线英式语音包尚未安装" });
+    res.status(422).json({ error: "真人词典发音当前仅支持英语单词" });
     return;
   }
 
   try {
-    const audio = await synthesizeWithPiper(text);
-    res.setHeader("Content-Type", "audio/wav");
+    const cachedPath = await cachedPronunciationPath(word);
+    const audioPath = cachedPath ?? await (async () => {
+      const pronunciation = await findDictionaryPronunciation(word);
+      if (!pronunciation?.audio) throw new Error("没有找到真人词典发音");
+      return downloadPronunciation(word, pronunciation.audio);
+    })();
+
+    res.setHeader("Content-Type", pronunciationContentType(audioPath));
     res.setHeader("Cache-Control", "no-store");
-    res.send(audio);
+    res.setHeader("X-Pronunciation-Source", cachedPath ? "cache" : "wiktionary");
+    res.setHeader("X-Pronunciation-Word", encodeURIComponent(word));
+    res.send(await fs.promises.readFile(audioPath));
   } catch (error) {
-    console.warn("Offline TTS failed", error);
-    res.status(502).json({ error: "离线发音暂时不可用，已回退到浏览器发音" });
+    console.warn("Dictionary pronunciation failed", error);
+    res.status(404).json({ error: "没有找到真人词典发音，已回退到浏览器发音" });
   }
 });
 
