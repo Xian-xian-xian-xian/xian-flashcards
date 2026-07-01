@@ -1509,12 +1509,12 @@ textarea:focus {
 .labeled-markdown-label {
   color: var(--muted);
   font-size: 0.82em;
-  font-weight: 900;
+  font-weight: 500;
 }
 
-.flip-card .word-face strong,
-.flip-card .word-back strong {
+.flip-card .word-text {
   font-size: clamp(var(--study-word-min), 8vw, var(--study-word-max));
+  font-weight: 800;
   line-height: 1;
 }
 
@@ -1526,14 +1526,16 @@ textarea:focus {
   font-weight: 900;
 }
 
-.flip-card .word-back b {
+.flip-card .word-meaning {
   font-size: clamp(var(--study-back-min), 4vw, var(--study-back-max));
+  font-weight: 600;
 }
 
 .flip-card .word-back small {
   max-width: 60ch;
   margin-top: 0;
   font-size: var(--study-small-size);
+  font-weight: 400;
   line-height: 1.55;
 }
 
@@ -1979,7 +1981,7 @@ body.resizing-answer-dock .question-dock-resizer::after {
 .feedback-block > span {
   color: var(--text);
   font-size: inherit;
-  font-weight: 900;
+  font-weight: 500;
 }
 
 .feedback-block.other {

@@ -1562,6 +1562,17 @@ function CardEditor(props: { card?: Card; onSubmit: (payload: CardPayload) => Pr
   const [advancedOpen, setAdvancedOpen] = useState(Boolean(props.card && (props.card.phonetic || props.card.example || props.card.mnemonic || props.card.note || parseChoices(props.card.choices).length > 0)));
   const [saving, setSaving] = useState(false);
 
+  useEffect(() => {
+    setFront(props.card?.front ?? "");
+    setPhonetic(props.card?.phonetic ?? "");
+    setBack(props.card?.back ?? "");
+    setExample(props.card?.example ?? "");
+    setMnemonic(props.card?.mnemonic ?? "");
+    setNote(props.card?.note ?? "");
+    setChoices(parseChoices(props.card?.choices).join(" | "));
+    setAdvancedOpen(Boolean(props.card && (props.card.phonetic || props.card.example || props.card.mnemonic || props.card.note || parseChoices(props.card.choices).length > 0)));
+  }, [props.card?.id, props.card?.updated_at]);
+
   async function submit(event: FormEvent) {
     event.preventDefault();
     if (!front.trim() || !back.trim() || saving) return;
@@ -1867,12 +1878,12 @@ function StudyView(props: {
   const studyStyle = {
     "--study-face-min": `${Math.round(32 * scale)}px`,
     "--study-face-max": `${Math.round(72 * scale)}px`,
-    "--study-word-min": `${Math.round(38 * scale)}px`,
-    "--study-word-max": `${Math.round(72 * scale)}px`,
+    "--study-word-min": `${Math.round(34 * scale)}px`,
+    "--study-word-max": `${Math.round(64 * scale)}px`,
     "--study-phonetic-min": `${Math.round(18 * scale)}px`,
     "--study-phonetic-max": `${Math.round(28 * scale)}px`,
-    "--study-back-min": `${Math.round(22 * scale)}px`,
-    "--study-back-max": `${Math.round(34 * scale)}px`,
+    "--study-back-min": `${Math.round(20 * scale)}px`,
+    "--study-back-max": `${Math.round(30 * scale)}px`,
     "--study-small-size": `${Math.round(16 * scale)}px`,
     "--study-question-size": `${Math.round(24 * scale)}px`,
     "--study-choice-size": `${Math.round(16 * scale)}px`,
@@ -2260,7 +2271,7 @@ function CardFront(props: { card: Card }) {
   if (props.card.card_type === "blank") return <MarkdownText value={props.card.front} renderBlank={(key) => <span key={key} className="blank-dock-gap" />} />;
   if (props.card.card_type === "choice") return <MarkdownText value={props.card.front} />;
   if (!isWordCard(props.card)) return <MarkdownText value={props.card.front} />;
-  return <span className="word-face"><strong><MarkdownText value={props.card.front} /></strong>{props.card.phonetic && <em>{props.card.phonetic}</em>}</span>;
+  return <span className="word-face"><span className="word-text"><MarkdownText value={props.card.front} /></span>{props.card.phonetic && <em>{props.card.phonetic}</em>}</span>;
 }
 
 function CardBack(props: { card: Card }) {
@@ -2269,9 +2280,9 @@ function CardBack(props: { card: Card }) {
   }
   return (
     <span className="word-back">
-      <strong><MarkdownText value={props.card.front} /></strong>
+      <span className="word-text"><MarkdownText value={props.card.front} /></span>
       {props.card.phonetic && <em>{props.card.phonetic}</em>}
-      <b><MarkdownText value={props.card.back} /></b>
+      <span className="word-meaning"><MarkdownText value={props.card.back} /></span>
       {props.card.example && <small><MarkdownText value={props.card.example} /></small>}
       <LabeledMarkdown label="助记" value={props.card.mnemonic} />
     </span>
@@ -2404,7 +2415,7 @@ function SettingsView(props: { settings: Settings; onThemeChange: (theme: ThemeM
   return (
     <form className="panel settings-panel" onSubmit={save}>
       <label>主题<select value={draft.theme} onChange={(event) => changeTheme(event.target.value as ThemeMode)}><option value="system">跟随系统</option><option value="light">浅色</option><option value="dark">暗黑</option></select></label>
-      <label>默认发音语言<select value={draft.voiceLanguage} onChange={(event) => updateDraft({ voiceLanguage: event.target.value })}><option value="en-US">英语 en-US</option><option value="ja-JP">日语 ja-JP</option><option value="ko-KR">韩语 ko-KR</option><option value="fr-FR">法语 fr-FR</option><option value="de-DE">德语 de-DE</option></select></label>
+      <label>默认发音语言<select value={draft.voiceLanguage} onChange={(event) => updateDraft({ voiceLanguage: event.target.value })}><option value="en-US">英语-美国 en-US</option><option value="en-GB">英语-英国 en-GB</option><option value="ja-JP">日语 ja-JP</option><option value="ko-KR">韩语 ko-KR</option><option value="fr-FR">法语 fr-FR</option><option value="de-DE">德语 de-DE</option></select></label>
       <label>自动发音<select value={draft.autoSpeak} onChange={(event) => updateDraft({ autoSpeak: event.target.value as Settings["autoSpeak"] })}><option value="off">关闭</option><option value="on">开启</option></select></label>
       <label>每日新学目标<input type="number" min={0} value={draft.dailyNewGoal} onChange={(event) => updateDraft({ dailyNewGoal: Number(event.target.value) })} /></label>
       <div className="settings-actions">

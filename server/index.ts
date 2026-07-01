@@ -176,6 +176,10 @@ function hasAnyKey(row: Record<string, unknown>, keys: string[]) {
   return keys.some((key) => key in row);
 }
 
+function optionalText(value: unknown) {
+  return typeof value === "string" ? value.trim() : null;
+}
+
 function splitChoiceText(value: string) {
   return value
     .split(/[|\n]+|[；;](?=\s*\S)/)
@@ -833,10 +837,10 @@ app.patch("/api/cards/:id", (req, res) => {
       cardType,
       req.body.front?.trim() || null,
       req.body.back?.trim() || null,
-      req.body.phonetic?.trim() ?? null,
-      req.body.example?.trim() ?? null,
-      req.body.mnemonic?.trim() ?? null,
-      req.body.note?.trim() ?? null,
+      "phonetic" in req.body ? optionalText(req.body.phonetic) : null,
+      "example" in req.body ? optionalText(req.body.example) : null,
+      "mnemonic" in req.body ? optionalText(req.body.mnemonic) : null,
+      "note" in req.body ? optionalText(req.body.note) : null,
       nextChoices,
       typeof req.body.favorite === "boolean" || typeof req.body.favorite === "number"
         ? Number(req.body.favorite)
@@ -901,7 +905,6 @@ function normalizeImportRows(rows: Record<string, unknown>[]) {
   return rows
     .map((row) => {
       const values = Object.values(row).map((value) => String(value ?? "").trim());
-      const hasPhonetic = "phonetic" in row || "音标" in row;
       const choices = importChoiceValues(row);
       const front = String(rowValue(row, ["front", "question", "word", "题目", "正面", "单词"]) ?? values[0] ?? "").trim();
       const back = String(rowValue(row, ["back", "answer", "meaning", "答案", "背面", "释义"]) ?? values[1] ?? "").trim();
@@ -913,8 +916,8 @@ function normalizeImportRows(rows: Record<string, unknown>[]) {
         back,
         phonetic: String(rowValue(row, ["phonetic", "音标"]) ?? "").trim(),
         example: String(rowValue(row, ["example", "解析", "例句", "说明"]) ?? positionalExample ?? "").trim(),
-        mnemonic: String(rowValue(row, ["mnemonic", "助记"]) ?? (cardType === "choice" ? "" : hasPhonetic ? values[4] : values[3]) ?? "").trim(),
-        note: String(rowValue(row, ["note", "备注"]) ?? (cardType === "choice" ? "" : hasPhonetic ? values[5] : values[4]) ?? "").trim(),
+        mnemonic: String(rowValue(row, ["mnemonic", "助记"]) ?? "").trim(),
+        note: String(rowValue(row, ["note", "备注", "注记"]) ?? "").trim(),
         choices: normalizedChoicePayload(cardType, choices, back)
       };
     })
