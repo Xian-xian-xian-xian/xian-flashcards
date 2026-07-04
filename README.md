@@ -34,7 +34,7 @@ pnpm remote
 PORT=8080 pnpm start:remote
 ```
 
-英语单词发音默认使用阿里云百炼 CosyVoice v3 英式男声 `loongeric_v3`，生成结果会缓存到 `runtime/pronunciations`。生产环境可在服务器项目目录的 `.env` 中至少配置：
+英语单词发音默认使用阿里云百炼 CosyVoice 英式男声 `loongeric_v2`，生成结果会缓存到 `runtime/pronunciations`。生产环境可在服务器项目目录的 `.env` 中至少配置：
 
 ```bash
 DASHSCOPE_API_KEY=你的百炼APIKey
@@ -44,7 +44,7 @@ DASHSCOPE_API_KEY=你的百炼APIKey
 
 ```bash
 ALIYUN_TTS_MODEL=cosyvoice-v3-flash
-ALIYUN_TTS_VOICE=loongeric_v3
+ALIYUN_TTS_VOICE=loongeric_v2
 ALIYUN_TTS_WORKSPACE_ID=你的百炼业务空间ID
 ALIYUN_TTS_REGION=cn-beijing
 PRONUNCIATION_CACHE_DIR=runtime/pronunciations

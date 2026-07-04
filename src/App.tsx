@@ -52,7 +52,7 @@ import type { Card, CardType, DailyTask, Deck, ReviewRating, ReviewRemaining, Re
 type View = "home" | "deck" | "study" | "import" | "settings" | "about";
 type SyncState = "idle" | "syncing" | "success" | "error" | "conflict";
 
-const version = "0.3.10";
+const version = "0.3.11";
 const logExportPressCount = 6;
 const logExportKey = "a";
 const logExportResetMs = 1800;
@@ -2463,6 +2463,7 @@ function AboutView(props: { syncStatus: SyncStatus | null }) {
       <div className="about-title"><Info /><div><p className="eyebrow">闪记</p><h2>版本 {version}</h2></div></div>
       <div className="schedule-box changelog-box">
         <h3>更新日志</h3>
+        <div className="changelog-row"><strong>0.3.11</strong><span>2026-07-04</span><p>英语单词发音音色切换为阿里云 CosyVoice 的 loongeric_v2，并清理旧音色缓存后重新生成。</p></div>
         <div className="changelog-row"><strong>0.3.10</strong><span>2026-07-04</span><p>英语单词发音改为优先调用阿里云 CosyVoice v3 的 loongeric_v3 英式男声音色，并按模型和音色在后端缓存生成音频。</p></div>
         <div className="changelog-row"><strong>0.3.9</strong><span>2026-07-01</span><p>英语单词发音改为优先使用 Wiktionary/Commons 真人词典音频，并在后端缓存；找不到真人录音时自动回退浏览器发音。</p></div>
         <div className="changelog-row"><strong>0.3.8</strong><span>2026-07-01</span><p>发音升级为后端离线 Piper 英式英语语音包；英语朗读统一使用 en-GB，离线包不可用时自动回退浏览器发音。</p></div>
