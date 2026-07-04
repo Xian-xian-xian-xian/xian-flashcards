@@ -350,8 +350,10 @@ function aliyunTtsStartPayload() {
       sample_rate: 22050,
       rate: 1,
       pitch: 1,
-      volume: 50
-    }
+      volume: 50,
+      enable_ssml: false
+    },
+    input: {}
   };
 }
 
@@ -367,6 +369,8 @@ function parseAliyunWsMessage(data: WebSocket.RawData) {
         event?: string;
         code?: string;
         message?: string;
+        error_code?: string;
+        error_message?: string;
       };
     };
   } catch {
@@ -382,7 +386,7 @@ async function synthesizeWithAliyun(word: string) {
   const audio = await new Promise<Buffer>((resolve, reject) => {
     const ws = new WebSocket(aliyunTtsUrl, {
       headers: {
-        Authorization: `Bearer ${aliyunTtsApiKey}`,
+        Authorization: `bearer ${aliyunTtsApiKey}`,
         "X-DashScope-DataInspection": "enable"
       }
     });
@@ -409,14 +413,14 @@ async function synthesizeWithAliyun(word: string) {
       const event = message?.header?.event;
       if (event === "task-started") {
         send(aliyunTtsRequest("continue-task", taskId, { input: { text: word } }));
-        send(aliyunTtsRequest("finish-task", taskId));
+        send(aliyunTtsRequest("finish-task", taskId, { input: {} }));
       } else if (event === "task-finished") {
         cleanup();
         ws.close();
         resolve(Buffer.concat(chunks));
       } else if (event === "task-failed") {
         cleanup();
-        reject(new Error(message?.header?.message ?? message?.header?.code ?? "阿里云语音合成失败"));
+        reject(new Error(message?.header?.error_message ?? message?.header?.message ?? message?.header?.error_code ?? message?.header?.code ?? "阿里云语音合成失败"));
       }
     });
 
