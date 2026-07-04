@@ -52,7 +52,7 @@ import type { Card, CardType, DailyTask, Deck, ReviewRating, ReviewRemaining, Re
 type View = "home" | "deck" | "study" | "import" | "settings" | "about";
 type SyncState = "idle" | "syncing" | "success" | "error" | "conflict";
 
-const version = "0.3.9";
+const version = "0.3.10";
 const logExportPressCount = 6;
 const logExportKey = "a";
 const logExportResetMs = 1800;
@@ -899,7 +899,7 @@ export default function App() {
       audio.addEventListener("error", () => URL.revokeObjectURL(url), { once: true });
       await audio.play();
     } catch (error) {
-      console.warn("离线英式发音不可用，回退到浏览器发音", error);
+      console.warn("阿里云英式发音不可用，回退到浏览器发音", error);
       speakWithBrowser(text, speechLanguage);
     }
   }
@@ -2463,6 +2463,7 @@ function AboutView(props: { syncStatus: SyncStatus | null }) {
       <div className="about-title"><Info /><div><p className="eyebrow">闪记</p><h2>版本 {version}</h2></div></div>
       <div className="schedule-box changelog-box">
         <h3>更新日志</h3>
+        <div className="changelog-row"><strong>0.3.10</strong><span>2026-07-04</span><p>英语单词发音改为优先调用阿里云 CosyVoice v3 的 loongeric_v3 英式男声音色，并按模型和音色在后端缓存生成音频。</p></div>
         <div className="changelog-row"><strong>0.3.9</strong><span>2026-07-01</span><p>英语单词发音改为优先使用 Wiktionary/Commons 真人词典音频，并在后端缓存；找不到真人录音时自动回退浏览器发音。</p></div>
         <div className="changelog-row"><strong>0.3.8</strong><span>2026-07-01</span><p>发音升级为后端离线 Piper 英式英语语音包；英语朗读统一使用 en-GB，离线包不可用时自动回退浏览器发音。</p></div>
         <div className="changelog-row"><strong>0.3.7</strong><span>2026-07-01</span><p>修复单词卡导入时助记/注记误填相邻列、学习页例句编辑同步、例句注记字重和默认英式英语发音选项。</p></div>

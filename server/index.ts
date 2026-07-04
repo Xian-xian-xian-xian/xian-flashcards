@@ -5,6 +5,7 @@ import fs from "node:fs";
 import crypto from "node:crypto";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+import WebSocket from "ws";
 import { parse } from "csv-parse/sync";
 import * as XLSX from "xlsx";
 import type { SqlValue } from "sql.js";
@@ -59,9 +60,19 @@ type CardType = "basic" | "word" | "choice" | "blank";
 const maxDeckDepth = 5;
 const sessionCookieName = "flashcards_session";
 const sessionDays = 30;
-const appVersion = "0.3.9";
+const appVersion = "0.3.10";
 const timeZone = "Asia/Shanghai";
 const pronunciationCacheDir = process.env.PRONUNCIATION_CACHE_DIR ?? path.resolve(process.cwd(), "runtime/pronunciations");
+const aliyunTtsModel = process.env.ALIYUN_TTS_MODEL ?? "cosyvoice-v3-flash";
+const aliyunTtsVoice = process.env.ALIYUN_TTS_VOICE ?? "loongeric_v3";
+const aliyunTtsRegion = process.env.ALIYUN_TTS_REGION ?? "cn-beijing";
+const aliyunTtsWorkspaceId = process.env.ALIYUN_TTS_WORKSPACE_ID ?? process.env.DASHSCOPE_WORKSPACE_ID ?? "";
+const aliyunTtsApiKey = process.env.DASHSCOPE_API_KEY ?? process.env.ALIYUN_BAILIAN_API_KEY ?? "";
+const aliyunTtsUrl = process.env.ALIYUN_TTS_WS_URL ?? (
+  aliyunTtsWorkspaceId
+    ? `wss://${aliyunTtsWorkspaceId}.${aliyunTtsRegion}.maas.aliyuncs.com/api-ws/v1/inference`
+    : "wss://dashscope.aliyuncs.com/api-ws/v1/inference"
+);
 const normalizedUsers = new Set<number>();
 const recentLogWindowMs = 10 * 60 * 1000;
 const maxRecentLogEntries = 2000;
@@ -301,78 +312,128 @@ function normalizePronunciationWord(value: unknown) {
   return match ? text : null;
 }
 
-function pronunciationCacheName(word: string, extension: string) {
-  return `${word.replace(/[^a-z0-9'-]/g, "_")}.${extension}`;
+function ttsCacheName(word: string) {
+  const safeModel = aliyunTtsModel.replace(/[^a-z0-9_-]/gi, "_");
+  const safeVoice = aliyunTtsVoice.replace(/[^a-z0-9_-]/gi, "_");
+  const safeWord = word.replace(/[^a-z0-9'-]/g, "_");
+  return `${safeModel}-${safeVoice}-${safeWord}.mp3`;
 }
 
-function pronunciationContentType(filePath: string) {
-  const extension = path.extname(filePath).toLowerCase();
-  if (extension === ".mp3") return "audio/mpeg";
-  if (extension === ".ogg" || extension === ".oga") return "audio/ogg";
-  if (extension === ".wav") return "audio/wav";
-  return "application/octet-stream";
-}
-
-async function cachedPronunciationPath(word: string) {
+async function cachedTtsPath(word: string) {
   await fs.promises.mkdir(pronunciationCacheDir, { recursive: true });
-  const entries = await fs.promises.readdir(pronunciationCacheDir).catch(() => []);
-  const prefix = pronunciationCacheName(word, "").slice(0, -1);
-  const match = entries.find((entry) => entry === `${prefix}.mp3` || entry === `${prefix}.ogg` || entry === `${prefix}.oga` || entry === `${prefix}.wav`);
-  return match ? path.join(pronunciationCacheDir, match) : null;
+  const filePath = path.join(pronunciationCacheDir, ttsCacheName(word));
+  return fs.existsSync(filePath) ? filePath : null;
 }
 
-function audioExtension(audioUrl: string, contentType: string | null) {
-  const pathname = new URL(audioUrl).pathname.toLowerCase();
-  if (contentType?.includes("mpeg") || pathname.endsWith(".mp3")) return "mp3";
-  if (contentType?.includes("ogg") || pathname.endsWith(".ogg")) return "ogg";
-  if (contentType?.includes("wav") || pathname.endsWith(".wav")) return "wav";
-  return "mp3";
+function aliyunTtsRequest(action: string, taskId: string, payload: Record<string, unknown> = {}) {
+  return {
+    header: {
+      action,
+      task_id: taskId,
+      streaming: "duplex"
+    },
+    payload
+  };
 }
 
-type DictionaryPhonetic = {
-  text?: string;
-  audio?: string;
-  sourceUrl?: string;
-};
-
-type DictionaryEntry = {
-  phonetics?: DictionaryPhonetic[];
-};
-
-function scorePronunciation(candidate: DictionaryPhonetic) {
-  const haystack = `${candidate.text ?? ""} ${candidate.audio ?? ""} ${candidate.sourceUrl ?? ""}`.toLowerCase();
-  let score = 0;
-  if (haystack.includes("-uk") || haystack.includes("_uk") || haystack.includes("uk.")) score += 100;
-  if (haystack.includes("gb") || haystack.includes("british") || haystack.includes("received_pronunciation")) score += 80;
-  if (haystack.includes("us") || haystack.includes("-us") || haystack.includes("_us")) score -= 50;
-  if (haystack.includes("au") || haystack.includes("-au") || haystack.includes("_au")) score -= 20;
-  if ((candidate.text ?? "").includes("əʊ")) score += 15;
-  return score;
+function aliyunTtsStartPayload() {
+  return {
+    task_group: "audio",
+    task: "tts",
+    function: "SpeechSynthesizer",
+    model: aliyunTtsModel,
+    parameters: {
+      text_type: "PlainText",
+      voice: aliyunTtsVoice,
+      format: "mp3",
+      sample_rate: 22050,
+      rate: 1,
+      pitch: 1,
+      volume: 50
+    }
+  };
 }
 
-async function findDictionaryPronunciation(word: string) {
-  const response = await fetch(`https://api.dictionaryapi.dev/api/v2/entries/en/${encodeURIComponent(word)}`, {
-    headers: { "User-Agent": `xian-flashcards/${appVersion} pronunciation-cache` }
+function parseAliyunWsMessage(data: WebSocket.RawData) {
+  const text = Array.isArray(data)
+    ? Buffer.concat(data).toString("utf8")
+    : Buffer.isBuffer(data)
+      ? data.toString("utf8")
+      : Buffer.from(data as ArrayBuffer).toString("utf8");
+  try {
+    return JSON.parse(text) as {
+      header?: {
+        event?: string;
+        code?: string;
+        message?: string;
+      };
+    };
+  } catch {
+    return null;
+  }
+}
+
+async function synthesizeWithAliyun(word: string) {
+  if (!aliyunTtsApiKey) throw new Error("缺少 DASHSCOPE_API_KEY 或 ALIYUN_BAILIAN_API_KEY");
+  const taskId = crypto.randomUUID();
+  const chunks: Buffer[] = [];
+
+  const audio = await new Promise<Buffer>((resolve, reject) => {
+    const ws = new WebSocket(aliyunTtsUrl, {
+      headers: {
+        Authorization: `Bearer ${aliyunTtsApiKey}`,
+        "X-DashScope-DataInspection": "enable"
+      }
+    });
+
+    const timeout = setTimeout(() => {
+      ws.close();
+      reject(new Error("阿里云语音合成超时"));
+    }, 30000);
+
+    const cleanup = () => clearTimeout(timeout);
+    const send = (message: unknown) => ws.send(JSON.stringify(message));
+
+    ws.on("open", () => {
+      send(aliyunTtsRequest("run-task", taskId, aliyunTtsStartPayload()));
+    });
+
+    ws.on("message", (data, isBinary) => {
+      if (isBinary) {
+        chunks.push(Buffer.isBuffer(data) ? data : Buffer.from(data as ArrayBuffer));
+        return;
+      }
+
+      const message = parseAliyunWsMessage(data);
+      const event = message?.header?.event;
+      if (event === "task-started") {
+        send(aliyunTtsRequest("continue-task", taskId, { input: { text: word } }));
+        send(aliyunTtsRequest("finish-task", taskId));
+      } else if (event === "task-finished") {
+        cleanup();
+        ws.close();
+        resolve(Buffer.concat(chunks));
+      } else if (event === "task-failed") {
+        cleanup();
+        reject(new Error(message?.header?.message ?? message?.header?.code ?? "阿里云语音合成失败"));
+      }
+    });
+
+    ws.on("error", (error) => {
+      cleanup();
+      reject(error);
+    });
+
+    ws.on("close", () => {
+      cleanup();
+      if (!chunks.length) reject(new Error("阿里云语音合成未返回音频"));
+    });
   });
-  if (!response.ok) return null;
-  const entries = await response.json() as DictionaryEntry[];
-  const candidates = entries
-    .flatMap((entry) => entry.phonetics ?? [])
-    .filter((phonetic) => typeof phonetic.audio === "string" && phonetic.audio.trim());
-  candidates.sort((a, b) => scorePronunciation(b) - scorePronunciation(a));
-  return candidates[0] ?? null;
-}
 
-async function downloadPronunciation(word: string, audioUrl: string) {
-  const response = await fetch(audioUrl, {
-    headers: { "User-Agent": `xian-flashcards/${appVersion} pronunciation-cache` }
-  });
-  if (!response.ok) throw new Error(`音频下载失败：${response.status}`);
-  const contentType = response.headers.get("content-type");
-  const extension = audioExtension(audioUrl, contentType);
+  if (!audio.length) throw new Error("阿里云语音合成未返回音频");
   await fs.promises.mkdir(pronunciationCacheDir, { recursive: true });
-  const filePath = path.join(pronunciationCacheDir, pronunciationCacheName(word, extension));
-  await fs.promises.writeFile(filePath, Buffer.from(await response.arrayBuffer()));
+  const filePath = path.join(pronunciationCacheDir, ttsCacheName(word));
+  await fs.promises.writeFile(filePath, audio);
   return filePath;
 }
 
@@ -822,26 +883,24 @@ app.post("/api/tts", async (req, res) => {
     return;
   }
   if (!isEnglishVoiceLanguage(req.body.language)) {
-    res.status(422).json({ error: "真人词典发音当前仅支持英语单词" });
+    res.status(422).json({ error: "阿里云英式发音当前仅支持英语单词" });
     return;
   }
 
   try {
-    const cachedPath = await cachedPronunciationPath(word);
-    const audioPath = cachedPath ?? await (async () => {
-      const pronunciation = await findDictionaryPronunciation(word);
-      if (!pronunciation?.audio) throw new Error("没有找到真人词典发音");
-      return downloadPronunciation(word, pronunciation.audio);
-    })();
+    const cachedPath = await cachedTtsPath(word);
+    const audioPath = cachedPath ?? await synthesizeWithAliyun(word);
 
-    res.setHeader("Content-Type", pronunciationContentType(audioPath));
+    res.setHeader("Content-Type", "audio/mpeg");
     res.setHeader("Cache-Control", "no-store");
-    res.setHeader("X-Pronunciation-Source", cachedPath ? "cache" : "wiktionary");
+    res.setHeader("X-Pronunciation-Source", cachedPath ? "cache" : "aliyun-cosyvoice");
+    res.setHeader("X-Pronunciation-Model", aliyunTtsModel);
+    res.setHeader("X-Pronunciation-Voice", aliyunTtsVoice);
     res.setHeader("X-Pronunciation-Word", encodeURIComponent(word));
     res.send(await fs.promises.readFile(audioPath));
   } catch (error) {
-    console.warn("Dictionary pronunciation failed", error);
-    res.status(404).json({ error: "没有找到真人词典发音，已回退到浏览器发音" });
+    console.warn("Aliyun CosyVoice pronunciation failed", error);
+    res.status(502).json({ error: "阿里云英式发音暂不可用，已回退到浏览器发音" });
   }
 });
 
