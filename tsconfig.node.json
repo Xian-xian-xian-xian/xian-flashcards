@@ -11,5 +11,6 @@
     "types": ["node"],
     "outDir": "dist-server"
   },
-  "include": ["server", "vite.config.ts"]
+  "include": ["server", "vite.config.ts"],
+  "exclude": ["server/**/*.test.ts", "server/**/*.spec.ts"]
 }

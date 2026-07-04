@@ -149,6 +149,12 @@ export async function initDb() {
   if (!dailyTaskColumns.includes("new_card_ids")) {
     exec("ALTER TABLE daily_tasks ADD COLUMN new_card_ids TEXT DEFAULT '[]'");
   }
+  if (!dailyTaskColumns.includes("new_mastered_card_ids")) {
+    exec("ALTER TABLE daily_tasks ADD COLUMN new_mastered_card_ids TEXT DEFAULT '[]'");
+  }
+  if (!dailyTaskColumns.includes("review_mastered_card_ids")) {
+    exec("ALTER TABLE daily_tasks ADD COLUMN review_mastered_card_ids TEXT DEFAULT '[]'");
+  }
   persist();
 }
 

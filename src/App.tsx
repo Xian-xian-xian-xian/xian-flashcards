@@ -51,8 +51,11 @@ import type { Card, CardType, DailyTask, Deck, ReviewRating, ReviewRemaining, Re
 
 type View = "home" | "deck" | "study" | "import" | "settings" | "about";
 type SyncState = "idle" | "syncing" | "success" | "error" | "conflict";
+type StudyMode = "review" | "new" | "grind";
+type ReviewResult = { stage: number; dueAt: string; previous: ReviewSnapshot };
+type PracticeResult = { stage: number; dueAt: string; previous: Pick<ReviewSnapshot, "dailyTaskPrevious"> };
 
-const version = "0.3.11";
+const version = "0.3.12";
 const logExportPressCount = 6;
 const logExportKey = "a";
 const logExportResetMs = 1800;
@@ -70,8 +73,10 @@ const emptyDailyTask: DailyTask = {
   date: "",
   daily_new_goal: 20,
   new_completed: 0,
+  new_mastered: 0,
   review_total: 0,
   review_completed: 0,
+  review_mastered: 0,
   completed: false,
   completed_at: "",
   streak: 0
@@ -507,6 +512,24 @@ function nextStudyQueue(queue: Card[], card: Card, rating: ReviewRating, result:
   return [...rest.slice(0, repeatIndex), repeatCard, ...rest.slice(repeatIndex)];
 }
 
+function clampGrindGroupSize(value: unknown) {
+  const size = Math.round(Number(value));
+  if (!Number.isFinite(size)) return 15;
+  return Math.min(100, Math.max(1, size));
+}
+
+function appendUniqueCards(cards: Card[], nextCards: Card[]) {
+  const seen = new Set(cards.map((card) => card.id));
+  return [
+    ...cards,
+    ...nextCards.filter((card) => {
+      if (seen.has(card.id)) return false;
+      seen.add(card.id);
+      return true;
+    })
+  ];
+}
+
 function playAnswerSound(result: "right" | "wrong") {
   try {
     const AudioContextClass = window.AudioContext || (window as typeof window & { webkitAudioContext?: typeof AudioContext }).webkitAudioContext;
@@ -907,6 +930,18 @@ export default function App() {
   async function handleAnswer(card: Card, rating: ReviewRating) {
     try {
       const result = await api.answer(card.id, rating);
+      setDailyTask(await api.dailyTask());
+      return result;
+    } catch (error) {
+      showToast((error as Error).message, "error");
+      throw error;
+    }
+  }
+
+  async function handlePractice(card: Card, rating: ReviewRating) {
+    try {
+      const result = await api.practice(card.id, rating);
+      setDailyTask(await api.dailyTask());
       return result;
     } catch (error) {
       showToast((error as Error).message, "error");
@@ -1110,9 +1145,19 @@ export default function App() {
             }}
             autoSpeak={settings.autoSpeak === "on"}
             onAnswer={handleAnswer}
+            onPractice={handlePractice}
             onUndoAnswer={async (card, snapshot) => {
               try {
                 await api.restoreReview(card.id, snapshot);
+                await afterMutation("已撤销上一张");
+              } catch (error) {
+                showToast((error as Error).message, "error");
+                throw error;
+              }
+            }}
+            onUndoPractice={async (card, snapshot) => {
+              try {
+                await api.restorePractice(card.id, snapshot);
                 await afterMutation("已撤销上一张");
               } catch (error) {
                 showToast((error as Error).message, "error");
@@ -1295,8 +1340,9 @@ function HomeView(props: {
 }) {
   const mastered = props.stats.total_cards ? Math.round((props.stats.mastered_cards / props.stats.total_cards) * 100) : 0;
   const dailyTarget = Math.max(props.dailyTask.daily_new_goal + props.dailyTask.review_total, 1);
-  const dailyDone = Math.min(props.dailyTask.new_completed, props.dailyTask.daily_new_goal) + Math.min(props.dailyTask.review_completed, props.dailyTask.review_total);
+  const dailyDone = Math.min(props.dailyTask.new_mastered, props.dailyTask.daily_new_goal) + Math.min(props.dailyTask.review_completed, props.dailyTask.review_total);
   const dailyProgress = props.dailyTask.completed ? 100 : Math.round((dailyDone / dailyTarget) * 100);
+  const reviewMasterRate = props.dailyTask.review_total ? Math.round((props.dailyTask.review_mastered / props.dailyTask.review_total) * 100) : 0;
   return (
     <section className="stack">
       <div className={`hero-panel daily-hero ${props.dailyTask.completed ? "complete" : ""}`}>
@@ -1304,10 +1350,10 @@ function HomeView(props: {
         <div>
           <p className="eyebrow">今日打卡</p>
           <div className="streak-heading">
-            <h2>{props.dailyTask.completed ? "已完成" : `${props.dailyTask.new_completed}/${props.dailyTask.daily_new_goal} 新学`}</h2>
+            <h2>{props.dailyTask.completed ? "已完成" : `${props.dailyTask.new_mastered}/${props.dailyTask.daily_new_goal} 新学掌握`}</h2>
             <span className={`streak-badge ${props.dailyTask.completed ? "done" : ""}`}><CheckCircle2 />连续 {props.dailyTask.streak} 天</span>
           </div>
-          <p>复习 {props.dailyTask.review_completed}/{props.dailyTask.review_total} · {props.dailyTask.completed ? "今日打卡成功" : "完成新学和复习后自动打卡"}</p>
+          <p>新学接触 {props.dailyTask.new_completed} · 复习处理 {props.dailyTask.review_completed}/{props.dailyTask.review_total} · 掌握 {props.dailyTask.review_mastered} 张</p>
           <div className="daily-progress" aria-label={`今日进度 ${dailyProgress}%`}>
             <span style={{ width: `${dailyProgress}%` }} />
           </div>
@@ -1328,8 +1374,8 @@ function HomeView(props: {
       </div>
 
       <div className="task-strip">
-        <TaskItem icon={<Target />} label="每日新学" value={`${props.dailyTask.new_completed}/${props.dailyTask.daily_new_goal}`} done={props.dailyTask.new_completed >= props.dailyTask.daily_new_goal} />
-        <TaskItem icon={<ListChecks />} label="既有复习" value={`${props.dailyTask.review_completed}/${props.dailyTask.review_total}`} done={props.dailyTask.review_completed >= props.dailyTask.review_total} />
+        <TaskItem icon={<Target />} label="每日新学" value={`${props.dailyTask.new_mastered}/${props.dailyTask.daily_new_goal} 掌握 · 接触 ${props.dailyTask.new_completed}`} done={props.dailyTask.new_mastered >= props.dailyTask.daily_new_goal} />
+        <TaskItem icon={<ListChecks />} label="既有复习" value={`${props.dailyTask.review_completed}/${props.dailyTask.review_total} 处理 · 掌握率 ${reviewMasterRate}%`} done={props.dailyTask.review_completed >= props.dailyTask.review_total} />
         <TaskItem icon={<CheckCircle2 />} label="连续打卡" value={`${props.dailyTask.streak} 天`} done={props.dailyTask.completed} />
       </div>
 
@@ -1686,21 +1732,34 @@ function StudyView(props: {
   onStudyLineHeight: (lineHeight: number) => Promise<void>;
   onStudyFontFamily: (fontFamily: Settings["studyFontFamily"]) => Promise<void>;
   autoSpeak: boolean;
-  onAnswer: (card: Card, rating: ReviewRating) => Promise<{ stage: number; dueAt: string; previous: ReviewSnapshot }>;
+  onAnswer: (card: Card, rating: ReviewRating) => Promise<ReviewResult>;
+  onPractice: (card: Card, rating: ReviewRating) => Promise<PracticeResult>;
   onUndoAnswer: (card: Card, snapshot: ReviewSnapshot) => Promise<void>;
+  onUndoPractice: (card: Card, snapshot: Pick<ReviewSnapshot, "dailyTaskPrevious">) => Promise<void>;
   onUpdateCard: (id: number, payload: CardPayload) => Promise<Card | null | undefined>;
   onSpeak: (text: string, language?: string) => void;
 }) {
-  const [studyKind, setStudyKind] = useState<"review" | "new">("review");
+  const [studyMode, setStudyMode] = useState<StudyMode>("review");
   const [sessionLimit, setSessionLimit] = useState(20);
+  const [grindGroupSize, setGrindGroupSize] = useState(15);
+  const [grindGroupNumber, setGrindGroupNumber] = useState(0);
+  const [grindGroupStartedAt, setGrindGroupStartedAt] = useState("");
+  const [grindMessage, setGrindMessage] = useState("");
   const [sessionCards, setSessionCards] = useState<Card[]>([]);
   const [queue, setQueue] = useState<Card[]>([]);
   const [masteredIds, setMasteredIds] = useState<number[]>([]);
+  const [longTermSubmittedIds, setLongTermSubmittedIds] = useState<number[]>([]);
   const [history, setHistory] = useState<Array<{
     card: Card;
-    previous: ReviewSnapshot;
+    previous: ReviewSnapshot | Pick<ReviewSnapshot, "dailyTaskPrevious">;
+    practice: boolean;
+    sessionCards: Card[];
     queue: Card[];
     masteredIds: number[];
+    longTermSubmittedIds: number[];
+    grindGroupNumber: number;
+    grindGroupStartedAt: string;
+    grindMessage: string;
     flipped: boolean;
     answer: string;
     checked: "right" | "wrong" | null;
@@ -1728,11 +1787,17 @@ function StudyView(props: {
   const [completionPlayed, setCompletionPlayed] = useState(false);
   const answerLayoutRef = useRef<HTMLDivElement | null>(null);
   const studyScrollRef = useRef<HTMLDivElement | null>(null);
+  const busyRef = useRef(false);
   const card = queue[0];
 
   useEffect(() => {
+    if (studyMode === "grind") {
+      resetSession();
+      setGrindMessage("请选择大卡组并点击开始死学。");
+      return;
+    }
     startSession().catch((error) => console.error(error));
-  }, [studyKind, props.selectedRootDeckId]);
+  }, [studyMode, props.selectedRootDeckId]);
 
   useEffect(() => {
     loadRemaining().catch((error) => console.error(error));
@@ -1774,14 +1839,36 @@ function StudyView(props: {
     return () => document.removeEventListener("fullscreenchange", onFullscreen);
   }, []);
 
+  function resetSession() {
+    setSessionCards([]);
+    setQueue([]);
+    setMasteredIds([]);
+    setLongTermSubmittedIds([]);
+    setHistory([]);
+    setGrindGroupNumber(0);
+    setGrindGroupStartedAt("");
+    setFlipped(false);
+    setAnswer("");
+    setChecked(null);
+    setSelectedChoice("");
+    setCelebrationKey(0);
+    setAnswerDockOpen(true);
+    setCompletionPlayed(false);
+    setEditingStudyCard(null);
+    setCardRevision((value) => value + 1);
+    setCardMotion("entering");
+  }
+
   async function startSession(nextLimit = sessionLimit) {
-    if (!props.selectedRootDeckId || busy) return;
+    if (!props.selectedRootDeckId || busyRef.current) return;
+    busyRef.current = true;
     setBusy("session");
     try {
-      const nextCards = await api.dueCards(props.selectedRootDeckId, Math.max(1, nextLimit), studyKind);
+      const nextCards = await api.dueCards(props.selectedRootDeckId, Math.max(1, nextLimit), studyMode === "new" ? "new" : "review");
       setSessionCards(nextCards);
       setQueue(nextCards);
       setMasteredIds([]);
+      setLongTermSubmittedIds([]);
       setHistory([]);
       setFlipped(false);
       setAnswer("");
@@ -1795,6 +1882,49 @@ function StudyView(props: {
       setCardMotion("entering");
       await loadRemaining();
     } finally {
+      busyRef.current = false;
+      setBusy("");
+    }
+  }
+
+  async function loadGrindCards(excludeIds: number[] = [], targetSize = grindGroupSize) {
+    if (!props.selectedRootDeckId) return [];
+    const target = clampGrindGroupSize(targetSize);
+    const excluded = new Set(excludeIds);
+    const reviewCards = (await api.dueCards(props.selectedRootDeckId, Math.min(200, target + excluded.size + 20), "review"))
+      .filter((item) => !excluded.has(item.id));
+    const selectedReviewCards = reviewCards.slice(0, target);
+    if (selectedReviewCards.length >= target) return selectedReviewCards;
+    selectedReviewCards.forEach((item) => excluded.add(item.id));
+    const newCards = (await api.dueCards(props.selectedRootDeckId, Math.min(200, target - selectedReviewCards.length + excluded.size + 20), "new"))
+      .filter((item) => !excluded.has(item.id))
+      .slice(0, target - selectedReviewCards.length);
+    return [...selectedReviewCards, ...newCards];
+  }
+
+  async function startGrindSession(nextGroupSize = grindGroupSize) {
+    const size = clampGrindGroupSize(nextGroupSize);
+    setGrindGroupSize(size);
+    if (!props.selectedRootDeckId) {
+      setGrindMessage("请先选择一个大卡组。");
+      return;
+    }
+    if (busyRef.current) return;
+    busyRef.current = true;
+    setBusy("session");
+    try {
+      const startedAt = new Date().toISOString();
+      const nextCards = await loadGrindCards([], size);
+      resetSession();
+      setGrindGroupNumber(nextCards.length > 0 ? 1 : 0);
+      setGrindGroupStartedAt(nextCards.length > 0 ? startedAt : "");
+      setSessionCards(nextCards);
+      setQueue(nextCards);
+      setCompletionPlayed(false);
+      setGrindMessage(nextCards.length > 0 ? "死学模式已开始。" : "死学完成：当前大类下暂无到期复习卡和新卡。");
+      await loadRemaining();
+    } finally {
+      busyRef.current = false;
       setBusy("");
     }
   }
@@ -1807,22 +1937,83 @@ function StudyView(props: {
     setRemaining(await api.reviewRemaining(props.selectedRootDeckId));
   }
 
+  async function dueReviewInterrupts(nextQueue: Card[]) {
+    if (studyMode !== "grind" || !props.selectedRootDeckId) return [];
+    const queuedIds = new Set(nextQueue.map((item) => item.id));
+    return (await api.dueCards(props.selectedRootDeckId, 100, "review"))
+      .filter((item) => !queuedIds.has(item.id) && (!grindGroupStartedAt || item.due_at > grindGroupStartedAt));
+  }
+
   async function rate(rating: ReviewRating) {
-    if (!card || busy) return;
+    if (!card || busyRef.current) return;
+    busyRef.current = true;
     setBusy(`rate-${rating}`);
     const beforeQueue = queue;
+    const beforeSessionCards = sessionCards;
     const beforeMasteredIds = masteredIds;
+    const beforeLongTermSubmittedIds = longTermSubmittedIds;
     try {
-      const result = await props.onAnswer(card, rating);
+      const practice = beforeLongTermSubmittedIds.includes(card.id);
+      const result = practice ? await props.onPractice(card, rating) : await props.onAnswer(card, rating);
       const nextMasteredIds = rating === "known" && !beforeMasteredIds.includes(card.id)
         ? [...beforeMasteredIds, card.id]
         : beforeMasteredIds;
-      const nextQueue = nextStudyQueue(beforeQueue, card, rating, result);
-      setHistory((items) => [...items, { card, previous: result.previous, queue: beforeQueue, masteredIds: beforeMasteredIds, flipped, answer, checked, selectedChoice }]);
+      const nextLongTermSubmittedIds = practice || beforeLongTermSubmittedIds.includes(card.id)
+        ? beforeLongTermSubmittedIds
+        : [...beforeLongTermSubmittedIds, card.id];
+      let nextSessionCards = beforeSessionCards;
+      let nextQueue = nextStudyQueue(beforeQueue, card, rating, result);
+      let finalMasteredIds = nextMasteredIds;
+      let finalLongTermSubmittedIds = nextLongTermSubmittedIds;
+      if (studyMode === "grind") {
+        const interrupts = await dueReviewInterrupts(nextQueue);
+        if (interrupts.length > 0) {
+          nextQueue = [...interrupts, ...nextQueue];
+          nextSessionCards = appendUniqueCards(nextSessionCards, interrupts);
+        }
+        if (nextQueue.length === 0) {
+          const latestRemaining = await api.reviewRemaining(props.selectedRootDeckId ?? undefined);
+          if (latestRemaining.reviewRemaining > 0 || latestRemaining.newRemaining > 0) {
+            const nextGroup = await loadGrindCards([], grindGroupSize);
+            if (nextGroup.length > 0) {
+              const nextGroupStartedAt = new Date().toISOString();
+              nextSessionCards = nextGroup;
+              nextQueue = nextGroup;
+              finalMasteredIds = [];
+              finalLongTermSubmittedIds = [];
+              setGrindGroupNumber((value) => value + 1);
+              setGrindGroupStartedAt(nextGroupStartedAt);
+              setGrindMessage("本组完成，开始下一组。");
+            } else {
+              setGrindMessage("死学完成：当前大类下暂无到期复习卡和新卡。");
+            }
+          } else {
+            setGrindMessage("死学完成：当前大类下暂无到期复习卡和新卡。");
+          }
+        }
+      }
+      setHistory((items) => [...items, {
+        card,
+        previous: result.previous,
+        practice,
+        sessionCards: beforeSessionCards,
+        queue: beforeQueue,
+        masteredIds: beforeMasteredIds,
+        longTermSubmittedIds: beforeLongTermSubmittedIds,
+        grindGroupNumber,
+        grindGroupStartedAt,
+        grindMessage,
+        flipped,
+        answer,
+        checked,
+        selectedChoice
+      }]);
       setCardMotion("leaving");
       await delay(140);
+      setSessionCards(nextSessionCards);
       setQueue(nextQueue);
-      setMasteredIds(nextMasteredIds);
+      setMasteredIds(finalMasteredIds);
+      setLongTermSubmittedIds(finalLongTermSubmittedIds);
       setFlipped(false);
       setAnswer("");
       setChecked(null);
@@ -1832,19 +2023,30 @@ function StudyView(props: {
       setCardMotion("entering");
       await loadRemaining();
     } finally {
+      busyRef.current = false;
       setBusy("");
     }
   }
 
   async function undo() {
     const previous = history.at(-1);
-    if (!previous || busy) return;
+    if (!previous || busyRef.current) return;
+    busyRef.current = true;
     setBusy("undo");
     try {
-      await props.onUndoAnswer(previous.card, previous.previous);
+      if (previous.practice) {
+        await props.onUndoPractice(previous.card, previous.previous as Pick<ReviewSnapshot, "dailyTaskPrevious">);
+      } else {
+        await props.onUndoAnswer(previous.card, previous.previous as ReviewSnapshot);
+      }
       setHistory((items) => items.slice(0, -1));
+      setSessionCards(previous.sessionCards);
       setQueue(previous.queue);
       setMasteredIds(previous.masteredIds);
+      setLongTermSubmittedIds(previous.longTermSubmittedIds);
+      setGrindGroupNumber(previous.grindGroupNumber);
+      setGrindGroupStartedAt(previous.grindGroupStartedAt);
+      setGrindMessage(previous.grindMessage);
       setFlipped(previous.flipped);
       setAnswer(previous.answer);
       setChecked(previous.checked);
@@ -1854,6 +2056,7 @@ function StudyView(props: {
       setCardMotion("entering");
       await loadRemaining();
     } finally {
+      busyRef.current = false;
       setBusy("");
     }
   }
@@ -2051,23 +2254,48 @@ function StudyView(props: {
             <span>复习剩余 {remaining.reviewRemaining}</span>
           </div>
           <div className="mode-tabs compact-tabs">
-            <button className={studyKind === "review" ? "active" : ""} onClick={() => setStudyKind("review")}>复习</button>
-            <button className={studyKind === "new" ? "active" : ""} onClick={() => setStudyKind("new")}>新学</button>
+            <button className={studyMode === "review" ? "active" : ""} onClick={() => setStudyMode("review")}>复习</button>
+            <button className={studyMode === "new" ? "active" : ""} onClick={() => setStudyMode("new")}>新学</button>
+            <button className={studyMode === "grind" ? "active" : ""} onClick={() => setStudyMode("grind")}>死学模式</button>
           </div>
-          <label>
-            {studyKind === "new" ? "新学张数" : "复习张数"}
-            <input type="number" min={1} max={200} value={sessionLimit} onChange={(event) => {
-              const next = Math.max(1, Number(event.target.value) || 1);
-              setSessionLimit(next);
-            }} />
-          </label>
-          <button className="primary-button" disabled={busy === "session"} onClick={() => startSession()}><Sparkles />{busy === "session" ? "载入中" : "开始"}</button>
+          {studyMode === "grind" ? (
+            <>
+              <label>
+                每组卡片数
+                <input type="number" min={1} max={100} value={grindGroupSize} onChange={(event) => setGrindGroupSize(clampGrindGroupSize(event.target.value))} />
+              </label>
+              <button className="primary-button" disabled={busy === "session" || !props.selectedRootDeckId} onClick={() => startGrindSession()}><Sparkles />{busy === "session" ? "载入中" : "开始死学"}</button>
+            </>
+          ) : (
+            <>
+              <label>
+                {studyMode === "new" ? "新学张数" : "复习张数"}
+                <input type="number" min={1} max={200} value={sessionLimit} onChange={(event) => {
+                  const next = Math.max(1, Number(event.target.value) || 1);
+                  setSessionLimit(next);
+                }} />
+              </label>
+              <button className="primary-button" disabled={busy === "session"} onClick={() => startSession()}><Sparkles />{busy === "session" ? "载入中" : "开始"}</button>
+            </>
+          )}
         </div>
+        {studyMode === "grind" && (
+          <div className="study-remaining" aria-label="死学模式状态">
+            <span>当前模式：死学模式</span>
+            <span>大类：{props.selectedDeck?.name ?? "未选择"}</span>
+            <span>第 {grindGroupNumber || 0} 组</span>
+            <span>本组目标 {grindGroupSize}</span>
+            <span>已加入 {sessionCards.length}</span>
+            {grindMessage && <span>{grindMessage}</span>}
+          </div>
+        )}
       </div>
 
       {!card ? total > 0 ? (
-        <StudyComplete total={total} completed={completed} onRestart={() => startSession()} busy={busy === "session"} />
-      ) : <EmptyState text={studyKind === "new" ? "这个大卡组暂无可新学卡片。" : "这个大卡组暂无到期复习卡片。"} /> : (
+        studyMode === "grind" && grindMessage.startsWith("死学完成")
+          ? <EmptyState text="死学完成：当前大类下暂无到期复习卡和新卡。" />
+          : <StudyComplete total={total} completed={completed} onRestart={() => studyMode === "grind" ? startGrindSession() : startSession()} busy={busy === "session"} />
+      ) : <EmptyState text={studyMode === "grind" ? (props.selectedRootDeckId ? "请选择开始死学。" : "请先选择一个大卡组。") : studyMode === "new" ? "这个大卡组暂无可新学卡片。" : "这个大卡组暂无到期复习卡片。"} /> : (
         <div key={`${card.id}-${cardRevision}`} className={`study-panel ${cardMotion} align-${props.studyTextAlign} ${checked === "right" ? "celebrating" : ""}`} style={studyStyle}>
           {checked === "right" && (
             <div className="answer-celebration" key={celebrationKey} aria-hidden="true">
@@ -2083,6 +2311,10 @@ function StudyView(props: {
               <span>{total}</span>
             </div>
             <div className="study-actions">
+              {studyMode === "grind" && <span className="type-pill">死学模式</span>}
+              {studyMode === "grind" && <span className="type-pill">{props.selectedDeck?.name ?? "当前大类"}</span>}
+              {studyMode === "grind" && <span className="type-pill">第 {grindGroupNumber} 组</span>}
+              {studyMode === "grind" && <span className="type-pill">目标 {grindGroupSize} · 已加入 {sessionCards.length}</span>}
               <span className="type-pill">{cardTypeLabels[card.card_type]}</span>
               <span className="type-pill">待掌握 {queue.length}</span>
               <span className="type-pill">新学剩余 {remaining.newRemaining}</span>
@@ -2463,6 +2695,7 @@ function AboutView(props: { syncStatus: SyncStatus | null }) {
       <div className="about-title"><Info /><div><p className="eyebrow">闪记</p><h2>版本 {version}</h2></div></div>
       <div className="schedule-box changelog-box">
         <h3>更新日志</h3>
+        <div className="changelog-row"><strong>0.3.12</strong><span>2026-07-04</span><p>修正 loongeric_v2 音色对应模型为 cosyvoice-v2，避免阿里云合成失败后回退到浏览器女声。</p></div>
         <div className="changelog-row"><strong>0.3.11</strong><span>2026-07-04</span><p>英语单词发音音色切换为阿里云 CosyVoice 的 loongeric_v2，并清理旧音色缓存后重新生成。</p></div>
         <div className="changelog-row"><strong>0.3.10</strong><span>2026-07-04</span><p>英语单词发音改为优先调用阿里云 CosyVoice v3 的 loongeric_v3 英式男声音色，并按模型和音色在后端缓存生成音频。</p></div>
         <div className="changelog-row"><strong>0.3.9</strong><span>2026-07-01</span><p>英语单词发音改为优先使用 Wiktionary/Commons 真人词典音频，并在后端缓存；找不到真人录音时自动回退浏览器发音。</p></div>

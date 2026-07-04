@@ -61,10 +61,10 @@ type CardType = "basic" | "word" | "choice" | "blank";
 const maxDeckDepth = 5;
 const sessionCookieName = "flashcards_session";
 const sessionDays = 30;
-const appVersion = "0.3.11";
+const appVersion = "0.3.12";
 const timeZone = "Asia/Shanghai";
 const pronunciationCacheDir = process.env.PRONUNCIATION_CACHE_DIR ?? path.resolve(process.cwd(), "runtime/pronunciations");
-const aliyunTtsModel = process.env.ALIYUN_TTS_MODEL ?? "cosyvoice-v3-flash";
+const aliyunTtsModel = process.env.ALIYUN_TTS_MODEL ?? "cosyvoice-v2";
 const aliyunTtsVoice = process.env.ALIYUN_TTS_VOICE ?? "loongeric_v2";
 const aliyunTtsRegion = process.env.ALIYUN_TTS_REGION ?? "cn-beijing";
 const aliyunTtsWorkspaceId = process.env.ALIYUN_TTS_WORKSPACE_ID ?? process.env.DASHSCOPE_WORKSPACE_ID ?? "";
@@ -698,35 +698,184 @@ function dueReviewIdsForToday(userId: number, now = nowIso()) {
   ).map((row) => Number(row.id));
 }
 
+type DailyTaskRow = Record<string, unknown> & {
+  date: string;
+  daily_new_goal: number;
+  review_card_ids: string;
+  new_card_ids: string;
+  new_mastered_card_ids: string;
+  review_mastered_card_ids: string;
+  completed_at: string;
+};
+
+type DailyTaskSnapshot = Pick<DailyTaskRow, "new_card_ids" | "new_mastered_card_ids" | "review_mastered_card_ids" | "completed_at">;
+
 function ensureDailyTask(userId: number) {
   const date = shanghaiDateKey();
   const existing = get<{ date: string }>("SELECT date FROM daily_tasks WHERE user_id = ? AND date = ?", [userId, date]);
   if (!existing) {
     const now = nowIso();
     run(
-      `INSERT INTO daily_tasks (user_id, date, daily_new_goal, review_card_ids, new_card_ids, completed_at, created_at, updated_at)
-       VALUES (?, ?, ?, ?, ?, '', ?, ?)`,
-      [userId, date, getDailyGoal(userId), JSON.stringify(dueReviewIdsForToday(userId, now)), "[]", now, now]
+      `INSERT INTO daily_tasks (
+         user_id, date, daily_new_goal, review_card_ids, new_card_ids,
+         new_mastered_card_ids, review_mastered_card_ids, completed_at, created_at, updated_at
+       )
+       VALUES (?, ?, ?, ?, ?, ?, ?, '', ?, ?)`,
+      [userId, date, getDailyGoal(userId), JSON.stringify(dueReviewIdsForToday(userId, now)), "[]", "[]", "[]", now, now]
     );
   }
-  return get<{ date: string; daily_new_goal: number; review_card_ids: string; new_card_ids: string; completed_at: string }>(
+  return get<DailyTaskRow>(
     "SELECT * FROM daily_tasks WHERE user_id = ? AND date = ?",
     [userId, date]
   )!;
 }
 
-function updateDailyNewCard(userId: number, cardId: number, action: "add" | "remove") {
+function dailyTaskSnapshot(task: DailyTaskRow): DailyTaskSnapshot {
+  return {
+    new_card_ids: String(task.new_card_ids ?? "[]"),
+    new_mastered_card_ids: String(task.new_mastered_card_ids ?? "[]"),
+    review_mastered_card_ids: String(task.review_mastered_card_ids ?? "[]"),
+    completed_at: String(task.completed_at ?? "")
+  };
+}
+
+function restoreDailyTaskSnapshot(userId: number, snapshot: unknown) {
+  if (!snapshot || typeof snapshot !== "object") return false;
   const task = ensureDailyTask(userId);
-  const ids = new Set(parseJsonArray(task.new_card_ids));
-  if (action === "add") ids.add(cardId);
-  else ids.delete(cardId);
+  const value = snapshot as Partial<DailyTaskSnapshot>;
   const now = nowIso();
-  run("UPDATE daily_tasks SET new_card_ids = ?, completed_at = '', updated_at = ? WHERE user_id = ? AND date = ?", [
-    JSON.stringify([...ids]),
-    now,
-    userId,
-    task.date
-  ]);
+  run(
+    `UPDATE daily_tasks
+     SET new_card_ids = ?,
+         new_mastered_card_ids = ?,
+         review_mastered_card_ids = ?,
+         completed_at = ?,
+         updated_at = ?
+     WHERE user_id = ? AND date = ?`,
+    [
+      typeof value.new_card_ids === "string" ? value.new_card_ids : task.new_card_ids,
+      typeof value.new_mastered_card_ids === "string" ? value.new_mastered_card_ids : task.new_mastered_card_ids,
+      typeof value.review_mastered_card_ids === "string" ? value.review_mastered_card_ids : task.review_mastered_card_ids,
+      typeof value.completed_at === "string" ? value.completed_at : task.completed_at,
+      now,
+      userId,
+      task.date
+    ]
+  );
+  return true;
+}
+
+function updateDailyTaskProgress(userId: number, cardId: number, rating: ReviewRating, originalStage: number) {
+  const task = ensureDailyTask(userId);
+  const reviewIds = new Set(parseJsonArray(task.review_card_ids));
+  const newIds = new Set(parseJsonArray(task.new_card_ids));
+  const newMasteredIds = new Set(parseJsonArray(task.new_mastered_card_ids));
+  const reviewMasteredIds = new Set(parseJsonArray(task.review_mastered_card_ids));
+
+  if (originalStage === 0) {
+    newIds.add(cardId);
+    if (rating === "known") newMasteredIds.add(cardId);
+    else newMasteredIds.delete(cardId);
+  } else if (reviewIds.has(cardId)) {
+    if (rating === "known") reviewMasteredIds.add(cardId);
+    else reviewMasteredIds.delete(cardId);
+  }
+
+  const now = nowIso();
+  run(
+    `UPDATE daily_tasks
+     SET new_card_ids = ?,
+         new_mastered_card_ids = ?,
+         review_mastered_card_ids = ?,
+         completed_at = '',
+         updated_at = ?
+     WHERE user_id = ? AND date = ?`,
+    [
+      JSON.stringify([...newIds]),
+      JSON.stringify([...newMasteredIds]),
+      JSON.stringify([...reviewMasteredIds]),
+      now,
+      userId,
+      task.date
+    ]
+  );
+}
+
+function removeDailyNewCard(userId: number, cardId: number) {
+  const task = ensureDailyTask(userId);
+  const newIds = new Set(parseJsonArray(task.new_card_ids));
+  const newMasteredIds = new Set(parseJsonArray(task.new_mastered_card_ids));
+  newIds.delete(cardId);
+  newMasteredIds.delete(cardId);
+  const now = nowIso();
+  run(
+    `UPDATE daily_tasks
+     SET new_card_ids = ?,
+         new_mastered_card_ids = ?,
+         completed_at = '',
+         updated_at = ?
+     WHERE user_id = ? AND date = ?`,
+    [
+      JSON.stringify([...newIds]),
+      JSON.stringify([...newMasteredIds]),
+      now,
+      userId,
+      task.date
+    ]
+  );
+}
+
+function updateDailyPracticeMastery(userId: number, cardId: number, rating: ReviewRating) {
+  const task = ensureDailyTask(userId);
+  const newIds = new Set(parseJsonArray(task.new_card_ids));
+  const reviewIds = new Set(parseJsonArray(task.review_card_ids));
+  const newMasteredIds = new Set(parseJsonArray(task.new_mastered_card_ids));
+  const reviewMasteredIds = new Set(parseJsonArray(task.review_mastered_card_ids));
+
+  if (newIds.has(cardId)) {
+    if (rating === "known") newMasteredIds.add(cardId);
+    else newMasteredIds.delete(cardId);
+  } else if (reviewIds.has(cardId)) {
+    if (rating === "known") reviewMasteredIds.add(cardId);
+    else reviewMasteredIds.delete(cardId);
+  }
+
+  const now = nowIso();
+  run(
+    `UPDATE daily_tasks
+     SET new_mastered_card_ids = ?,
+         review_mastered_card_ids = ?,
+         completed_at = '',
+         updated_at = ?
+     WHERE user_id = ? AND date = ?`,
+    [
+      JSON.stringify([...newMasteredIds]),
+      JSON.stringify([...reviewMasteredIds]),
+      now,
+      userId,
+      task.date
+    ]
+  );
+}
+
+function normalizeDailyMasteryLists(userId: number, task: DailyTaskRow) {
+  const reviewIds = new Set(parseJsonArray(task.review_card_ids));
+  const newIds = new Set(parseJsonArray(task.new_card_ids));
+  const rawNewMasteredIds = parseJsonArray(task.new_mastered_card_ids);
+  const rawReviewMasteredIds = parseJsonArray(task.review_mastered_card_ids);
+  const newMasteredIds = rawNewMasteredIds.filter((id) => newIds.has(id));
+  const reviewMasteredIds = rawReviewMasteredIds.filter((id) => reviewIds.has(id));
+  if (newMasteredIds.length === rawNewMasteredIds.length && reviewMasteredIds.length === rawReviewMasteredIds.length) {
+    return { newMasteredIds, reviewMasteredIds };
+  }
+  const now = nowIso();
+  run(
+    `UPDATE daily_tasks
+     SET new_mastered_card_ids = ?, review_mastered_card_ids = ?, updated_at = ?
+     WHERE user_id = ? AND date = ?`,
+    [JSON.stringify(newMasteredIds), JSON.stringify(reviewMasteredIds), now, userId, task.date]
+  );
+  return { newMasteredIds, reviewMasteredIds };
 }
 
 function dailyTaskSummary(userId: number) {
@@ -734,6 +883,7 @@ function dailyTaskSummary(userId: number) {
   const date = String(task.date);
   const reviewIds = parseJsonArray(task.review_card_ids);
   const newIds = parseJsonArray(task.new_card_ids);
+  const { newMasteredIds, reviewMasteredIds } = normalizeDailyMasteryLists(userId, task);
   const reviewRows = reviewIds.length
     ? all<{ card_id: number; updated_at: string }>(
         `SELECT card_id, updated_at FROM reviews WHERE card_id IN (${reviewIds.map(() => "?").join(",")})`,
@@ -742,11 +892,16 @@ function dailyTaskSummary(userId: number) {
     : [];
   const reviewCompleted = reviewRows.filter((row) => sameShanghaiDay(String(row.updated_at), date)).length;
   const newCompleted = newIds.length;
-  const completed = Boolean(task.completed_at) || (newCompleted >= Number(task.daily_new_goal) && reviewCompleted >= reviewIds.length);
+  const completed = newMasteredIds.length >= Number(task.daily_new_goal) && reviewCompleted >= reviewIds.length;
   if (completed && !task.completed_at) {
     const now = nowIso();
     run("UPDATE daily_tasks SET completed_at = ?, updated_at = ? WHERE user_id = ? AND date = ?", [now, now, userId, date]);
     task.completed_at = now;
+  }
+  if (!completed && task.completed_at) {
+    const now = nowIso();
+    run("UPDATE daily_tasks SET completed_at = '', updated_at = ? WHERE user_id = ? AND date = ?", [now, userId, date]);
+    task.completed_at = "";
   }
   const completedDates = all<{ date: string }>(
     "SELECT date FROM daily_tasks WHERE user_id = ? AND completed_at <> '' ORDER BY date DESC",
@@ -763,8 +918,10 @@ function dailyTaskSummary(userId: number) {
     date,
     daily_new_goal: Number(task.daily_new_goal),
     new_completed: newCompleted,
+    new_mastered: newMasteredIds.length,
     review_total: reviewIds.length,
     review_completed: reviewCompleted,
+    review_mastered: reviewMasteredIds.length,
     completed,
     completed_at: String(task.completed_at ?? ""),
     streak
@@ -1234,9 +1391,13 @@ app.post("/api/reviews/:cardId/answer", (req, res) => {
     return;
   }
 
-  const next = nextReviewState(Number(current.stage), rating);
+  const next = nextReviewState(Number(current.stage), rating, new Date(), {
+    known_count: Number(current.known_count),
+    fuzzy_count: Number(current.fuzzy_count),
+    unknown_count: Number(current.unknown_count)
+  });
   const cardId = Number(req.params.cardId);
-  if (Number(current.stage) === 0) updateDailyNewCard(userId, cardId, "add");
+  const previousDailyTask = dailyTaskSnapshot(ensureDailyTask(userId));
   run(
     `UPDATE reviews
      SET stage = ?,
@@ -1260,8 +1421,45 @@ app.post("/api/reviews/:cardId/answer", (req, res) => {
     ]
   );
 
+  updateDailyTaskProgress(userId, cardId, rating, Number(current.stage));
   dailyTaskSummary(userId);
-  res.json({ ...next, previous: current });
+  res.json({ ...next, previous: { ...current, dailyTaskPrevious: previousDailyTask } });
+});
+
+app.post("/api/reviews/:cardId/practice", (req, res) => {
+  const userId = currentUserId(res);
+  const cardId = Number(req.params.cardId);
+  const rating = req.body.rating as ReviewRating;
+  if (!["known", "fuzzy", "unknown"].includes(rating)) {
+    res.status(400).json({ error: "请选择认识、模糊或不认识" });
+    return;
+  }
+  const card = cardRow(userId, cardId);
+  if (!card) {
+    res.status(404).json({ error: "复习记录不存在" });
+    return;
+  }
+  const previousDailyTask = dailyTaskSnapshot(ensureDailyTask(userId));
+  updateDailyPracticeMastery(userId, cardId, rating);
+  dailyTaskSummary(userId);
+  res.json({
+    stage: Number(card.stage),
+    dueAt: String(card.due_at),
+    previous: { dailyTaskPrevious: previousDailyTask }
+  });
+});
+
+app.post("/api/reviews/:cardId/practice/restore", (req, res) => {
+  const userId = currentUserId(res);
+  const cardId = Number(req.params.cardId);
+  const card = get<{ id: number }>("SELECT id FROM cards WHERE id = ? AND user_id = ?", [cardId, userId]);
+  if (!card) {
+    res.status(404).json({ error: "复习记录不存在" });
+    return;
+  }
+  restoreDailyTaskSnapshot(userId, req.body.dailyTaskPrevious ?? req.body);
+  dailyTaskSummary(userId);
+  res.json({ ok: true });
 });
 
 app.post("/api/reviews/:cardId/restore", (req, res) => {
@@ -1272,7 +1470,8 @@ app.post("/api/reviews/:cardId/restore", (req, res) => {
     res.status(404).json({ error: "复习记录不存在" });
     return;
   }
-  if (Math.max(0, Number(req.body.stage ?? 0)) === 0) updateDailyNewCard(userId, cardId, "remove");
+  const restoredDailyTask = restoreDailyTaskSnapshot(userId, req.body.dailyTaskPrevious);
+  if (!restoredDailyTask && Math.max(0, Number(req.body.stage ?? 0)) === 0) removeDailyNewCard(userId, cardId);
   run(
     `UPDATE reviews
      SET stage = ?,

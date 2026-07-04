@@ -48,6 +48,7 @@ export type ReviewSnapshot = {
   fuzzy_count: number;
   unknown_count: number;
   updated_at: string;
+  dailyTaskPrevious?: DailyTaskSnapshot;
 };
 
 export type Stats = {
@@ -83,11 +84,20 @@ export type DailyTask = {
   date: string;
   daily_new_goal: number;
   new_completed: number;
+  new_mastered: number;
   review_total: number;
   review_completed: number;
+  review_mastered: number;
   completed: boolean;
   completed_at: string;
   streak: number;
+};
+
+export type DailyTaskSnapshot = {
+  new_card_ids: string;
+  new_mastered_card_ids: string;
+  review_mastered_card_ids: string;
+  completed_at: string;
 };
 
 export type SyncStatus = {

@@ -87,8 +87,15 @@ export const api = {
       method: "POST",
       body: JSON.stringify({ rating })
     }),
+  practice: (cardId: number, rating: ReviewRating) =>
+    request<{ stage: number; dueAt: string; previous: Pick<ReviewSnapshot, "dailyTaskPrevious"> }>(`/api/reviews/${cardId}/practice`, {
+      method: "POST",
+      body: JSON.stringify({ rating })
+    }),
   restoreReview: (cardId: number, snapshot: ReviewSnapshot) =>
     request<{ ok: true }>(`/api/reviews/${cardId}/restore`, { method: "POST", body: JSON.stringify(snapshot) }),
+  restorePractice: (cardId: number, snapshot: Pick<ReviewSnapshot, "dailyTaskPrevious">) =>
+    request<{ ok: true }>(`/api/reviews/${cardId}/practice/restore`, { method: "POST", body: JSON.stringify(snapshot) }),
   stats: () => request<Stats>("/api/stats"),
   settings: () => request<Settings>("/api/settings"),
   saveSettings: (settings: Partial<Settings>) =>
