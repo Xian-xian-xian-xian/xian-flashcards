@@ -1160,6 +1160,12 @@ textarea:focus {
   color: var(--primary-strong);
 }
 
+.study-schedule-pill {
+  border-color: color-mix(in srgb, var(--primary), transparent 58%);
+  background: var(--primary-soft);
+  color: var(--primary-strong);
+}
+
 .text-tool-popover {
   position: absolute;
   right: 0;

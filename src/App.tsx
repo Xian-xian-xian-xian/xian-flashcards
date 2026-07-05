@@ -61,7 +61,7 @@ declare global {
   }
 }
 
-const version = "0.4.2";
+const version = "0.4.3";
 const logExportPressCount = 6;
 const logExportKey = "a";
 const logExportResetMs = 1800;
@@ -525,6 +525,17 @@ function dueText(value: string) {
   const hours = Math.ceil(minutes / 60);
   if (hours < 24) return `${hours} 小时后`;
   return `${Math.ceil(hours / 24)} 天后`;
+}
+
+function reviewStageIntervalText(stage: number) {
+  const intervals = ["5 分钟", "30 分钟", "12 小时", "1 天", "2 天", "4 天", "7 天", "15 天", "30 天", "90 天"];
+  if (stage <= 0) return "首次学习";
+  return intervals[Math.min(stage, intervals.length) - 1] ?? intervals.at(-1)!;
+}
+
+function studyScheduleText(card: Card) {
+  if (card.stage <= 0) return "新卡 · 首次学习";
+  return `阶段 ${card.stage} · ${reviewStageIntervalText(card.stage)}`;
 }
 
 function fullDateTime(value: string) {
@@ -2393,6 +2404,7 @@ function StudyView(props: {
               {studyMode === "grind" && <span className="type-pill">第 {grindGroupNumber} 组</span>}
               {studyMode === "grind" && <span className="type-pill">目标 {grindGroupSize} · 已加入 {sessionCards.length}</span>}
               <span className="type-pill">{cardTypeLabels[card.card_type]}</span>
+              <span className="type-pill study-schedule-pill" title={`下次复习：${fullDateTime(card.due_at)}（${dueText(card.due_at)}）`}>{studyScheduleText(card)}</span>
               <span className="type-pill">待掌握 {queue.length}</span>
               <span className="type-pill">新学剩余 {remaining.newRemaining}</span>
               <span className="type-pill">复习剩余 {remaining.reviewRemaining}</span>
@@ -2778,6 +2790,7 @@ function AboutView(props: { syncStatus: SyncStatus | null }) {
       <div className="about-title"><Info /><div><p className="eyebrow">闪记</p><h2>版本 {version}</h2></div></div>
       <div className="schedule-box changelog-box">
         <h3>更新日志</h3>
+        <div className="changelog-row"><strong>0.4.3</strong><span>2026-07-05</span><p>学习过程中显示当前卡片的长期复习阶段和对应复习间隔，方便判断下一次复习节奏。</p></div>
         <div className="changelog-row"><strong>0.4.2</strong><span>2026-07-05</span><p>增强 Markdown 中 LaTeX 公式渲染；普通卡恢复正常字号，翻面后保留正面并在下方显示答案，正面加粗且答案不加粗。</p></div>
         <div className="changelog-row"><strong>0.3.12</strong><span>2026-07-04</span><p>修正 loongeric_v2 音色对应模型为 cosyvoice-v2，避免阿里云合成失败后回退到浏览器女声。</p></div>
         <div className="changelog-row"><strong>0.3.11</strong><span>2026-07-04</span><p>英语单词发音音色切换为阿里云 CosyVoice 的 loongeric_v2，并清理旧音色缓存后重新生成。</p></div>
