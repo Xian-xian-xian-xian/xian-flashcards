@@ -63,7 +63,7 @@ declare global {
   }
 }
 
-const version = "0.4.5";
+const version = "0.4.6";
 const logExportPressCount = 6;
 const logExportKey = "a";
 const logExportResetMs = 1800;
@@ -508,13 +508,6 @@ function isCorrectAnswer(card: Card, answer: string) {
   }
   const normalized = normalizeAnswer(answer);
   return normalized === normalizeAnswer(correctAnswer(card));
-}
-
-function inferCardType(front: string, back: string, choices: string[], phonetic: string, mnemonic: string): CardType {
-  if (choices.length > 0) return "choice";
-  if (/(\[\s*\]|_{2,}|（\s*）|\(\s*\))/.test(front)) return "blank";
-  if (phonetic.trim() || mnemonic.trim()) return "word";
-  return back.trim().length > 0 ? "basic" : "word";
 }
 
 function dueText(value: string) {
@@ -1723,6 +1716,7 @@ function DeckView(props: {
 }
 
 function CardEditor(props: { card?: Card; onSubmit: (payload: CardPayload) => Promise<void>; onCancel?: () => void }) {
+  const [cardType, setCardType] = useState<CardType>(props.card?.card_type ?? "basic");
   const [front, setFront] = useState(props.card?.front ?? "");
   const [phonetic, setPhonetic] = useState(props.card?.phonetic ?? "");
   const [back, setBack] = useState(props.card?.back ?? "");
@@ -1734,6 +1728,7 @@ function CardEditor(props: { card?: Card; onSubmit: (payload: CardPayload) => Pr
   const [saving, setSaving] = useState(false);
 
   useEffect(() => {
+    setCardType(props.card?.card_type ?? "basic");
     setFront(props.card?.front ?? "");
     setPhonetic(props.card?.phonetic ?? "");
     setBack(props.card?.back ?? "");
@@ -1750,7 +1745,6 @@ function CardEditor(props: { card?: Card; onSubmit: (payload: CardPayload) => Pr
     setSaving(true);
     try {
       const parsedChoices = parseChoices(choices);
-      const cardType = inferCardType(front, back, parsedChoices, phonetic, mnemonic);
       await props.onSubmit({
         card_type: cardType,
         front,
@@ -1769,6 +1763,7 @@ function CardEditor(props: { card?: Card; onSubmit: (payload: CardPayload) => Pr
         setMnemonic("");
         setNote("");
         setChoices("");
+        setCardType("basic");
         setAdvancedOpen(false);
       }
     } finally {
@@ -1778,12 +1773,18 @@ function CardEditor(props: { card?: Card; onSubmit: (payload: CardPayload) => Pr
 
   return (
     <form className={`card-form ${props.card ? "edit-card-form" : ""}`} onSubmit={submit}>
+      <label>卡片类型<select value={cardType} onChange={(event) => setCardType(event.target.value as CardType)}>
+        <option value="basic">普通卡</option>
+        <option value="word">单词卡</option>
+        <option value="choice">选择题卡</option>
+        <option value="blank">填空题卡</option>
+      </select></label>
       <SmartTextField value={front} onChange={setFront} placeholder="正面 / 题目，填空题使用 [] 表示空格" required allowImageInsert />
       <SmartTextField value={back} onChange={setBack} placeholder="背面 / 正确答案" required allowImageInsert />
       <button className="primary-button secondary-button" type="button" onClick={() => setAdvancedOpen((value) => !value)}><SlidersHorizontal />高级字段</button>
       {advancedOpen && (
         <div className="advanced-fields">
-          <SmartTextField value={choices} onChange={setChoices} placeholder="选择题选项，用 |、; 分隔，或一行一个选项" multilineThreshold={28} />
+          {cardType === "choice" && <SmartTextField value={choices} onChange={setChoices} placeholder="选择题选项，用 |、; 分隔，或一行一个选项" multilineThreshold={28} />}
           <SmartTextField value={phonetic} onChange={setPhonetic} placeholder="音标（可选）" />
           <SmartTextField value={example} onChange={setExample} placeholder="例句 / 说明 / 解析（可选）" />
           <SmartTextField value={mnemonic} onChange={setMnemonic} placeholder="助记（可选）" />
@@ -2767,6 +2768,7 @@ function CardBack(props: { card: Card }) {
       <span className="word-meaning"><MarkdownText value={props.card.back} /></span>
       {props.card.example && <small><MarkdownText value={props.card.example} /></small>}
       <LabeledMarkdown label="助记" value={props.card.mnemonic} />
+      <LabeledMarkdown label="备注" value={props.card.note} />
     </span>
   );
 }
@@ -2917,6 +2919,7 @@ function AboutView(props: { syncStatus: SyncStatus | null }) {
       <div className="schedule-box"><h3>同步状态</h3><p>最近同步：{props.syncStatus ? fullDateTime(props.syncStatus.lastSyncAt) : "暂无"} · 数据更新：{props.syncStatus?.dataUpdatedAt ? fullDateTime(props.syncStatus.dataUpdatedAt) : "暂无"}</p></div>
       <div className="schedule-box changelog-box">
         <h3>更新日志</h3>
+        <div className="changelog-row"><strong>0.4.6</strong><span>2026-07-05</span><p>卡片类型改为编辑时手动选择并随卡片保存；单词卡不再依赖例句判定，导入空例句不会被其他列补填，助记展示不再加粗，反面会显示备注。</p></div>
         <div className="changelog-row"><strong>0.4.5</strong><span>2026-07-05</span><p>修复死学模式到期复习卡插队后的本组数量、旧卡 practice 后反复插队、学习反馈提示与卡片右下角对齐，并在设置中增加导出最近日志。</p></div>
         <div className="changelog-row"><strong>0.4.4</strong><span>2026-07-05</span><p>学习反馈提示改到卡片内，死学模式组间停留等待选择，关于页同步状态上移，并为手动同步增加成功提示。</p></div>
         <div className="changelog-row"><strong>0.4.3</strong><span>2026-07-05</span><p>学习过程中显示当前卡片的长期复习阶段和对应复习间隔，方便判断下一次复习节奏。</p></div>

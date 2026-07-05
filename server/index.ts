@@ -61,7 +61,7 @@ type CardType = "basic" | "word" | "choice" | "blank";
 const maxDeckDepth = 5;
 const sessionCookieName = "flashcards_session";
 const sessionDays = 30;
-const appVersion = "0.4.5";
+const appVersion = "0.4.6";
 const timeZone = "Asia/Shanghai";
 const pronunciationCacheDir = process.env.PRONUNCIATION_CACHE_DIR ?? path.resolve(process.cwd(), "runtime/pronunciations");
 const aliyunTtsModel = process.env.ALIYUN_TTS_MODEL ?? "cosyvoice-v2";
@@ -529,18 +529,13 @@ function normalizeExistingCards(userId: number) {
   );
   cards.forEach((card) => {
     const currentType = normalizeCardType(card.card_type);
-    let nextType: CardType | null = null;
     const parsedChoices = normalizeChoices(card.choices);
-    if (currentType !== "choice" && parsedChoices.length > 0) nextType = "choice";
-    else if ((currentType === "basic" || currentType === "word") && /(\[\s*\]|_{2,})/.test(String(card.front))) nextType = "blank";
-    const finalType = nextType ?? currentType;
-    const nextChoices = normalizedChoicePayload(finalType, parsedChoices, String(card.back));
-    const shouldUpdateType = nextType !== null && nextType !== currentType;
-    const shouldUpdateChoices = finalType === "choice" && JSON.stringify(parsedChoices) !== JSON.stringify(nextChoices);
-    if (!shouldUpdateType && !shouldUpdateChoices) return;
+    const nextChoices = normalizedChoicePayload(currentType, parsedChoices, String(card.back));
+    const shouldUpdateChoices = currentType === "choice" && JSON.stringify(parsedChoices) !== JSON.stringify(nextChoices);
+    if (!shouldUpdateChoices) return;
     run(
-      "UPDATE cards SET card_type = ?, choices = ?, updated_at = ? WHERE id = ? AND user_id = ?",
-      [finalType, JSON.stringify(nextChoices), nowIso(), Number(card.id), userId]
+      "UPDATE cards SET choices = ?, updated_at = ? WHERE id = ? AND user_id = ?",
+      [JSON.stringify(nextChoices), nowIso(), Number(card.id), userId]
     );
   });
 }
@@ -1281,13 +1276,12 @@ function normalizeImportRows(rows: Record<string, unknown>[]) {
       const front = String(rowValue(row, ["front", "question", "word", "题目", "正面", "单词"]) ?? values[0] ?? "").trim();
       const back = String(rowValue(row, ["back", "answer", "meaning", "答案", "背面", "释义"]) ?? values[1] ?? "").trim();
       const cardType = inferCardType(row, front, choices);
-      const positionalExample = cardType === "choice" ? "" : values[2];
       return {
         card_type: cardType,
         front,
         back,
         phonetic: String(rowValue(row, ["phonetic", "音标"]) ?? "").trim(),
-        example: String(rowValue(row, ["example", "解析", "例句", "说明"]) ?? positionalExample ?? "").trim(),
+        example: String(rowValue(row, ["example", "解析", "例句", "说明"]) ?? "").trim(),
         mnemonic: String(rowValue(row, ["mnemonic", "助记"]) ?? "").trim(),
         note: String(rowValue(row, ["note", "备注", "注记"]) ?? "").trim(),
         choices: normalizedChoicePayload(cardType, choices, back)

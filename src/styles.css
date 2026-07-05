@@ -1671,6 +1671,7 @@ textarea:focus {
   display: grid;
   gap: 0.35em;
   width: 100%;
+  font-weight: 400;
   text-align: inherit;
 }
 
