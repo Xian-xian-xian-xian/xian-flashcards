@@ -53,6 +53,7 @@ type SyncState = "idle" | "syncing" | "success" | "error" | "conflict";
 type StudyMode = "review" | "new" | "grind";
 type ReviewResult = { stage: number; dueAt: string; previous: ReviewSnapshot };
 type PracticeResult = { stage: number; dueAt: string; previous: Pick<ReviewSnapshot, "dailyTaskPrevious"> };
+type RatingFeedback = { key: number; rating: ReviewRating; title: string; stageText: string; dueText: string };
 type KatexRuntime = { renderToString: (value: string, options: { displayMode?: boolean; throwOnError: boolean; trust: boolean; strict: "ignore" }) => string };
 
 declare global {
@@ -536,6 +537,31 @@ function reviewStageIntervalText(stage: number) {
 function studyScheduleText(card: Card) {
   if (card.stage <= 0) return "新卡 · 首次学习";
   return `阶段 ${card.stage} · ${reviewStageIntervalText(card.stage)}`;
+}
+
+function ratingTitle(rating: ReviewRating) {
+  if (rating === "known") return "本次掌握";
+  if (rating === "fuzzy") return "本次模糊";
+  return "本次不会";
+}
+
+function stageName(stage: number) {
+  return stage <= 0 ? "新卡" : `${stage} 阶段`;
+}
+
+function ratingStageText(previousStage: number, nextStage: number) {
+  if (nextStage > previousStage) return `升级到 ${stageName(nextStage)}`;
+  if (nextStage < previousStage) return `退回到 ${stageName(nextStage)}`;
+  return `保持 ${stageName(nextStage)}`;
+}
+
+function ratingFeedback(rating: ReviewRating, previousStage: number, result: { stage: number; dueAt: string }): Omit<RatingFeedback, "key"> {
+  return {
+    rating,
+    title: ratingTitle(rating),
+    stageText: ratingStageText(previousStage, result.stage),
+    dueText: `下次复习 ${dueText(result.dueAt)}`
+  };
 }
 
 function fullDateTime(value: string) {
@@ -1872,6 +1898,8 @@ function StudyView(props: {
   const [cardMotion, setCardMotion] = useState<"entering" | "leaving" | "idle">("entering");
   const [cardRevision, setCardRevision] = useState(0);
   const [celebrationKey, setCelebrationKey] = useState(0);
+  const [ratingResult, setRatingResult] = useState<RatingFeedback | null>(null);
+  const [ratingNotice, setRatingNotice] = useState<RatingFeedback | null>(null);
   const [completionPlayed, setCompletionPlayed] = useState(false);
   const answerLayoutRef = useRef<HTMLDivElement | null>(null);
   const studyScrollRef = useRef<HTMLDivElement | null>(null);
@@ -1897,6 +1925,7 @@ function StudyView(props: {
     setChecked(null);
     setSelectedChoice("");
     setCelebrationKey(0);
+    setRatingResult(null);
     setAnswerDockOpen(true);
     setEditingStudyCard(null);
     setCardMotion("entering");
@@ -1911,6 +1940,12 @@ function StudyView(props: {
       setCompletionPlayed(true);
     }
   }, [card, completionPlayed, sessionCards.length]);
+
+  useEffect(() => {
+    if (!ratingNotice) return;
+    const timer = window.setTimeout(() => setRatingNotice(null), 3800);
+    return () => window.clearTimeout(timer);
+  }, [ratingNotice]);
 
   useEffect(() => {
     setScaleDraft(props.studyTextScale);
@@ -1940,6 +1975,7 @@ function StudyView(props: {
     setChecked(null);
     setSelectedChoice("");
     setCelebrationKey(0);
+    setRatingResult(null);
     setAnswerDockOpen(true);
     setCompletionPlayed(false);
     setEditingStudyCard(null);
@@ -1963,10 +1999,12 @@ function StudyView(props: {
       setChecked(null);
       setSelectedChoice("");
       setCelebrationKey(0);
+      setRatingResult(null);
       setAnswerDockOpen(true);
       setCompletionPlayed(false);
       setEditingStudyCard(null);
       setCardRevision(0);
+      setRatingResult(null);
       setCardMotion("entering");
       await loadRemaining();
     } finally {
@@ -2043,6 +2081,11 @@ function StudyView(props: {
     try {
       const practice = beforeLongTermSubmittedIds.includes(card.id);
       const result = practice ? await props.onPractice(card, rating) : await props.onAnswer(card, rating);
+      const feedback = ratingFeedback(rating, card.stage, result);
+      playAnswerSound(rating === "known" ? "right" : "wrong");
+      const nextRatingFeedback = { ...feedback, key: Date.now() };
+      setRatingResult(nextRatingFeedback);
+      setRatingNotice(nextRatingFeedback);
       const nextMasteredIds = rating === "known" && !beforeMasteredIds.includes(card.id)
         ? [...beforeMasteredIds, card.id]
         : beforeMasteredIds;
@@ -2096,6 +2139,7 @@ function StudyView(props: {
         checked,
         selectedChoice
       }]);
+      await delay(720);
       setCardMotion("leaving");
       await delay(140);
       setSessionCards(nextSessionCards);
@@ -2107,6 +2151,7 @@ function StudyView(props: {
       setChecked(null);
       setSelectedChoice("");
       setCelebrationKey(0);
+      setRatingResult(null);
       setCardRevision((value) => value + 1);
       setCardMotion("entering");
       await loadRemaining();
@@ -2392,6 +2437,7 @@ function StudyView(props: {
               {Array.from({ length: 12 }, (_, index) => <i key={index} />)}
             </div>
           )}
+          {ratingResult && <RatingCelebration feedback={ratingResult} />}
           <div className="study-fixed-top">
             <div className="progress-line" style={{ "--progress-ratio": String(Math.min(completed / Math.max(total, 1), 1)) } as CSSProperties}>
               <span>{completed}</span>
@@ -2558,7 +2604,40 @@ function StudyView(props: {
           )}
         </div>
       )}
+      {ratingNotice && <RatingNotice feedback={ratingNotice} onClose={() => setRatingNotice(null)} />}
     </section>
+  );
+}
+
+function RatingIcon(props: { rating: ReviewRating }) {
+  if (props.rating === "known") return <CheckCircle2 />;
+  if (props.rating === "fuzzy") return <RotateCcw />;
+  return <XCircle />;
+}
+
+function RatingCelebration(props: { feedback: RatingFeedback }) {
+  return (
+    <div className={`rating-celebration ${props.feedback.rating}`} key={props.feedback.key} aria-live="polite">
+      <span className="rating-celebration-ring" />
+      <span className="rating-celebration-badge">
+        <RatingIcon rating={props.feedback.rating} />
+        <strong>{props.feedback.title}</strong>
+        <small>{props.feedback.stageText} · {props.feedback.dueText}</small>
+      </span>
+      {Array.from({ length: 14 }, (_, index) => <i key={index} />)}
+    </div>
+  );
+}
+
+function RatingNotice(props: { feedback: RatingFeedback; onClose: () => void }) {
+  return (
+    <button className={`rating-toast ${props.feedback.rating}`} onClick={props.onClose}>
+      <RatingIcon rating={props.feedback.rating} />
+      <span>
+        <strong>{props.feedback.title}</strong>
+        <small>{props.feedback.stageText} · {props.feedback.dueText}</small>
+      </span>
+    </button>
   );
 }
 
