@@ -1,50 +1,48 @@
-import {
-  AlertTriangle,
-  AlignCenter,
-  AlignLeft,
-  ArrowLeft,
-  Bell,
-  BookOpen,
-  Brain,
-  CheckCircle2,
-  Columns2,
-  Edit3,
-  Eye,
-  EyeOff,
-  FileSpreadsheet,
-  FolderPlus,
-  HelpCircle,
-  Home,
-  Info,
-  ListChecks,
-  LogOut,
-  Maximize2,
-  Minimize2,
-  MoreHorizontal,
-  Moon,
-  MoveRight,
-  PanelLeftClose,
-  PanelLeftOpen,
-  Plus,
-  RefreshCw,
-  RotateCcw,
-  Rows2,
-  Save,
-  Search,
-  Settings as SettingsIcon,
-  SlidersHorizontal,
-  Sparkles,
-  Square,
-  SquareCheck,
-  Star,
-  Sun,
-  Target,
-  Trash2,
-  Type,
-  User as UserIcon,
-  Volume2,
-  XCircle
-} from "lucide-react";
+import AlertTriangle from "lucide-react/dist/esm/icons/alert-triangle";
+import AlignCenter from "lucide-react/dist/esm/icons/align-center";
+import AlignLeft from "lucide-react/dist/esm/icons/align-left";
+import ArrowLeft from "lucide-react/dist/esm/icons/arrow-left";
+import Bell from "lucide-react/dist/esm/icons/bell";
+import BookOpen from "lucide-react/dist/esm/icons/book-open";
+import Brain from "lucide-react/dist/esm/icons/brain";
+import CheckCircle2 from "lucide-react/dist/esm/icons/check-circle-2";
+import Columns2 from "lucide-react/dist/esm/icons/columns-2";
+import Edit3 from "lucide-react/dist/esm/icons/edit-3";
+import Eye from "lucide-react/dist/esm/icons/eye";
+import EyeOff from "lucide-react/dist/esm/icons/eye-off";
+import FileSpreadsheet from "lucide-react/dist/esm/icons/file-spreadsheet";
+import FolderPlus from "lucide-react/dist/esm/icons/folder-plus";
+import HelpCircle from "lucide-react/dist/esm/icons/help-circle";
+import Home from "lucide-react/dist/esm/icons/home";
+import Info from "lucide-react/dist/esm/icons/info";
+import ListChecks from "lucide-react/dist/esm/icons/list-checks";
+import LogOut from "lucide-react/dist/esm/icons/log-out";
+import Maximize2 from "lucide-react/dist/esm/icons/maximize-2";
+import Minimize2 from "lucide-react/dist/esm/icons/minimize-2";
+import MoreHorizontal from "lucide-react/dist/esm/icons/more-horizontal";
+import Moon from "lucide-react/dist/esm/icons/moon";
+import MoveRight from "lucide-react/dist/esm/icons/move-right";
+import PanelLeftClose from "lucide-react/dist/esm/icons/panel-left-close";
+import PanelLeftOpen from "lucide-react/dist/esm/icons/panel-left-open";
+import Plus from "lucide-react/dist/esm/icons/plus";
+import RefreshCw from "lucide-react/dist/esm/icons/refresh-cw";
+import RotateCcw from "lucide-react/dist/esm/icons/rotate-ccw";
+import Rows2 from "lucide-react/dist/esm/icons/rows-2";
+import Save from "lucide-react/dist/esm/icons/save";
+import Search from "lucide-react/dist/esm/icons/search";
+import SettingsIcon from "lucide-react/dist/esm/icons/settings";
+import SlidersHorizontal from "lucide-react/dist/esm/icons/sliders-horizontal";
+import Sparkles from "lucide-react/dist/esm/icons/sparkles";
+import Square from "lucide-react/dist/esm/icons/square";
+import SquareCheck from "lucide-react/dist/esm/icons/square-check";
+import Star from "lucide-react/dist/esm/icons/star";
+import Sun from "lucide-react/dist/esm/icons/sun";
+import Target from "lucide-react/dist/esm/icons/target";
+import Trash2 from "lucide-react/dist/esm/icons/trash-2";
+import Type from "lucide-react/dist/esm/icons/type";
+import UserIcon from "lucide-react/dist/esm/icons/user";
+import Volume2 from "lucide-react/dist/esm/icons/volume-2";
+import XCircle from "lucide-react/dist/esm/icons/x-circle";
 import { CSSProperties, FormEvent, PointerEvent as ReactPointerEvent, ReactNode, useEffect, useMemo, useRef, useState } from "react";
 import { api, type CardPayload, type ConflictError } from "./api";
 import type { Card, CardType, DailyTask, Deck, ReviewRating, ReviewRemaining, ReviewSnapshot, Settings, Stats, SyncStatus, ThemeMode, User } from "./types";
@@ -54,8 +52,15 @@ type SyncState = "idle" | "syncing" | "success" | "error" | "conflict";
 type StudyMode = "review" | "new" | "grind";
 type ReviewResult = { stage: number; dueAt: string; previous: ReviewSnapshot };
 type PracticeResult = { stage: number; dueAt: string; previous: Pick<ReviewSnapshot, "dailyTaskPrevious"> };
+type KatexRuntime = { renderToString: (value: string, options: { displayMode?: boolean; throwOnError: boolean; trust: boolean; strict: "ignore" }) => string };
 
-const version = "0.3.12";
+declare global {
+  interface Window {
+    katex?: KatexRuntime;
+  }
+}
+
+const version = "0.4.2";
 const logExportPressCount = 6;
 const logExportKey = "a";
 const logExportResetMs = 1800;
@@ -200,16 +205,17 @@ function markdownBlocks(value: string): MarkdownBlock[] {
   const normalized = value
     .replace(/\r\n/g, "\n")
     .replace(/(^|\n)([*_]{2})[ \t]*(```[\w-]*\n[\s\S]*?\n?```)[ \t]*\2(?=\n|$)/g, "$1$3");
-  const pattern = /```([\w-]*)[ \t]*\n([\s\S]*?)\n?```|\$\$\n?([\s\S]*?)\n?\$\$/g;
+  const pattern = /```([\w-]*)[ \t]*\n([\s\S]*?)\n?```|\$\$\n?([\s\S]*?)\n?\$\$|\\\[\n?([\s\S]*?)\n?\\\]|\\begin\{(equation\*?|align\*?|gather\*?|multline\*?|split)\}([\s\S]*?)\\end\{(?:equation\*?|align\*?|gather\*?|multline\*?|split)\}/g;
   let lastIndex = 0;
 
-  normalized.replace(pattern, (match, language, code, math, offset) => {
+  normalized.replace(pattern, (match, language, code, dollarMath, bracketMath, environment, environmentMath, offset) => {
     const before = normalized.slice(lastIndex, offset);
     pushMarkdownTextBlocks(blocks, before);
     if (match.startsWith("```")) {
       blocks.push({ type: "code", language: String(language || "").trim(), content: String(code ?? "").replace(/\n$/, "") });
     } else {
-      blocks.push({ type: "math", content: String(math ?? "").trim() });
+      const math = dollarMath ?? bracketMath ?? (environment ? `\\begin{${environment}}${environmentMath ?? ""}\\end{${environment}}` : "");
+      blocks.push({ type: "math", content: String(math).trim() });
     }
     lastIndex = offset + match.length;
     return match;
@@ -219,7 +225,7 @@ function markdownBlocks(value: string): MarkdownBlock[] {
   return blocks;
 }
 
-const escapedMarkdownPattern = /\\([\\`*_[\]()#+\-.!|>~$])/g;
+const escapedMarkdownPattern = /\\([\\`*_#+\-.!|>~$])/g;
 
 function protectEscapedMarkdown(value: string) {
   const escaped: string[] = [];
@@ -234,21 +240,65 @@ function protectEscapedMarkdown(value: string) {
 
 const blankMarkerPattern = /(\[\s*\]|_{2,}|（\s*）|\(\s*\))/g;
 
+const inlineMarkdownPattern = /(!\[[^\]]*]\([^)]+\)|\\\((.*?)\\\)|\\begin\{(equation\*?|align\*?|gather\*?|multline\*?|split)\}(.+?)\\end\{(?:equation\*?|align\*?|gather\*?|multline\*?|split)\}|\$([^$\n]+)\$|\*\*[^*]+\*\*|__[^_]+__|~~[^~]+~~|`[^`]+`|\[[^\]]+\]\([^)]+\)|\*[^*]+\*|_[^_]+_)/g;
+const bareMathPattern = /((?:\\[a-zA-Z]+\s*)?[A-Za-z][A-Za-z0-9]*\s*\([^)\n]*\)\s*=\s*[A-Za-z0-9{}()[\]^_+\-\\\s]+|[A-Za-z0-9{}()[\]^_+\-\\]+\s*=\s*[A-Za-z0-9{}()[\]^_+\-\\\s]+)/g;
+
+function sanitizeLatex(value: string) {
+  return value
+    .replace(/\\notag\b/g, "")
+    .replace(/\\begin\{equation\*?\}/g, "")
+    .replace(/\\end\{equation\*?\}/g, "")
+    .trim();
+}
+
+function looksLikeBareMath(value: string) {
+  const text = value.trim();
+  if (!text || /[\u4e00-\u9fff]/.test(text)) return false;
+  if (/^\\[a-zA-Z]+/.test(text)) return true;
+  if (!/[=^_{}\\]/.test(text)) return false;
+  if (/[<>]/.test(text)) return false;
+  return /^[A-Za-z0-9\s()[\]{}.,;:+\-*/=^_\\]+$/.test(text);
+}
+
+function MathText(props: { value: string; displayMode?: boolean }) {
+  const html = useMemo(() => window.katex?.renderToString(sanitizeLatex(props.value), {
+    displayMode: props.displayMode,
+    throwOnError: false,
+    trust: false,
+    strict: "ignore"
+  }), [props.value, props.displayMode]);
+  if (!html) return <span className={props.displayMode ? "math-block" : "math-inline"}>{props.value}</span>;
+  return <span className={props.displayMode ? "math-block" : "math-inline"} dangerouslySetInnerHTML={{ __html: html }} />;
+}
+
+function pushPlainTextWithBareMath(nodes: ReactNode[], value: string, restore: (part: string) => string) {
+  let lastIndex = 0;
+  value.replace(bareMathPattern, (match, _formula, offset) => {
+    if (offset > lastIndex) nodes.push(restore(value.slice(lastIndex, offset)));
+    const restored = restore(match);
+    nodes.push(looksLikeBareMath(restored) ? <MathText key={nodes.length} value={restored} /> : restored);
+    lastIndex = offset + match.length;
+    return match;
+  });
+  if (lastIndex < value.length) nodes.push(restore(value.slice(lastIndex)));
+}
+
 function renderInlineMarkdown(value: string) {
   const nodes: ReactNode[] = [];
   const protectedValue = protectEscapedMarkdown(value);
   const source = protectedValue.text;
-  const pattern = /(!\[[^\]]*]\([^)]+\)|\$\$[^$]+\$\$|\$[^$\n]+\$|\*\*[^*]+\*\*|__[^_]+__|~~[^~]+~~|`[^`]+`|\[[^\]]+\]\([^)]+\)|\*[^*]+\*|_[^_]+_)/g;
   let lastIndex = 0;
-  source.replace(pattern, (match, _capture, offset) => {
-    if (offset > lastIndex) nodes.push(protectedValue.restore(source.slice(lastIndex, offset)));
+  source.replace(inlineMarkdownPattern, (match, _image, parenMath, environment, environmentMath, dollarMath, offset) => {
+    if (offset > lastIndex) pushPlainTextWithBareMath(nodes, source.slice(lastIndex, offset), protectedValue.restore);
     if (match.startsWith("![")) {
       const image = match.match(/^!\[([^\]]*)]\(([^)]+)\)$/);
       nodes.push(image ? <img key={nodes.length} src={protectedValue.restore(image[2])} alt={protectedValue.restore(image[1])} loading="lazy" /> : protectedValue.restore(match));
-    } else if (match.startsWith("$$")) {
-      nodes.push(<span key={nodes.length} className="math-inline">{protectedValue.restore(match.slice(2, -2))}</span>);
-    } else if (match.startsWith("$")) {
-      nodes.push(<span key={nodes.length} className="math-inline">{protectedValue.restore(match.slice(1, -1))}</span>);
+    } else if (parenMath !== undefined) {
+      nodes.push(<MathText key={nodes.length} value={protectedValue.restore(parenMath)} />);
+    } else if (environment) {
+      nodes.push(<MathText key={nodes.length} value={protectedValue.restore(`\\begin{${environment}}${environmentMath ?? ""}\\end{${environment}}`)} />);
+    } else if (dollarMath !== undefined) {
+      nodes.push(<MathText key={nodes.length} value={protectedValue.restore(dollarMath)} />);
     } else if (match.startsWith("**") || match.startsWith("__")) {
       nodes.push(<strong key={nodes.length}>{protectedValue.restore(match.slice(2, -2))}</strong>);
     } else if (match.startsWith("~~")) {
@@ -264,7 +314,7 @@ function renderInlineMarkdown(value: string) {
     lastIndex = offset + match.length;
     return match;
   });
-  if (lastIndex < source.length) nodes.push(protectedValue.restore(source.slice(lastIndex)));
+  if (lastIndex < source.length) pushPlainTextWithBareMath(nodes, source.slice(lastIndex), protectedValue.restore);
   return nodes;
 }
 
@@ -353,7 +403,7 @@ function MarkdownText(props: { value: string; className?: string; renderBlank?: 
             </span>
           );
         }
-        if (block.type === "math") return <span key={index} className="math-block">{block.content}</span>;
+        if (block.type === "math") return <MathText key={index} value={block.content} displayMode />;
         if (block.type === "blank") return <span key={index} className="markdown-blank-line" style={{ "--blank-lines": String(block.count) } as CSSProperties} />;
         return renderMarkdownTextBlock(block.content, index, props.renderBlank);
       })}
@@ -2532,13 +2582,19 @@ function StudyComplete(props: { total: number; completed: number; onRestart: () 
 function CardFront(props: { card: Card }) {
   if (props.card.card_type === "blank") return <MarkdownText value={props.card.front} renderBlank={(key) => <span key={key} className="blank-dock-gap" />} />;
   if (props.card.card_type === "choice") return <MarkdownText value={props.card.front} />;
-  if (!isWordCard(props.card)) return <MarkdownText value={props.card.front} />;
+  if (!isWordCard(props.card)) return <span className="basic-face"><MarkdownText value={props.card.front} /></span>;
   return <span className="word-face"><span className="word-text"><MarkdownText value={props.card.front} /></span>{props.card.phonetic && <em>{props.card.phonetic}</em>}</span>;
 }
 
 function CardBack(props: { card: Card }) {
   if (!isWordCard(props.card)) {
-    return <><MarkdownText value={props.card.back} />{props.card.example && <small><MarkdownText value={props.card.example} /></small>}</>;
+    return (
+      <span className="basic-back">
+        <span className="basic-face"><MarkdownText value={props.card.front} /></span>
+        <span className="basic-answer"><MarkdownText value={props.card.back} /></span>
+        {props.card.example && <small><MarkdownText value={props.card.example} /></small>}
+      </span>
+    );
   }
   return (
     <span className="word-back">
@@ -2579,7 +2635,7 @@ function ChoiceArea(props: {
         {props.choices.map((choice, index) => {
           const isSelected = choice === props.selected;
           const isAnswer = answersMatch(choice, props.answer);
-          const state = props.checked && (isAnswer ? "correct" : isSelected ? "wrong" : "");
+          const state = props.checked ? (isAnswer ? "correct" : isSelected ? "wrong" : "") : undefined;
           return (
             <button
               className={state}
@@ -2695,6 +2751,7 @@ function AboutView(props: { syncStatus: SyncStatus | null }) {
       <div className="about-title"><Info /><div><p className="eyebrow">闪记</p><h2>版本 {version}</h2></div></div>
       <div className="schedule-box changelog-box">
         <h3>更新日志</h3>
+        <div className="changelog-row"><strong>0.4.2</strong><span>2026-07-05</span><p>增强 Markdown 中 LaTeX 公式渲染；普通卡恢复正常字号，翻面后保留正面并在下方显示答案，正面加粗且答案不加粗。</p></div>
         <div className="changelog-row"><strong>0.3.12</strong><span>2026-07-04</span><p>修正 loongeric_v2 音色对应模型为 cosyvoice-v2，避免阿里云合成失败后回退到浏览器女声。</p></div>
         <div className="changelog-row"><strong>0.3.11</strong><span>2026-07-04</span><p>英语单词发音音色切换为阿里云 CosyVoice 的 loongeric_v2，并清理旧音色缓存后重新生成。</p></div>
         <div className="changelog-row"><strong>0.3.10</strong><span>2026-07-04</span><p>英语单词发音改为优先调用阿里云 CosyVoice v3 的 loongeric_v3 英式男声音色，并按模型和音色在后端缓存生成音频。</p></div>

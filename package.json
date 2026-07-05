@@ -1,6 +1,6 @@
 {
   "name": "xian-flashcards",
-  "version": "0.3.12",
+  "version": "0.4.2",
   "private": true,
   "type": "module",
   "scripts": {
@@ -23,6 +23,7 @@
     "csv-parse": "^5.6.0",
     "dotenv": "^17.4.2",
     "express": "^4.21.2",
+    "katex": "^0.16.22",
     "lucide-react": "^0.468.0",
     "multer": "^2.0.2",
     "react": "^18.3.1",

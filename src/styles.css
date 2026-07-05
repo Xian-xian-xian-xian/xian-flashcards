@@ -1303,6 +1303,36 @@ textarea:focus {
   font-weight: 950;
 }
 
+.flip-card-face > .basic-face,
+.flip-card-face .basic-face,
+.flip-card-face .basic-back {
+  font-size: var(--study-question-size);
+}
+
+.flip-card-face > .basic-face,
+.flip-card-face .basic-face {
+  font-weight: 900;
+}
+
+.flip-card-face .basic-back {
+  display: grid;
+  gap: 18px;
+  justify-items: center;
+  font-weight: 400;
+}
+
+.flip-card-face .basic-answer {
+  display: block;
+  width: 100%;
+  padding-top: 18px;
+  border-top: 1px solid color-mix(in srgb, var(--border), transparent 20%);
+  font-weight: 400;
+}
+
+.flip-card-face .basic-answer :is(strong, b, .markdown-heading, th) {
+  font-weight: 400;
+}
+
 .markdown-text {
   display: grid;
   gap: 0.78em;
@@ -1374,16 +1404,13 @@ textarea:focus {
 
 .math-inline,
 .math-block {
-  font-family: "Noto Serif CJK SC", "Times New Roman", "Songti SC", serif;
-  font-style: italic;
+  font-weight: inherit;
 }
 
 .math-inline {
-  display: inline-flex;
+  display: inline-block;
   max-width: 100%;
-  padding: 0.05em 0.35em;
-  border-radius: 6px;
-  background: color-mix(in srgb, var(--yellow), transparent 82%);
+  vertical-align: baseline;
   overflow-wrap: anywhere;
 }
 
@@ -1397,7 +1424,17 @@ textarea:focus {
   background: color-mix(in srgb, var(--yellow), transparent 88%);
   font-size: 1.08em;
   text-align: center;
-  white-space: pre-wrap;
+}
+
+.math-block .katex-display {
+  margin: 0;
+  overflow-x: auto;
+  overflow-y: hidden;
+  white-space: nowrap;
+}
+
+.math-inline .katex {
+  white-space: normal;
 }
 
 .markdown-text a {
