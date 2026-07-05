@@ -2418,8 +2418,8 @@ textarea {
 .rating-toast {
   --rating-color: var(--green);
   position: absolute;
-  right: 22px;
-  bottom: 84px;
+  right: 28px;
+  bottom: 90px;
   z-index: 12;
   display: grid;
   grid-template-columns: 36px minmax(0, 1fr);
@@ -3056,9 +3056,9 @@ textarea {
   }
 
   .rating-toast {
-    right: 14px;
-    bottom: 78px;
-    max-width: calc(100% - 28px);
+    right: 18px;
+    bottom: 82px;
+    max-width: calc(100% - 36px);
   }
 
   .detail-grid,

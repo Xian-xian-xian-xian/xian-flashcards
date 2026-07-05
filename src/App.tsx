@@ -7,6 +7,7 @@ import BookOpen from "lucide-react/dist/esm/icons/book-open";
 import Brain from "lucide-react/dist/esm/icons/brain";
 import CheckCircle2 from "lucide-react/dist/esm/icons/check-circle-2";
 import Columns2 from "lucide-react/dist/esm/icons/columns-2";
+import Download from "lucide-react/dist/esm/icons/download";
 import Edit3 from "lucide-react/dist/esm/icons/edit-3";
 import Eye from "lucide-react/dist/esm/icons/eye";
 import EyeOff from "lucide-react/dist/esm/icons/eye-off";
@@ -62,7 +63,7 @@ declare global {
   }
 }
 
-const version = "0.4.4";
+const version = "0.4.5";
 const logExportPressCount = 6;
 const logExportKey = "a";
 const logExportResetMs = 1800;
@@ -606,16 +607,23 @@ function clampGrindGroupSize(value: unknown) {
   return Math.min(100, Math.max(1, size));
 }
 
-function appendUniqueCards(cards: Card[], nextCards: Card[]) {
-  const seen = new Set(cards.map((card) => card.id));
-  return [
-    ...cards,
-    ...nextCards.filter((card) => {
-      if (seen.has(card.id)) return false;
-      seen.add(card.id);
-      return true;
-    })
-  ];
+function prependUniqueCards(cards: Card[], nextCards: Card[]) {
+  const seen = new Set<number>();
+  return [...nextCards, ...cards].filter((card) => {
+    if (seen.has(card.id)) return false;
+    seen.add(card.id);
+    return true;
+  });
+}
+
+function applyGrindInterrupts(queue: Card[], sessionCards: Card[], interrupts: Card[], targetSize: number) {
+  if (interrupts.length === 0) return { queue, sessionCards };
+  const cappedSessionCards = prependUniqueCards(sessionCards, interrupts).slice(0, clampGrindGroupSize(targetSize));
+  const sessionIds = new Set(cappedSessionCards.map((item) => item.id));
+  return {
+    queue: prependUniqueCards(queue, interrupts).filter((item) => sessionIds.has(item.id)),
+    sessionCards: cappedSessionCards
+  };
 }
 
 function playAnswerSound(result: "right" | "wrong") {
@@ -920,6 +928,19 @@ export default function App() {
     return () => media.removeEventListener("change", updateSystemTheme);
   }, [settings.theme]);
 
+  async function downloadRecentLogs() {
+    const { blob, filename } = await api.exportRecentLogs();
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement("a");
+    link.href = url;
+    link.download = filename;
+    document.body.append(link);
+    link.click();
+    link.remove();
+    URL.revokeObjectURL(url);
+    showToast("已导出最近 10 分钟日志");
+  }
+
   useEffect(() => {
     let pressCount = 0;
     let resetTimer = 0;
@@ -927,22 +948,6 @@ export default function App() {
       pressCount = 0;
       if (resetTimer) window.clearTimeout(resetTimer);
       resetTimer = 0;
-    };
-    const downloadRecentLogs = async () => {
-      try {
-        const { blob, filename } = await api.exportRecentLogs();
-        const url = URL.createObjectURL(blob);
-        const link = document.createElement("a");
-        link.href = url;
-        link.download = filename;
-        document.body.append(link);
-        link.click();
-        link.remove();
-        URL.revokeObjectURL(url);
-        showToast("已导出最近 10 分钟日志");
-      } catch (error) {
-        showToast((error as Error).message, "error");
-      }
     };
     const onKeyDown = (event: KeyboardEvent) => {
       const target = event.target as HTMLElement | null;
@@ -953,7 +958,7 @@ export default function App() {
       resetTimer = window.setTimeout(reset, logExportResetMs);
       if (pressCount < logExportPressCount) return;
       reset();
-      downloadRecentLogs();
+      downloadRecentLogs().catch((error) => showToast((error as Error).message, "error"));
     };
     window.addEventListener("keydown", onKeyDown);
     return () => {
@@ -1290,8 +1295,10 @@ export default function App() {
               });
             }}
             onNotify={enableNotifications}
+            onExportLogs={() => withPending("logs", downloadRecentLogs)}
             saving={Boolean(pending.settings)}
             notifying={Boolean(pending.notify)}
+            exportingLogs={Boolean(pending.logs)}
           />
         )}
 
@@ -2064,9 +2071,9 @@ function StudyView(props: {
     setRemaining(await api.reviewRemaining(props.selectedRootDeckId));
   }
 
-  async function dueReviewInterrupts(nextQueue: Card[]) {
+  async function dueReviewInterrupts(nextQueue: Card[], excludeIds: number[] = []) {
     if (studyMode !== "grind" || !props.selectedRootDeckId) return [];
-    const queuedIds = new Set(nextQueue.map((item) => item.id));
+    const queuedIds = new Set([...nextQueue.map((item) => item.id), ...excludeIds]);
     return (await api.dueCards(props.selectedRootDeckId, 100, "review"))
       .filter((item) => !queuedIds.has(item.id) && (!grindGroupStartedAt || item.due_at > grindGroupStartedAt));
   }
@@ -2098,10 +2105,11 @@ function StudyView(props: {
       let finalMasteredIds = nextMasteredIds;
       let finalLongTermSubmittedIds = nextLongTermSubmittedIds;
       if (studyMode === "grind") {
-        const interrupts = await dueReviewInterrupts(nextQueue);
+        const interrupts = await dueReviewInterrupts(nextQueue, finalLongTermSubmittedIds);
         if (interrupts.length > 0) {
-          nextQueue = [...interrupts, ...nextQueue];
-          nextSessionCards = appendUniqueCards(nextSessionCards, interrupts);
+          const adjusted = applyGrindInterrupts(nextQueue, nextSessionCards, interrupts, grindGroupSize);
+          nextQueue = adjusted.queue;
+          nextSessionCards = adjusted.sessionCards;
         }
         if (nextQueue.length === 0) {
           const latestRemaining = await api.reviewRemaining(props.selectedRootDeckId ?? undefined);
@@ -2827,7 +2835,7 @@ function ImportView(props: { decks: Deck[]; selectedDeckId: number | null; onSel
   );
 }
 
-function SettingsView(props: { settings: Settings; onThemeChange: (theme: ThemeMode) => Promise<void>; onSave: (settings: Partial<Settings>) => Promise<void>; onNotify: () => Promise<void>; saving: boolean; notifying: boolean }) {
+function SettingsView(props: { settings: Settings; onThemeChange: (theme: ThemeMode) => Promise<void>; onSave: (settings: Partial<Settings>) => Promise<void>; onNotify: () => Promise<void>; onExportLogs: () => Promise<void>; saving: boolean; notifying: boolean; exportingLogs: boolean }) {
   const [draft, setDraft] = useState<Settings>(props.settings);
 
   useEffect(() => {
@@ -2859,6 +2867,7 @@ function SettingsView(props: { settings: Settings; onThemeChange: (theme: ThemeM
       <div className="settings-actions">
         <button className="primary-button" disabled={props.saving}><Save />{props.saving ? "保存中" : "保存设置"}</button>
         <button className="primary-button secondary-button" type="button" disabled={props.notifying} onClick={props.onNotify}><Bell />{props.notifying ? "授权中" : "开启浏览器通知"}</button>
+        <button className="primary-button secondary-button" type="button" disabled={props.exportingLogs} onClick={props.onExportLogs}><Download />{props.exportingLogs ? "导出中" : "导出最近日志"}</button>
       </div>
       <div className="schedule-box"><h3>艾宾浩斯间隔</h3><p>5 分钟 · 30 分钟 · 12 小时 · 1 天 · 2 天 · 4 天 · 7 天 · 15 天 · 30 天 · 90 天</p></div>
     </form>
@@ -2872,6 +2881,7 @@ function AboutView(props: { syncStatus: SyncStatus | null }) {
       <div className="schedule-box"><h3>同步状态</h3><p>最近同步：{props.syncStatus ? fullDateTime(props.syncStatus.lastSyncAt) : "暂无"} · 数据更新：{props.syncStatus?.dataUpdatedAt ? fullDateTime(props.syncStatus.dataUpdatedAt) : "暂无"}</p></div>
       <div className="schedule-box changelog-box">
         <h3>更新日志</h3>
+        <div className="changelog-row"><strong>0.4.5</strong><span>2026-07-05</span><p>修复死学模式到期复习卡插队后的本组数量、旧卡 practice 后反复插队、学习反馈提示与卡片右下角对齐，并在设置中增加导出最近日志。</p></div>
         <div className="changelog-row"><strong>0.4.4</strong><span>2026-07-05</span><p>学习反馈提示改到卡片内，死学模式组间停留等待选择，关于页同步状态上移，并为手动同步增加成功提示。</p></div>
         <div className="changelog-row"><strong>0.4.3</strong><span>2026-07-05</span><p>学习过程中显示当前卡片的长期复习阶段和对应复习间隔，方便判断下一次复习节奏。</p></div>
         <div className="changelog-row"><strong>0.4.2</strong><span>2026-07-05</span><p>增强 Markdown 中 LaTeX 公式渲染；普通卡恢复正常字号，翻面后保留正面并在下方显示答案，正面加粗且答案不加粗。</p></div>
