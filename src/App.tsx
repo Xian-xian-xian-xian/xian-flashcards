@@ -45,7 +45,7 @@ import Type from "lucide-react/dist/esm/icons/type";
 import UserIcon from "lucide-react/dist/esm/icons/user";
 import Volume2 from "lucide-react/dist/esm/icons/volume-2";
 import XCircle from "lucide-react/dist/esm/icons/x-circle";
-import { CSSProperties, FormEvent, PointerEvent as ReactPointerEvent, ReactNode, useEffect, useMemo, useRef, useState } from "react";
+import { CSSProperties, FormEvent, PointerEvent as ReactPointerEvent, ReactNode, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { api, type CardPayload, type ConflictError } from "./api";
 import type { Card, CardType, DailyTask, Deck, ReviewRating, ReviewRemaining, ReviewSnapshot, Settings, Stats, SyncStatus, ThemeMode, User } from "./types";
 
@@ -1909,6 +1909,8 @@ function StudyView(props: {
   const [ratingResult, setRatingResult] = useState<RatingFeedback | null>(null);
   const [ratingNotice, setRatingNotice] = useState<RatingFeedback | null>(null);
   const [completionPlayed, setCompletionPlayed] = useState(false);
+  const studyPanelRef = useRef<HTMLDivElement | null>(null);
+  const cardFrameRef = useRef<HTMLElement | null>(null);
   const answerLayoutRef = useRef<HTMLDivElement | null>(null);
   const studyScrollRef = useRef<HTMLDivElement | null>(null);
   const busyRef = useRef(false);
@@ -1954,6 +1956,37 @@ function StudyView(props: {
     const timer = window.setTimeout(() => setRatingNotice(null), 3800);
     return () => window.clearTimeout(timer);
   }, [ratingNotice]);
+
+  useLayoutEffect(() => {
+    const panel = studyPanelRef.current;
+    const cardFrame = cardFrameRef.current;
+    if (!panel || !cardFrame) return;
+
+    const updateAnchor = () => {
+      const panelRect = panel.getBoundingClientRect();
+      const cardRect = cardFrame.getBoundingClientRect();
+      const inset = 8;
+      panel.style.setProperty("--rating-toast-right", `${Math.max(0, panelRect.right - cardRect.right + inset)}px`);
+      panel.style.setProperty("--rating-toast-bottom", `${Math.max(0, panelRect.bottom - cardRect.bottom + inset)}px`);
+      panel.style.setProperty("--rating-toast-max-width", `${Math.max(220, cardRect.width - inset * 2)}px`);
+    };
+
+    updateAnchor();
+    const scrollElement = studyScrollRef.current;
+    const resizeObserver = typeof ResizeObserver === "undefined" ? null : new ResizeObserver(updateAnchor);
+    resizeObserver?.observe(panel);
+    resizeObserver?.observe(cardFrame);
+    window.addEventListener("resize", updateAnchor);
+    document.addEventListener("fullscreenchange", updateAnchor);
+    scrollElement?.addEventListener("scroll", updateAnchor, { passive: true });
+
+    return () => {
+      resizeObserver?.disconnect();
+      window.removeEventListener("resize", updateAnchor);
+      document.removeEventListener("fullscreenchange", updateAnchor);
+      scrollElement?.removeEventListener("scroll", updateAnchor);
+    };
+  }, [card?.id, cardRevision, flipped, checked, answerDockOpen, answerDockWidth, immersive, props.studyChoiceLayout, props.studyTextScale, props.studyTextAlign, props.studyLineHeight, props.studyFontFamily]);
 
   useEffect(() => {
     setScaleDraft(props.studyTextScale);
@@ -2436,7 +2469,7 @@ function StudyView(props: {
               busy={busy === "session"}
             />
       ) : <EmptyState text={studyMode === "grind" ? (props.selectedRootDeckId ? "请选择开始死学。" : "请先选择一个大卡组。") : studyMode === "new" ? "这个大卡组暂无可新学卡片。" : "这个大卡组暂无到期复习卡片。"} /> : (
-        <div key={`${card.id}-${cardRevision}`} className={`study-panel ${cardMotion} align-${props.studyTextAlign} ${checked === "right" ? "celebrating" : ""}`} style={studyStyle}>
+        <div ref={studyPanelRef} key={`${card.id}-${cardRevision}`} className={`study-panel ${cardMotion} align-${props.studyTextAlign} ${checked === "right" ? "celebrating" : ""}`} style={studyStyle}>
           {checked === "right" && (
             <div className="answer-celebration" key={celebrationKey} aria-hidden="true">
               <span className="celebration-ring" />
@@ -2527,7 +2560,7 @@ function StudyView(props: {
           <div className="study-scroll" ref={studyScrollRef}>
             {editingStudyCard && <CardEditor card={editingStudyCard} onCancel={() => setEditingStudyCard(null)} onSubmit={saveStudyCard} />}
             {card.card_type !== "choice" && card.card_type !== "blank" && (
-              <button className={`flip-card ${flipped ? "flipped" : ""}`} onClick={() => setFlipped((value) => !value)}>
+              <button ref={(node) => { cardFrameRef.current = node; }} className={`flip-card ${flipped ? "flipped" : ""}`} onClick={() => setFlipped((value) => !value)}>
                 <span className="flip-card-inner">
                   <span className="flip-card-face flip-card-front"><CardFront card={card} /></span>
                   <span className="flip-card-face flip-card-back"><CardBack card={card} /></span>
@@ -2536,7 +2569,7 @@ function StudyView(props: {
             )}
             {card.card_type === "choice" && (
               <div ref={answerLayoutRef} className={`answer-layout ${showAnswerDock ? "with-dock" : ""}`}>
-                <div className={`question-box choice-question ${choiceLayoutClass(choices, props.studyChoiceLayout)}`}>
+                <div ref={(node) => { cardFrameRef.current = node; }} className={`question-box choice-question ${choiceLayoutClass(choices, props.studyChoiceLayout)}`}>
                   <MarkdownText value={card.front} className="question-text" />
                   <ChoiceArea choices={choices} answer={card.back} selected={selectedChoice} checked={checked} layout={props.studyChoiceLayout} onChoose={checkChoice}>
                     {checked && <AnswerFeedback checked={checked} correct={displayCorrect} explanation={explanation} other={otherNote} selected={selectedChoice} />}
@@ -2556,7 +2589,7 @@ function StudyView(props: {
             )}
             {card.card_type === "blank" && (
               <div ref={answerLayoutRef} className={`answer-layout ${showAnswerDock ? "with-dock" : ""}`}>
-                <div className={`question-box choice-question blank-question ${choiceLayoutClass([card.front, card.example], props.studyChoiceLayout)}`}>
+                <div ref={(node) => { cardFrameRef.current = node; }} className={`question-box choice-question blank-question ${choiceLayoutClass([card.front, card.example], props.studyChoiceLayout)}`}>
                   <form className="blank-answer-form" onSubmit={submitBlankAnswer}>
                     <MarkdownText
                       value={card.front}

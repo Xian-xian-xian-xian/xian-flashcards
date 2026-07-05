@@ -2418,14 +2418,14 @@ textarea {
 .rating-toast {
   --rating-color: var(--green);
   position: absolute;
-  right: 28px;
-  bottom: 90px;
+  right: var(--rating-toast-right, 28px);
+  bottom: var(--rating-toast-bottom, 90px);
   z-index: 12;
   display: grid;
   grid-template-columns: 36px minmax(0, 1fr);
   align-items: center;
   gap: 10px;
-  max-width: min(420px, calc(100% - 44px));
+  max-width: min(420px, var(--rating-toast-max-width, calc(100% - 44px)));
   padding: 13px 15px;
   border: 1px solid color-mix(in srgb, var(--rating-color), transparent 45%);
   border-radius: 8px;
@@ -3056,9 +3056,9 @@ textarea {
   }
 
   .rating-toast {
-    right: 18px;
-    bottom: 82px;
-    max-width: calc(100% - 36px);
+    right: var(--rating-toast-right, 18px);
+    bottom: var(--rating-toast-bottom, 82px);
+    max-width: min(100%, var(--rating-toast-max-width, calc(100% - 36px)));
   }
 
   .detail-grid,
