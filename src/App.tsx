@@ -62,7 +62,7 @@ declare global {
   }
 }
 
-const version = "0.4.3";
+const version = "0.4.4";
 const logExportPressCount = 6;
 const logExportKey = "a";
 const logExportResetMs = 1800;
@@ -791,7 +791,7 @@ export default function App() {
     });
   }, [cards, search]);
 
-  async function refresh(options: { silent?: boolean } = {}) {
+  async function refresh(options: { silent?: boolean; notifySuccess?: boolean } = {}) {
     if (!options.silent) setSyncState("syncing");
     try {
       const [nextDecks, nextStats, nextSettings, nextDailyTask, nextSyncStatus] = await Promise.all([
@@ -819,6 +819,7 @@ export default function App() {
       const rootId = nextRootId;
       setDueCards(rootId ? await api.dueCards(rootId, 80) : []);
       if (!options.silent) setSyncState("success");
+      if (options.notifySuccess) showToast("同步成功");
     } catch (error) {
       setSyncState("error");
       showToast((error as Error).message, "error");
@@ -1071,7 +1072,7 @@ export default function App() {
             <h1>{viewTitle(view)}</h1>
           </div>
           <div className="top-actions">
-            <button className={`sync-button ${syncState}`} title="同步" disabled={syncState === "syncing"} onClick={() => withPending("sync", () => refresh())}>
+            <button className={`sync-button ${syncState}`} title="同步" disabled={syncState === "syncing"} onClick={() => withPending("sync", () => refresh({ notifySuccess: true }))}>
               <RefreshCw />
               <span>{syncLabel(syncState)}</span>
             </button>
@@ -2105,19 +2106,7 @@ function StudyView(props: {
         if (nextQueue.length === 0) {
           const latestRemaining = await api.reviewRemaining(props.selectedRootDeckId ?? undefined);
           if (latestRemaining.reviewRemaining > 0 || latestRemaining.newRemaining > 0) {
-            const nextGroup = await loadGrindCards([], grindGroupSize);
-            if (nextGroup.length > 0) {
-              const nextGroupStartedAt = new Date().toISOString();
-              nextSessionCards = nextGroup;
-              nextQueue = nextGroup;
-              finalMasteredIds = [];
-              finalLongTermSubmittedIds = [];
-              setGrindGroupNumber((value) => value + 1);
-              setGrindGroupStartedAt(nextGroupStartedAt);
-              setGrindMessage("本组完成，开始下一组。");
-            } else {
-              setGrindMessage("死学完成：当前大类下暂无到期复习卡和新卡。");
-            }
+            setGrindMessage("本组完成，可以继续下一组或休息一下。");
           } else {
             setGrindMessage("死学完成：当前大类下暂无到期复习卡和新卡。");
           }
@@ -2427,7 +2416,17 @@ function StudyView(props: {
       {!card ? total > 0 ? (
         studyMode === "grind" && grindMessage.startsWith("死学完成")
           ? <EmptyState text="死学完成：当前大类下暂无到期复习卡和新卡。" />
-          : <StudyComplete total={total} completed={completed} onRestart={() => studyMode === "grind" ? startGrindSession() : startSession()} busy={busy === "session"} />
+          : <StudyComplete
+              total={total}
+              completed={completed}
+              onRestart={() => studyMode === "grind" ? startGrindSession() : startSession()}
+              onRest={studyMode === "grind" ? () => {
+                resetSession();
+                setGrindMessage("已休息，准备好后再开始死学。");
+              } : undefined}
+              restartLabel={studyMode === "grind" ? "继续下一组" : "再来一轮"}
+              busy={busy === "session"}
+            />
       ) : <EmptyState text={studyMode === "grind" ? (props.selectedRootDeckId ? "请选择开始死学。" : "请先选择一个大卡组。") : studyMode === "new" ? "这个大卡组暂无可新学卡片。" : "这个大卡组暂无到期复习卡片。"} /> : (
         <div key={`${card.id}-${cardRevision}`} className={`study-panel ${cardMotion} align-${props.studyTextAlign} ${checked === "right" ? "celebrating" : ""}`} style={studyStyle}>
           {checked === "right" && (
@@ -2595,6 +2594,7 @@ function StudyView(props: {
               </div>
             )}
           </div>
+          {ratingNotice && <RatingNotice feedback={ratingNotice} onClose={() => setRatingNotice(null)} />}
           {showManualRatings && (
             <div className="rating-row">
               <button className="rating unknown" disabled={Boolean(busy)} onClick={() => rate("unknown")}><XCircle />{busy === "rate-unknown" ? "提交中" : "不认识"}</button>
@@ -2604,7 +2604,6 @@ function StudyView(props: {
           )}
         </div>
       )}
-      {ratingNotice && <RatingNotice feedback={ratingNotice} onClose={() => setRatingNotice(null)} />}
     </section>
   );
 }
@@ -2681,7 +2680,7 @@ function TextToolButton(props: { icon: ReactNode; title: string; active: boolean
   );
 }
 
-function StudyComplete(props: { total: number; completed: number; onRestart: () => void; busy: boolean }) {
+function StudyComplete(props: { total: number; completed: number; onRestart: () => void; onRest?: () => void; restartLabel?: string; busy: boolean }) {
   return (
     <section className="study-complete-panel">
       <div className="finish-burst" aria-hidden="true">
@@ -2692,7 +2691,10 @@ function StudyComplete(props: { total: number; completed: number; onRestart: () 
       <p className="eyebrow">本轮完成</p>
       <h2>{props.completed}/{props.total}</h2>
       <p>这一组已经全部掌握，今天的脑力很亮。</p>
-      <button className="primary-button" disabled={props.busy} onClick={props.onRestart}><Sparkles />{props.busy ? "载入中" : "再来一轮"}</button>
+      <div className="study-complete-actions">
+        <button className="primary-button" disabled={props.busy} onClick={props.onRestart}><Sparkles />{props.busy ? "载入中" : props.restartLabel ?? "再来一轮"}</button>
+        {props.onRest && <button className="primary-button secondary-button" disabled={props.busy} onClick={props.onRest}>休息一下</button>}
+      </div>
     </section>
   );
 }
@@ -2867,8 +2869,10 @@ function AboutView(props: { syncStatus: SyncStatus | null }) {
   return (
     <section className="panel about-panel">
       <div className="about-title"><Info /><div><p className="eyebrow">闪记</p><h2>版本 {version}</h2></div></div>
+      <div className="schedule-box"><h3>同步状态</h3><p>最近同步：{props.syncStatus ? fullDateTime(props.syncStatus.lastSyncAt) : "暂无"} · 数据更新：{props.syncStatus?.dataUpdatedAt ? fullDateTime(props.syncStatus.dataUpdatedAt) : "暂无"}</p></div>
       <div className="schedule-box changelog-box">
         <h3>更新日志</h3>
+        <div className="changelog-row"><strong>0.4.4</strong><span>2026-07-05</span><p>学习反馈提示改到卡片内，死学模式组间停留等待选择，关于页同步状态上移，并为手动同步增加成功提示。</p></div>
         <div className="changelog-row"><strong>0.4.3</strong><span>2026-07-05</span><p>学习过程中显示当前卡片的长期复习阶段和对应复习间隔，方便判断下一次复习节奏。</p></div>
         <div className="changelog-row"><strong>0.4.2</strong><span>2026-07-05</span><p>增强 Markdown 中 LaTeX 公式渲染；普通卡恢复正常字号，翻面后保留正面并在下方显示答案，正面加粗且答案不加粗。</p></div>
         <div className="changelog-row"><strong>0.3.12</strong><span>2026-07-04</span><p>修正 loongeric_v2 音色对应模型为 cosyvoice-v2，避免阿里云合成失败后回退到浏览器女声。</p></div>
@@ -2902,7 +2906,6 @@ function AboutView(props: { syncStatus: SyncStatus | null }) {
         <div className="changelog-row"><strong>0.2.1</strong><span>2026-06-25</span><p>修复多层卡组菜单重叠；新增卡片批量全选、移动、删除；填空题支持填写判定并统一 [] 占位符；学习页支持新学张数、本轮固定队列、错题循环到掌握和撤销。</p></div>
         <div className="changelog-row"><strong>0.2.0</strong><span>2026-06-24</span><p>新增选择题卡、填空题卡、每日任务、连续打卡、按大卡组复习、同步按钮、自动同步和冲突处理。</p></div>
       </div>
-      <div className="schedule-box"><h3>同步状态</h3><p>最近同步：{props.syncStatus ? fullDateTime(props.syncStatus.lastSyncAt) : "暂无"} · 数据更新：{props.syncStatus?.dataUpdatedAt ? fullDateTime(props.syncStatus.dataUpdatedAt) : "暂无"}</p></div>
     </section>
   );
 }

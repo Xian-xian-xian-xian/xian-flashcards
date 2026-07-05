@@ -2203,6 +2203,18 @@ body.resizing-answer-dock .question-dock-resizer::after {
   margin-top: 18px;
 }
 
+.study-complete-actions {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: 10px;
+  margin-top: 18px;
+}
+
+.study-complete-actions .primary-button {
+  margin-top: 0;
+}
+
 .finish-burst {
   position: absolute;
   inset: 0;
@@ -2405,15 +2417,15 @@ textarea {
 
 .rating-toast {
   --rating-color: var(--green);
-  position: fixed;
+  position: absolute;
   right: 22px;
-  bottom: 22px;
+  bottom: 84px;
   z-index: 12;
   display: grid;
   grid-template-columns: 36px minmax(0, 1fr);
   align-items: center;
   gap: 10px;
-  max-width: min(420px, calc(100vw - 44px));
+  max-width: min(420px, calc(100% - 44px));
   padding: 13px 15px;
   border: 1px solid color-mix(in srgb, var(--rating-color), transparent 45%);
   border-radius: 8px;
@@ -3041,6 +3053,12 @@ textarea {
     margin-right: 0;
     margin-left: 0;
     gap: 8px;
+  }
+
+  .rating-toast {
+    right: 14px;
+    bottom: 78px;
+    max-width: calc(100% - 28px);
   }
 
   .detail-grid,
