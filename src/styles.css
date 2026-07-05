@@ -1452,6 +1452,10 @@ textarea:focus {
   font-weight: 400;
 }
 
+.flip-card-face .basic-back.two-column-back {
+  width: min(980px, 100%);
+}
+
 .flip-card-face .basic-answer {
   display: block;
   width: 100%;
@@ -1460,8 +1464,29 @@ textarea:focus {
   font-weight: 400;
 }
 
-.flip-card-face .basic-answer :is(strong, b, .markdown-heading, th) {
+.flip-card-face .basic-answer:first-child {
+  padding-top: 0;
+  border-top: 0;
+}
+
+.flip-card-back .basic-face,
+.flip-card-face .basic-answer {
   font-weight: 400;
+}
+
+.flip-card-face .basic-back.two-column-back .basic-answer {
+  column-count: 2;
+  column-gap: clamp(20px, 3vw, 42px);
+  text-align: left;
+}
+
+.flip-card-face .basic-back.two-column-back .basic-answer .markdown-text {
+  display: block;
+}
+
+.flip-card-face .basic-back.two-column-back .basic-answer .markdown-text > * {
+  break-inside: avoid;
+  margin-bottom: 0.78em;
 }
 
 .markdown-text {
@@ -3089,6 +3114,11 @@ textarea {
 
   .flip-card-face {
     padding: 16px;
+  }
+
+  .flip-card-face .basic-back.two-column-back .basic-answer {
+    column-count: 1;
+    text-align: var(--study-text-align);
   }
 
   .rating {

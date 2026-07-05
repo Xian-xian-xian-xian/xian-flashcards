@@ -2265,7 +2265,11 @@ function StudyView(props: {
   const otherNote = card?.note ?? "";
   const explanationText = [explanation, otherNote].filter(Boolean).join("\n\n");
   const explanationIsLong = explanationText.length > 80 || /\n|```|\$\$/.test(explanationText);
+  const isBasicCard = card?.card_type === "basic";
   const showAnswerDock = Boolean(card && checked && explanationIsLong && answerDockOpen);
+  const showBasicBackFront = Boolean(isBasicCard && flipped && answerDockOpen);
+  const showReferenceDock = showAnswerDock || showBasicBackFront;
+  const canToggleReferenceDock = Boolean(isBasicCard ? flipped : checked && explanationIsLong);
   const showManualRatings = card ? card.card_type !== "choice" && card.card_type !== "blank" || checked !== null : false;
   const currentBlankCount = card?.card_type === "blank" ? blankMarkerCount(card.front) : 1;
   const displayedBlankAnswer = displayBlankAnswer(answer);
@@ -2524,7 +2528,7 @@ function StudyView(props: {
                   </div>
                 )}
               </TextToolButton>
-              <TextToolButton icon={props.studyChoiceLayout === "one" ? <Rows2 /> : <Columns2 />} title="选项列数" active={activeTextTool === "choiceLayout"} onClick={() => setActiveTextTool(activeTextTool === "choiceLayout" ? null : "choiceLayout")}>
+              <TextToolButton icon={props.studyChoiceLayout === "one" ? <Rows2 /> : <Columns2 />} title="列数" active={activeTextTool === "choiceLayout"} onClick={() => setActiveTextTool(activeTextTool === "choiceLayout" ? null : "choiceLayout")}>
                 {activeTextTool === "choiceLayout" && (
                   <div className="text-tool-popover compact">
                     <button className={props.studyChoiceLayout === "auto" ? "active" : ""} onClick={() => saveChoiceLayout("auto")}><SlidersHorizontal />自动</button>
@@ -2548,9 +2552,9 @@ function StudyView(props: {
                 )}
               </TextToolButton>
               <button
-                className={`mini-button ${showAnswerDock ? "active" : ""}`}
+                className={`mini-button ${showReferenceDock ? "active" : ""}`}
                 title={answerDockOpen ? "隐藏题目参考" : "显示题目参考"}
-                disabled={!checked || !explanationIsLong}
+                disabled={!canToggleReferenceDock}
                 onClick={() => setAnswerDockOpen((open) => !open)}
               >
                 {answerDockOpen ? <EyeOff /> : <Eye />}
@@ -2563,11 +2567,19 @@ function StudyView(props: {
           </div>
           <div className="study-scroll" ref={studyScrollRef}>
             {editingStudyCard && <CardEditor card={editingStudyCard} onCancel={() => setEditingStudyCard(null)} onSubmit={saveStudyCard} />}
-            {card.card_type !== "choice" && card.card_type !== "blank" && (
+            {card.card_type === "basic" && (
               <button ref={(node) => { cardFrameRef.current = node; }} className={`flip-card ${flipped ? "flipped" : ""}`} onClick={() => setFlipped((value) => !value)}>
                 <span className="flip-card-inner">
                   <span className="flip-card-face flip-card-front"><CardFront card={card} /></span>
-                  <span className="flip-card-face flip-card-back"><CardBack card={card} /></span>
+                  <span className="flip-card-face flip-card-back"><CardBack card={card} layout={props.studyChoiceLayout} showFront={showBasicBackFront} /></span>
+                </span>
+              </button>
+            )}
+            {card.card_type === "word" && (
+              <button ref={(node) => { cardFrameRef.current = node; }} className={`flip-card ${flipped ? "flipped" : ""}`} onClick={() => setFlipped((value) => !value)}>
+                <span className="flip-card-inner">
+                  <span className="flip-card-face flip-card-front"><CardFront card={card} /></span>
+                  <span className="flip-card-face flip-card-back"><CardBack card={card} layout={props.studyChoiceLayout} /></span>
                 </span>
               </button>
             )}
@@ -2751,11 +2763,11 @@ function CardFront(props: { card: Card }) {
   return <span className="word-face"><span className="word-text"><MarkdownText value={props.card.front} /></span>{props.card.phonetic && <em>{props.card.phonetic}</em>}</span>;
 }
 
-function CardBack(props: { card: Card }) {
+function CardBack(props: { card: Card; layout: Settings["studyChoiceLayout"]; showFront?: boolean }) {
   if (!isWordCard(props.card)) {
     return (
-      <span className="basic-back">
-        <span className="basic-face"><MarkdownText value={props.card.front} /></span>
+      <span className={`basic-back ${props.layout === "two" ? "two-column-back" : ""}`}>
+        {props.showFront && <span className="basic-face"><MarkdownText value={props.card.front} /></span>}
         <span className="basic-answer"><MarkdownText value={props.card.back} /></span>
         {props.card.example && <small><MarkdownText value={props.card.example} /></small>}
       </span>
