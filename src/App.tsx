@@ -68,7 +68,7 @@ const logExportPressCount = 6;
 const logExportKey = "a";
 const logExportResetMs = 1800;
 const blankAnswerSeparator = "\u001f";
-const studyRootDeckStoragePrefix = "xian-flashcards-study-root-deck";
+const studyDeckStoragePrefix = "xian-flashcards-study-root-deck";
 
 const cardTypeLabels: Record<CardType, string> = {
   basic: "普通卡",
@@ -579,18 +579,18 @@ function applyTheme(mode: ThemeMode) {
   document.documentElement.dataset.theme = dark ? "dark" : "light";
 }
 
-function studyRootDeckStorageKey(userId: number) {
-  return `${studyRootDeckStoragePrefix}:${userId}`;
+function studyDeckStorageKey(userId: number) {
+  return `${studyDeckStoragePrefix}:${userId}`;
 }
 
-function readStoredStudyRootDeckId(userId: number, decks: Deck[]) {
-  const storedId = Number(window.localStorage.getItem(studyRootDeckStorageKey(userId)));
-  return Number.isFinite(storedId) && decks.some((deck) => deck.id === storedId && deck.depth === 1) ? storedId : null;
+function readStoredStudyDeckId(userId: number, decks: Deck[]) {
+  const storedId = Number(window.localStorage.getItem(studyDeckStorageKey(userId)));
+  return Number.isFinite(storedId) && decks.some((deck) => deck.id === storedId) ? storedId : null;
 }
 
-function writeStoredStudyRootDeckId(userId: number | null, deckId: number | null) {
+function writeStoredStudyDeckId(userId: number | null, deckId: number | null) {
   if (!userId || !deckId) return;
-  window.localStorage.setItem(studyRootDeckStorageKey(userId), String(deckId));
+  window.localStorage.setItem(studyDeckStorageKey(userId), String(deckId));
 }
 
 function nextStudyQueue(queue: Card[], card: Card, rating: ReviewRating, result: { stage: number; dueAt: string }) {
@@ -763,7 +763,7 @@ export default function App() {
   const [view, setView] = useState<View>("home");
   const [decks, setDecks] = useState<Deck[]>([]);
   const [selectedDeckId, setSelectedDeckId] = useState<number | null>(null);
-  const [studyRootDeckId, setStudyRootDeckId] = useState<number | null>(null);
+  const [studyDeckId, setStudyDeckId] = useState<number | null>(null);
   const [cards, setCards] = useState<Card[]>([]);
   const [dueCards, setDueCards] = useState<Card[]>([]);
   const [stats, setStats] = useState<Stats>({ total_cards: 0, mastered_cards: 0, due_cards: 0 });
@@ -790,7 +790,7 @@ export default function App() {
 
   const rootDecks = useMemo(() => decks.filter((deck) => deck.depth === 1), [decks]);
   const selectedDeck = decks.find((deck) => deck.id === selectedDeckId) ?? decks[0];
-  const studyRootDeck = rootDecks.find((deck) => deck.id === studyRootDeckId) ?? rootDecks[0];
+  const studyDeck = decks.find((deck) => deck.id === studyDeckId) ?? rootDecks[0] ?? decks[0];
   const filteredCards = useMemo(() => {
     const query = normalizeAnswer(search);
     return cards.filter((card) => {
@@ -816,16 +816,15 @@ export default function App() {
       setSyncStatus(nextSyncStatus);
       applyTheme(nextSettings.theme);
       setSelectedDeckId((current) => current && nextDecks.some((deck) => deck.id === current) ? current : nextDecks[0]?.id ?? null);
-      const fallbackRootId = nextDecks.find((deck) => deck.depth === 1)?.id ?? null;
-      const nextRootId = (studyRootDeckId && nextDecks.some((deck) => deck.id === studyRootDeckId && deck.depth === 1))
-        ? studyRootDeckId
+      const fallbackStudyDeckId = nextDecks.find((deck) => deck.depth === 1)?.id ?? nextDecks[0]?.id ?? null;
+      const nextStudyDeckId = (studyDeckId && nextDecks.some((deck) => deck.id === studyDeckId))
+        ? studyDeckId
         : user
-          ? readStoredStudyRootDeckId(user.id, nextDecks) ?? fallbackRootId
-          : fallbackRootId;
-      setStudyRootDeckId(nextRootId);
-      writeStoredStudyRootDeckId(user?.id ?? null, nextRootId);
-      const rootId = nextRootId;
-      setDueCards(rootId ? await api.dueCards(rootId, 80) : []);
+          ? readStoredStudyDeckId(user.id, nextDecks) ?? fallbackStudyDeckId
+          : fallbackStudyDeckId;
+      setStudyDeckId(nextStudyDeckId);
+      writeStoredStudyDeckId(user?.id ?? null, nextStudyDeckId);
+      setDueCards(nextStudyDeckId ? await api.dueCards(nextStudyDeckId, 80) : []);
       if (!options.silent) setSyncState("success");
       if (options.notifySuccess) showToast("同步成功");
     } catch (error) {
@@ -880,9 +879,9 @@ export default function App() {
     return updatedCard;
   }
 
-  function selectStudyRootDeck(id: number) {
-    setStudyRootDeckId(id);
-    writeStoredStudyRootDeckId(user?.id ?? null, id);
+  function selectStudyDeck(id: number) {
+    setStudyDeckId(id);
+    writeStoredStudyDeckId(user?.id ?? null, id);
   }
 
   useEffect(() => {
@@ -905,9 +904,9 @@ export default function App() {
   }, [selectedDeckId]);
 
   useEffect(() => {
-    if (!studyRootDeckId) return;
-    api.dueCards(studyRootDeckId, 80).then(setDueCards).catch((error) => showToast(error.message, "error"));
-  }, [studyRootDeckId]);
+    if (!studyDeckId) return;
+    api.dueCards(studyDeckId, 80).then(setDueCards).catch((error) => showToast(error.message, "error"));
+  }, [studyDeckId]);
 
   useEffect(() => {
     if (!toast) return;
@@ -978,17 +977,17 @@ export default function App() {
       document.removeEventListener("visibilitychange", onVisible);
       window.clearInterval(timer);
     };
-  }, [user?.id, studyRootDeckId]);
+  }, [user?.id, studyDeckId]);
 
   useEffect(() => {
     if (settings.notifications !== "on" || dueCards.length === 0 || Notification.permission !== "granted") return;
     const timer = window.setTimeout(() => {
       new Notification("该复习啦", {
-        body: `${studyRootDeck?.name ?? "当前卡组"} 有 ${dueCards.length} 张卡片到期。`
+        body: `${studyDeck?.name ?? "当前卡组"} 有 ${dueCards.length} 张卡片到期。`
       });
     }, 1000);
     return () => window.clearTimeout(timer);
-  }, [dueCards.length, settings.notifications, studyRootDeck?.name]);
+  }, [dueCards.length, settings.notifications, studyDeck?.name]);
 
   function speakWithBrowser(text: string, language?: string) {
     window.speechSynthesis.cancel();
@@ -1121,7 +1120,7 @@ export default function App() {
               setView("deck");
             }}
             onStudy={(id) => {
-              selectStudyRootDeck(id);
+              selectStudyDeck(id);
               setView("study");
             }}
           />
@@ -1208,10 +1207,10 @@ export default function App() {
         {view === "study" && (
           <StudyView
             cards={dueCards}
-            rootDecks={rootDecks}
-            selectedRootDeckId={studyRootDeckId}
-            onSelectRootDeck={selectStudyRootDeck}
-            selectedDeck={studyRootDeck}
+            decks={decks}
+            selectedStudyDeckId={studyDeckId}
+            onSelectStudyDeck={selectStudyDeck}
+            selectedDeck={studyDeck}
             studyTextScale={settings.studyTextScale}
             studyTextAlign={settings.studyTextAlign}
             studyChoiceLayout={settings.studyChoiceLayout}
@@ -1839,9 +1838,9 @@ function SmartTextField(props: { value: string; onChange: (value: string) => voi
 
 function StudyView(props: {
   cards: Card[];
-  rootDecks: Deck[];
-  selectedRootDeckId: number | null;
-  onSelectRootDeck: (id: number) => void;
+  decks: Deck[];
+  selectedStudyDeckId: number | null;
+  onSelectStudyDeck: (id: number) => void;
   selectedDeck?: Deck;
   studyTextScale: number;
   studyTextAlign: Settings["studyTextAlign"];
@@ -1919,15 +1918,15 @@ function StudyView(props: {
   useEffect(() => {
     if (studyMode === "grind") {
       resetSession();
-      setGrindMessage("请选择大卡组并点击开始死学。");
+      setGrindMessage("请选择卡组并点击开始死学。");
       return;
     }
     startSession().catch((error) => console.error(error));
-  }, [studyMode, props.selectedRootDeckId]);
+  }, [studyMode, props.selectedStudyDeckId]);
 
   useEffect(() => {
     loadRemaining().catch((error) => console.error(error));
-  }, [props.selectedRootDeckId]);
+  }, [props.selectedStudyDeckId]);
 
   useEffect(() => {
     setFlipped(false);
@@ -2025,11 +2024,11 @@ function StudyView(props: {
   }
 
   async function startSession(nextLimit = sessionLimit) {
-    if (!props.selectedRootDeckId || busyRef.current) return;
+    if (!props.selectedStudyDeckId || busyRef.current) return;
     busyRef.current = true;
     setBusy("session");
     try {
-      const nextCards = await api.dueCards(props.selectedRootDeckId, Math.max(1, nextLimit), studyMode === "new" ? "new" : "review");
+      const nextCards = await api.dueCards(props.selectedStudyDeckId, Math.max(1, nextLimit), studyMode === "new" ? "new" : "review");
       setSessionCards(nextCards);
       setQueue(nextCards);
       setMasteredIds([]);
@@ -2055,15 +2054,15 @@ function StudyView(props: {
   }
 
   async function loadGrindCards(excludeIds: number[] = [], targetSize = grindGroupSize) {
-    if (!props.selectedRootDeckId) return [];
+    if (!props.selectedStudyDeckId) return [];
     const target = clampGrindGroupSize(targetSize);
     const excluded = new Set(excludeIds);
-    const reviewCards = (await api.dueCards(props.selectedRootDeckId, Math.min(200, target + excluded.size + 20), "review"))
+    const reviewCards = (await api.dueCards(props.selectedStudyDeckId, Math.min(200, target + excluded.size + 20), "review"))
       .filter((item) => !excluded.has(item.id));
     const selectedReviewCards = reviewCards.slice(0, target);
     if (selectedReviewCards.length >= target) return selectedReviewCards;
     selectedReviewCards.forEach((item) => excluded.add(item.id));
-    const newCards = (await api.dueCards(props.selectedRootDeckId, Math.min(200, target - selectedReviewCards.length + excluded.size + 20), "new"))
+    const newCards = (await api.dueCards(props.selectedStudyDeckId, Math.min(200, target - selectedReviewCards.length + excluded.size + 20), "new"))
       .filter((item) => !excluded.has(item.id))
       .slice(0, target - selectedReviewCards.length);
     return [...selectedReviewCards, ...newCards];
@@ -2072,8 +2071,8 @@ function StudyView(props: {
   async function startGrindSession(nextGroupSize = grindGroupSize) {
     const size = clampGrindGroupSize(nextGroupSize);
     setGrindGroupSize(size);
-    if (!props.selectedRootDeckId) {
-      setGrindMessage("请先选择一个大卡组。");
+    if (!props.selectedStudyDeckId) {
+      setGrindMessage("请先选择一个卡组。");
       return;
     }
     if (busyRef.current) return;
@@ -2088,7 +2087,7 @@ function StudyView(props: {
       setSessionCards(nextCards);
       setQueue(nextCards);
       setCompletionPlayed(false);
-      setGrindMessage(nextCards.length > 0 ? "死学模式已开始。" : "死学完成：当前大类下暂无到期复习卡和新卡。");
+      setGrindMessage(nextCards.length > 0 ? "死学模式已开始。" : "死学完成：当前卡组下暂无到期复习卡和新卡。");
       await loadRemaining();
     } finally {
       busyRef.current = false;
@@ -2097,17 +2096,17 @@ function StudyView(props: {
   }
 
   async function loadRemaining() {
-    if (!props.selectedRootDeckId) {
+    if (!props.selectedStudyDeckId) {
       setRemaining({ newRemaining: 0, reviewRemaining: 0 });
       return;
     }
-    setRemaining(await api.reviewRemaining(props.selectedRootDeckId));
+    setRemaining(await api.reviewRemaining(props.selectedStudyDeckId));
   }
 
   async function dueReviewInterrupts(nextQueue: Card[], excludeIds: number[] = []) {
-    if (studyMode !== "grind" || !props.selectedRootDeckId) return [];
+    if (studyMode !== "grind" || !props.selectedStudyDeckId) return [];
     const queuedIds = new Set([...nextQueue.map((item) => item.id), ...excludeIds]);
-    return (await api.dueCards(props.selectedRootDeckId, 100, "review"))
+    return (await api.dueCards(props.selectedStudyDeckId, 100, "review"))
       .filter((item) => !queuedIds.has(item.id) && (!grindGroupStartedAt || item.due_at > grindGroupStartedAt));
   }
 
@@ -2145,11 +2144,11 @@ function StudyView(props: {
           nextSessionCards = adjusted.sessionCards;
         }
         if (nextQueue.length === 0) {
-          const latestRemaining = await api.reviewRemaining(props.selectedRootDeckId ?? undefined);
+          const latestRemaining = await api.reviewRemaining(props.selectedStudyDeckId ?? undefined);
           if (latestRemaining.reviewRemaining > 0 || latestRemaining.newRemaining > 0) {
             setGrindMessage("本组完成，可以继续下一组或休息一下。");
           } else {
-            setGrindMessage("死学完成：当前大类下暂无到期复习卡和新卡。");
+            setGrindMessage("死学完成：当前卡组下暂无到期复习卡和新卡。");
           }
         }
       }
@@ -2405,10 +2404,14 @@ function StudyView(props: {
     <section className={`stack study-view ${immersive ? "immersive" : ""}`}>
       <div className="panel study-selector">
         <label>
-          大卡组
-          <select value={props.selectedRootDeckId ?? ""} onChange={(event) => props.onSelectRootDeck(Number(event.target.value))}>
-            <option value="" disabled>选择大卡组</option>
-            {props.rootDecks.map((deck) => <option key={deck.id} value={deck.id}>{deck.name} · {deck.due_count || 0} 到期</option>)}
+          学习卡组
+          <select value={props.selectedStudyDeckId ?? ""} onChange={(event) => props.onSelectStudyDeck(Number(event.target.value))}>
+            <option value="" disabled>选择卡组</option>
+            {props.decks.map((deck) => (
+              <option key={deck.id} value={deck.id}>
+                {"　".repeat(Math.max(deck.depth - 1, 0))}{deck.name} · {deck.due_count || 0} 到期
+              </option>
+            ))}
           </select>
         </label>
         <div className="study-session-controls">
@@ -2427,7 +2430,7 @@ function StudyView(props: {
                 每组卡片数
                 <input type="number" min={1} max={100} value={grindGroupSize} onChange={(event) => setGrindGroupSize(clampGrindGroupSize(event.target.value))} />
               </label>
-              <button className="primary-button" disabled={busy === "session" || !props.selectedRootDeckId} onClick={() => startGrindSession()}><Sparkles />{busy === "session" ? "载入中" : "开始死学"}</button>
+              <button className="primary-button" disabled={busy === "session" || !props.selectedStudyDeckId} onClick={() => startGrindSession()}><Sparkles />{busy === "session" ? "载入中" : "开始死学"}</button>
             </>
           ) : (
             <>
@@ -2445,7 +2448,7 @@ function StudyView(props: {
         {studyMode === "grind" && (
           <div className="study-remaining" aria-label="死学模式状态">
             <span>当前模式：死学模式</span>
-            <span>大类：{props.selectedDeck?.name ?? "未选择"}</span>
+            <span>卡组：{props.selectedDeck?.name ?? "未选择"}</span>
             <span>第 {grindGroupNumber || 0} 组</span>
             <span>本组目标 {grindGroupSize}</span>
             <span>已加入 {sessionCards.length}</span>
@@ -2456,7 +2459,7 @@ function StudyView(props: {
 
       {!card ? total > 0 ? (
         studyMode === "grind" && grindMessage.startsWith("死学完成")
-          ? <EmptyState text="死学完成：当前大类下暂无到期复习卡和新卡。" />
+          ? <EmptyState text="死学完成：当前卡组下暂无到期复习卡和新卡。" />
           : <StudyComplete
               total={total}
               completed={completed}
@@ -2468,7 +2471,7 @@ function StudyView(props: {
               restartLabel={studyMode === "grind" ? "继续下一组" : "再来一轮"}
               busy={busy === "session"}
             />
-      ) : <EmptyState text={studyMode === "grind" ? (props.selectedRootDeckId ? "请选择开始死学。" : "请先选择一个大卡组。") : studyMode === "new" ? "这个大卡组暂无可新学卡片。" : "这个大卡组暂无到期复习卡片。"} /> : (
+      ) : <EmptyState text={studyMode === "grind" ? (props.selectedStudyDeckId ? "请选择开始死学。" : "请先选择一个卡组。") : studyMode === "new" ? "这个卡组暂无可新学卡片。" : "这个卡组暂无到期复习卡片。"} /> : (
         <div ref={studyPanelRef} key={`${card.id}-${cardRevision}`} className={`study-panel ${cardMotion} align-${props.studyTextAlign} ${checked === "right" ? "celebrating" : ""}`} style={studyStyle}>
           {checked === "right" && (
             <div className="answer-celebration" key={celebrationKey} aria-hidden="true">
@@ -2486,7 +2489,7 @@ function StudyView(props: {
             </div>
             <div className="study-actions">
               {studyMode === "grind" && <span className="type-pill">死学模式</span>}
-              {studyMode === "grind" && <span className="type-pill">{props.selectedDeck?.name ?? "当前大类"}</span>}
+              {studyMode === "grind" && <span className="type-pill">{props.selectedDeck?.name ?? "当前卡组"}</span>}
               {studyMode === "grind" && <span className="type-pill">第 {grindGroupNumber} 组</span>}
               {studyMode === "grind" && <span className="type-pill">目标 {grindGroupSize} · 已加入 {sessionCards.length}</span>}
               <span className="type-pill">{cardTypeLabels[card.card_type]}</span>
