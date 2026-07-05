@@ -63,7 +63,7 @@ declare global {
   }
 }
 
-const version = "0.4.6";
+const version = "0.4.7";
 const logExportPressCount = 6;
 const logExportKey = "a";
 const logExportResetMs = 1800;
@@ -2919,6 +2919,7 @@ function AboutView(props: { syncStatus: SyncStatus | null }) {
       <div className="schedule-box"><h3>同步状态</h3><p>最近同步：{props.syncStatus ? fullDateTime(props.syncStatus.lastSyncAt) : "暂无"} · 数据更新：{props.syncStatus?.dataUpdatedAt ? fullDateTime(props.syncStatus.dataUpdatedAt) : "暂无"}</p></div>
       <div className="schedule-box changelog-box">
         <h3>更新日志</h3>
+        <div className="changelog-row"><strong>0.4.7</strong><span>2026-07-05</span><p>阿里云 CosyVoice 英式朗读支持英文短语类单词卡，不再因空格直接回退到浏览器朗读。</p></div>
         <div className="changelog-row"><strong>0.4.6</strong><span>2026-07-05</span><p>卡片类型改为编辑时手动选择并随卡片保存；单词卡不再依赖例句判定，导入空例句不会被其他列补填，助记展示不再加粗，反面会显示备注。</p></div>
         <div className="changelog-row"><strong>0.4.5</strong><span>2026-07-05</span><p>修复死学模式到期复习卡插队后的本组数量、旧卡 practice 后反复插队、学习反馈提示与卡片右下角对齐，并在设置中增加导出最近日志。</p></div>
         <div className="changelog-row"><strong>0.4.4</strong><span>2026-07-05</span><p>学习反馈提示改到卡片内，死学模式组间停留等待选择，关于页同步状态上移，并为手动同步增加成功提示。</p></div>

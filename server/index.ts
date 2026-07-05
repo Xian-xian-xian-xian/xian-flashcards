@@ -61,7 +61,7 @@ type CardType = "basic" | "word" | "choice" | "blank";
 const maxDeckDepth = 5;
 const sessionCookieName = "flashcards_session";
 const sessionDays = 30;
-const appVersion = "0.4.6";
+const appVersion = "0.4.7";
 const timeZone = "Asia/Shanghai";
 const pronunciationCacheDir = process.env.PRONUNCIATION_CACHE_DIR ?? path.resolve(process.cwd(), "runtime/pronunciations");
 const aliyunTtsModel = process.env.ALIYUN_TTS_MODEL ?? "cosyvoice-v2";
@@ -304,25 +304,27 @@ function isEnglishVoiceLanguage(language: unknown) {
   return normalizeVoiceLanguage(language).toLowerCase().startsWith("en");
 }
 
-function normalizePronunciationWord(value: unknown) {
+function normalizePronunciationText(value: unknown) {
   const text = String(value ?? "")
     .trim()
     .replace(/[’‘]/g, "'")
+    .replace(/\s+/g, " ")
     .toLowerCase();
-  const match = text.match(/^[a-z][a-z'-]{0,79}$/);
+  const match = text.match(/^(?=.*[a-z])[a-z0-9][a-z0-9\s'.,!?;:()&/-]{0,199}$/);
   return match ? text : null;
 }
 
-function ttsCacheName(word: string) {
+function ttsCacheName(text: string) {
   const safeModel = aliyunTtsModel.replace(/[^a-z0-9_-]/gi, "_");
   const safeVoice = aliyunTtsVoice.replace(/[^a-z0-9_-]/gi, "_");
-  const safeWord = word.replace(/[^a-z0-9'-]/g, "_");
-  return `${safeModel}-${safeVoice}-${safeWord}.mp3`;
+  const safeText = text.replace(/[^a-z0-9]+/g, "_").replace(/^_+|_+$/g, "").slice(0, 64) || "speech";
+  const textHash = crypto.createHash("sha1").update(text).digest("hex").slice(0, 12);
+  return `${safeModel}-${safeVoice}-${safeText}-${textHash}.mp3`;
 }
 
-async function cachedTtsPath(word: string) {
+async function cachedTtsPath(text: string) {
   await fs.promises.mkdir(pronunciationCacheDir, { recursive: true });
-  const filePath = path.join(pronunciationCacheDir, ttsCacheName(word));
+  const filePath = path.join(pronunciationCacheDir, ttsCacheName(text));
   return fs.existsSync(filePath) ? filePath : null;
 }
 
@@ -378,7 +380,7 @@ function parseAliyunWsMessage(data: WebSocket.RawData) {
   }
 }
 
-async function synthesizeWithAliyun(word: string) {
+async function synthesizeWithAliyun(text: string) {
   if (!aliyunTtsApiKey) throw new Error("缺少 DASHSCOPE_API_KEY 或 ALIYUN_BAILIAN_API_KEY");
   const taskId = crypto.randomUUID();
   const chunks: Buffer[] = [];
@@ -412,7 +414,7 @@ async function synthesizeWithAliyun(word: string) {
       const message = parseAliyunWsMessage(data);
       const event = message?.header?.event;
       if (event === "task-started") {
-        send(aliyunTtsRequest("continue-task", taskId, { input: { text: word } }));
+        send(aliyunTtsRequest("continue-task", taskId, { input: { text } }));
         send(aliyunTtsRequest("finish-task", taskId, { input: {} }));
       } else if (event === "task-finished") {
         cleanup();
@@ -437,7 +439,7 @@ async function synthesizeWithAliyun(word: string) {
 
   if (!audio.length) throw new Error("阿里云语音合成未返回音频");
   await fs.promises.mkdir(pronunciationCacheDir, { recursive: true });
-  const filePath = path.join(pronunciationCacheDir, ttsCacheName(word));
+  const filePath = path.join(pronunciationCacheDir, ttsCacheName(text));
   await fs.promises.writeFile(filePath, audio);
   return filePath;
 }
@@ -1034,26 +1036,26 @@ app.get("/api/templates/:name", (req, res) => {
 });
 
 app.post("/api/tts", async (req, res) => {
-  const word = normalizePronunciationWord(req.body.text);
-  if (!word) {
-    res.status(400).json({ error: "朗读文本不能为空" });
+  const text = normalizePronunciationText(req.body.text);
+  if (!text) {
+    res.status(400).json({ error: "朗读文本必须是英文单词或短语" });
     return;
   }
   if (!isEnglishVoiceLanguage(req.body.language)) {
-    res.status(422).json({ error: "阿里云英式发音当前仅支持英语单词" });
+    res.status(422).json({ error: "阿里云英式发音当前仅支持英文单词或短语" });
     return;
   }
 
   try {
-    const cachedPath = await cachedTtsPath(word);
-    const audioPath = cachedPath ?? await synthesizeWithAliyun(word);
+    const cachedPath = await cachedTtsPath(text);
+    const audioPath = cachedPath ?? await synthesizeWithAliyun(text);
 
     res.setHeader("Content-Type", "audio/mpeg");
     res.setHeader("Cache-Control", "no-store");
     res.setHeader("X-Pronunciation-Source", cachedPath ? "cache" : "aliyun-cosyvoice");
     res.setHeader("X-Pronunciation-Model", aliyunTtsModel);
     res.setHeader("X-Pronunciation-Voice", aliyunTtsVoice);
-    res.setHeader("X-Pronunciation-Word", encodeURIComponent(word));
+    res.setHeader("X-Pronunciation-Text", encodeURIComponent(text));
     res.send(await fs.promises.readFile(audioPath));
   } catch (error) {
     console.warn("Aliyun CosyVoice pronunciation failed", error);
