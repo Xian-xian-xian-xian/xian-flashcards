@@ -14,6 +14,7 @@ import FileSpreadsheet from "lucide-react/dist/esm/icons/file-spreadsheet";
 import FolderPlus from "lucide-react/dist/esm/icons/folder-plus";
 import HelpCircle from "lucide-react/dist/esm/icons/help-circle";
 import Home from "lucide-react/dist/esm/icons/home";
+import ImageIcon from "lucide-react/dist/esm/icons/image";
 import Info from "lucide-react/dist/esm/icons/info";
 import ListChecks from "lucide-react/dist/esm/icons/list-checks";
 import LogOut from "lucide-react/dist/esm/icons/log-out";
@@ -292,7 +293,7 @@ function renderInlineMarkdown(value: string) {
     if (offset > lastIndex) pushPlainTextWithBareMath(nodes, source.slice(lastIndex, offset), protectedValue.restore);
     if (match.startsWith("![")) {
       const image = match.match(/^!\[([^\]]*)]\(([^)]+)\)$/);
-      nodes.push(image ? <img key={nodes.length} src={protectedValue.restore(image[2])} alt={protectedValue.restore(image[1])} loading="lazy" /> : protectedValue.restore(match));
+      nodes.push(image ? <img key={nodes.length} src={protectedValue.restore(image[2]).trim()} alt={protectedValue.restore(image[1])} loading="lazy" /> : protectedValue.restore(match));
     } else if (parenMath !== undefined) {
       nodes.push(<MathText key={nodes.length} value={protectedValue.restore(parenMath)} />);
     } else if (environment) {
@@ -1733,8 +1734,8 @@ function CardEditor(props: { card?: Card; onSubmit: (payload: CardPayload) => Pr
 
   return (
     <form className={`card-form ${props.card ? "edit-card-form" : ""}`} onSubmit={submit}>
-      <SmartTextField value={front} onChange={setFront} placeholder="正面 / 题目，填空题使用 [] 表示空格" required />
-      <SmartTextField value={back} onChange={setBack} placeholder="背面 / 正确答案" required />
+      <SmartTextField value={front} onChange={setFront} placeholder="正面 / 题目，填空题使用 [] 表示空格" required allowImageInsert />
+      <SmartTextField value={back} onChange={setBack} placeholder="背面 / 正确答案" required allowImageInsert />
       <button className="primary-button secondary-button" type="button" onClick={() => setAdvancedOpen((value) => !value)}><SlidersHorizontal />高级字段</button>
       {advancedOpen && (
         <div className="advanced-fields">
@@ -1751,10 +1752,12 @@ function CardEditor(props: { card?: Card; onSubmit: (payload: CardPayload) => Pr
   );
 }
 
-function SmartTextField(props: { value: string; onChange: (value: string) => void; placeholder: string; required?: boolean; multilineThreshold?: number }) {
+function SmartTextField(props: { value: string; onChange: (value: string) => void; placeholder: string; required?: boolean; multilineThreshold?: number; allowImageInsert?: boolean }) {
   const expanded = props.value.length > (props.multilineThreshold ?? 42) || props.value.includes("\n");
-  return (
+  const ref = useRef<HTMLTextAreaElement | null>(null);
+  const textarea = (
     <textarea
+      ref={ref}
       className={`smart-textarea ${expanded ? "expanded" : "compact"}`}
       value={props.value}
       onChange={(event) => props.onChange(event.target.value)}
@@ -1762,6 +1765,30 @@ function SmartTextField(props: { value: string; onChange: (value: string) => voi
       rows={expanded ? Math.min(8, Math.max(3, props.value.split("\n").length + 1)) : 1}
       required={props.required}
     />
+  );
+  if (!props.allowImageInsert) return textarea;
+  function insertImage() {
+    const url = window.prompt("图片地址（支持 https://、data:image/... 或可访问的图片链接）");
+    if (!url?.trim()) return;
+    const imageMarkdown = `![图片](${url.trim()})`;
+    const element = ref.current;
+    const start = element?.selectionStart ?? props.value.length;
+    const end = element?.selectionEnd ?? props.value.length;
+    const prefix = start > 0 && !/\s$/.test(props.value.slice(0, start)) ? "\n" : "";
+    const suffix = end < props.value.length && !/^\s/.test(props.value.slice(end)) ? "\n" : "";
+    const nextValue = `${props.value.slice(0, start)}${prefix}${imageMarkdown}${suffix}${props.value.slice(end)}`;
+    props.onChange(nextValue);
+    window.requestAnimationFrame(() => {
+      element?.focus();
+      const cursor = start + prefix.length + imageMarkdown.length;
+      element?.setSelectionRange(cursor, cursor);
+    });
+  }
+  return (
+    <span className="smart-field with-image-insert">
+      {textarea}
+      <button className="mini-button smart-image-button" type="button" title="插入图片" onClick={insertImage}><ImageIcon /></button>
+    </span>
   );
 }
 

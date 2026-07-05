@@ -833,6 +833,30 @@ textarea:focus {
   min-height: 108px;
 }
 
+.smart-field {
+  position: relative;
+  display: block;
+  min-width: 0;
+}
+
+.smart-field.with-image-insert .smart-textarea {
+  padding-right: 48px;
+}
+
+.smart-image-button {
+  position: absolute;
+  top: 5px;
+  right: 5px;
+  width: 34px;
+  height: 34px;
+  background: color-mix(in srgb, var(--surface), var(--primary-soft) 38%);
+}
+
+.smart-image-button svg {
+  width: 18px;
+  height: 18px;
+}
+
 .word-card {
   align-items: flex-start;
 }
@@ -1030,8 +1054,15 @@ textarea:focus {
 }
 
 .study-panel.align-left .flip-card .word-face,
-.study-panel.align-left .flip-card .word-back {
+.study-panel.align-left .flip-card .word-back,
+.study-panel.align-left .flip-card .basic-face,
+.study-panel.align-left .flip-card .basic-back {
   justify-items: start;
+}
+
+.study-panel.align-left .flip-card .basic-back,
+.study-panel.align-left .flip-card .basic-answer {
+  text-align: left;
 }
 
 .study-panel.align-left .choice-grid {
