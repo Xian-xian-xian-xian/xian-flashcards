@@ -29,6 +29,13 @@ function knownIntervalMultiplier(history: ReviewHistory) {
   return 1;
 }
 
+function shouldKeepKnownCardInFirstStage(currentStage: number, history: ReviewHistory) {
+  const knownCount = Math.max(0, Number(history.known_count ?? 0));
+  const fuzzyCount = Math.max(0, Number(history.fuzzy_count ?? 0));
+  const unknownCount = Math.max(0, Number(history.unknown_count ?? 0));
+  return currentStage <= 1 && knownCount === 0 && fuzzyCount + unknownCount > 0;
+}
+
 function fuzzyIntervalMs(currentStage: number) {
   if (currentStage <= 2) return 30 * 60 * 1000;
   if (currentStage <= 5) return 12 * 60 * 60 * 1000;
@@ -46,7 +53,9 @@ export function nextReviewState(
   let intervalMs = EBBINGHAUS_INTERVALS_MS[0];
 
   if (rating === "known") {
-    nextStage = Math.min(currentStage + 1, EBBINGHAUS_INTERVALS_MS.length);
+    nextStage = shouldKeepKnownCardInFirstStage(currentStage, history)
+      ? 1
+      : Math.min(currentStage + 1, EBBINGHAUS_INTERVALS_MS.length);
     const baseIntervalMs = EBBINGHAUS_INTERVALS_MS[nextStage - 1] ?? EBBINGHAUS_INTERVALS_MS.at(-1)!;
     intervalMs = Math.round(baseIntervalMs * knownIntervalMultiplier(history));
   }

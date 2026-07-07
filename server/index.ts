@@ -12,6 +12,7 @@ import * as XLSX from "xlsx";
 import type { SqlValue } from "sql.js";
 import { all, get, getUserSetting, initDb, lastTableId, nowIso, run, setUserSetting } from "./db.js";
 import { nextReviewState, type ReviewRating } from "./ebbinghaus.js";
+import { normalizeImportRows } from "./import-utils.js";
 
 const app = express();
 const upload = multer({ storage: multer.memoryStorage() });
@@ -179,17 +180,6 @@ function hasText(value: unknown) {
   return String(value ?? "").trim().length > 0;
 }
 
-function rowValue(row: Record<string, unknown>, keys: string[]) {
-  for (const key of keys) {
-    if (key in row && hasText(row[key])) return row[key];
-  }
-  return undefined;
-}
-
-function hasAnyKey(row: Record<string, unknown>, keys: string[]) {
-  return keys.some((key) => key in row);
-}
-
 function optionalText(value: unknown) {
   return typeof value === "string" ? value.trim() : null;
 }
@@ -247,27 +237,6 @@ function dedupeChoiceOptions(choices: string[]) {
 function addAnswerChoice(choices: string[], answer: string) {
   if (!answer.trim() || choices.some((choice) => answersMatch(choice, answer))) return choices;
   return [...choices, answer.trim()];
-}
-
-function importChoiceValues(row: Record<string, unknown>) {
-  const optionValues = Array.from({ length: 8 }, (_, index) => {
-    const number = index + 1;
-    return rowValue(row, [`option${number}`, `Option${number}`, `选项${number}`, `选项 ${number}`]);
-  });
-  const combinedOptions = rowValue(row, ["options", "Options", "选项", "候选项"]);
-  return normalizeChoices([
-    ...optionValues,
-    ...splitChoiceText(String(combinedOptions ?? ""))
-  ]);
-}
-
-function inferCardType(row: Record<string, unknown>, front: string, choices: string[]): CardType {
-  const explicit = rowValue(row, ["card_type", "type", "类型", "卡片类型", "题型"]);
-  if (explicit !== undefined) return normalizeCardType(explicit);
-  if (choices.length > 0 || hasAnyKey(row, ["option1", "Option1", "选项1", "options", "Options", "选项", "候选项"])) return "choice";
-  if (/(\[\s*\]|_{2,}|（\s*）|\(\s*\))/.test(front)) return "blank";
-  if (hasAnyKey(row, ["word", "单词", "phonetic", "音标", "meaning", "释义"])) return "word";
-  return "basic";
 }
 
 function normalizedChoicePayload(cardType: CardType, choices: string[] | string, answer: string) {
@@ -1269,28 +1238,6 @@ app.post("/api/cards/batch", (req, res) => {
     res.status(400).json({ error: (error as Error).message });
   }
 });
-
-function normalizeImportRows(rows: Record<string, unknown>[]) {
-  return rows
-    .map((row) => {
-      const values = Object.values(row).map((value) => String(value ?? "").trim());
-      const choices = importChoiceValues(row);
-      const front = String(rowValue(row, ["front", "question", "word", "题目", "正面", "单词"]) ?? values[0] ?? "").trim();
-      const back = String(rowValue(row, ["back", "answer", "meaning", "答案", "背面", "释义"]) ?? values[1] ?? "").trim();
-      const cardType = inferCardType(row, front, choices);
-      return {
-        card_type: cardType,
-        front,
-        back,
-        phonetic: String(rowValue(row, ["phonetic", "音标"]) ?? "").trim(),
-        example: String(rowValue(row, ["example", "解析", "例句", "说明"]) ?? "").trim(),
-        mnemonic: String(rowValue(row, ["mnemonic", "助记"]) ?? "").trim(),
-        note: String(rowValue(row, ["note", "备注", "注记"]) ?? "").trim(),
-        choices: normalizedChoicePayload(cardType, choices, back)
-      };
-    })
-    .filter((row) => row.front && row.back);
-}
 
 app.post("/api/import", upload.single("file"), (req, res) => {
   try {

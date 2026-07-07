@@ -22,6 +22,12 @@ describe("nextReviewState", () => {
     expect(dueInMs(nextReviewState(0, "unknown", now).dueAt)).toBe(5 * minute);
   });
 
+  it("keeps early cards in the first review interval after a fuzzy retry becomes known", () => {
+    const result = nextReviewState(1, "known", now, { fuzzy_count: 1 });
+    expect(result.stage).toBe(1);
+    expect(dueInMs(result.dueAt)).toBe(5 * minute);
+  });
+
   it("uses stage-based fuzzy intervals", () => {
     expect(dueInMs(nextReviewState(2, "fuzzy", now).dueAt)).toBe(30 * minute);
     expect(dueInMs(nextReviewState(3, "fuzzy", now).dueAt)).toBe(12 * hour);
