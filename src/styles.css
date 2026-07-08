@@ -172,7 +172,7 @@ button:disabled {
   border-radius: 8px;
   background: transparent;
   color: var(--muted);
-  font-weight: 800;
+  font-weight: 650;
   text-align: left;
 }
 
@@ -200,6 +200,28 @@ button:disabled {
   width: min(1180px, 100%);
   margin: 0 auto;
   padding: 26px;
+}
+
+.icp-footer {
+  padding: 22px 12px 2px;
+  color: var(--muted);
+  text-align: center;
+  font-size: 13px;
+  font-weight: 400;
+}
+
+.study-immersive-active .icp-footer {
+  display: none;
+}
+
+.icp-footer a {
+  color: inherit;
+  text-decoration: none;
+}
+
+.icp-footer a:hover {
+  color: var(--primary-strong);
+  text-decoration: underline;
 }
 
 .topbar {
@@ -538,8 +560,15 @@ button:disabled {
   animation: slide-up 260ms ease both;
 }
 
-.deck-card strong {
+.deck-card-title {
+  color: var(--text);
   font-size: 20px;
+  font-weight: 650;
+}
+
+.list-row-title {
+  color: var(--text);
+  font-weight: 500;
 }
 
 .deck-icon {
@@ -672,7 +701,7 @@ textarea:focus {
   border-bottom: 2px solid var(--blue);
 }
 
-.deck-name strong {
+.deck-name span {
   min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -761,9 +790,10 @@ textarea:focus {
   background: var(--primary-soft);
 }
 
-.batch-toolbar strong {
+.batch-title {
   min-width: 0;
   color: var(--primary-strong);
+  font-weight: 650;
 }
 
 .search {
@@ -792,31 +822,37 @@ textarea:focus {
 }
 
 .edit-card-form {
-  grid-template-columns: repeat(3, minmax(150px, 1fr)) auto auto;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
   padding: 12px;
   border: 1px solid var(--border);
   border-radius: 8px;
   background: var(--primary-soft);
 }
 
-.advanced-fields {
+.editor-field {
   display: grid;
-  grid-column: 1 / -1;
-  grid-template-columns: repeat(2, minmax(160px, 1fr));
-  gap: 10px;
-  padding: 10px;
-  border: 1px solid var(--border);
-  border-radius: 8px;
-  background: color-mix(in srgb, var(--surface), var(--primary-soft) 36%);
+  gap: 6px;
+  min-width: 0;
 }
 
-.advanced-fields input:first-child,
-.advanced-fields .smart-textarea:first-child {
-  grid-column: 1 / -1;
+.editor-field > span {
+  color: var(--muted);
+  font-size: 13px;
+  font-weight: 500;
 }
 
-.advanced-fields .smart-textarea.expanded:first-child,
+.editor-field .smart-field,
+.editor-field .smart-textarea,
+.editor-field textarea {
+  width: 100%;
+}
+
 .card-form .smart-textarea.expanded {
+  grid-column: 1 / -1;
+}
+
+.edit-card-form > label,
+.edit-card-form > .editor-field {
   grid-column: 1 / -1;
 }
 
@@ -831,6 +867,10 @@ textarea:focus {
 
 .smart-textarea.expanded {
   min-height: 108px;
+}
+
+.edit-card-form .smart-textarea.compact {
+  min-height: 48px;
 }
 
 .smart-field {
@@ -861,13 +901,14 @@ textarea:focus {
   align-items: flex-start;
 }
 
-.word-title strong {
+.word-card-title {
   font-size: 22px;
+  font-weight: 650;
 }
 
 .phonetic {
   color: var(--muted);
-  font-weight: 800;
+  font-weight: 500;
 }
 
 .type-pill {
@@ -1815,9 +1856,10 @@ body.resizing-answer-dock .question-dock-resizer::after {
   gap: 10px;
 }
 
-.question-dock-title strong {
+.question-dock-title > span {
   color: var(--primary-strong);
   font-size: var(--study-small-size);
+  font-weight: 650;
 }
 
 .question-dock-body {
@@ -2003,7 +2045,8 @@ body.resizing-answer-dock .question-dock-resizer::after {
   grid-template-columns: 1fr;
 }
 
-.choice-grid button {
+.choice-grid button,
+.choice-grid .preview-option {
   display: inline-flex;
   align-items: center;
   justify-content: center;
@@ -2021,17 +2064,21 @@ body.resizing-answer-dock .question-dock-resizer::after {
   box-shadow: inset 0 -3px 0 color-mix(in srgb, var(--blue), transparent 72%);
 }
 
-.choice-grid button .markdown-text {
+.choice-grid button .markdown-text,
+.choice-grid .preview-option .markdown-text {
   width: 100%;
 }
 
 .choice-grid.medium button,
-.choice-grid.long button {
+.choice-grid.long button,
+.choice-grid.medium .preview-option,
+.choice-grid.long .preview-option {
   min-height: 68px;
   padding: 14px 16px;
 }
 
-.choice-grid button.correct {
+.choice-grid button.correct,
+.choice-grid .preview-option.correct {
   border-color: color-mix(in srgb, var(--green), transparent 35%);
   background: color-mix(in srgb, var(--green), transparent 82%);
   color: var(--text);
@@ -2112,6 +2159,38 @@ body.resizing-answer-dock .question-dock-resizer::after {
 .study-view.immersive .flip-card-face,
 .study-view.immersive .question-box {
   min-height: min(72vh, 760px);
+}
+
+.card-preview-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 32;
+  display: grid;
+  place-items: stretch;
+  padding: clamp(10px, 2vw, 22px);
+  background: color-mix(in srgb, var(--background), transparent 6%);
+}
+
+.card-preview-panel {
+  width: min(1180px, 100%);
+  min-height: calc(100vh - clamp(20px, 4vw, 44px));
+  max-height: calc(100vh - clamp(20px, 4vw, 44px));
+  margin: 0 auto;
+}
+
+.preview-actions {
+  justify-content: flex-end;
+}
+
+.card-preview-scroll {
+  align-content: center;
+}
+
+.card-preview-panel .flip-card,
+.card-preview-panel .flip-card-inner,
+.card-preview-panel .flip-card-face,
+.card-preview-panel .question-box {
+  min-height: min(74vh, 760px);
 }
 
 .rating.known {
@@ -2500,7 +2579,9 @@ textarea {
 .auth-shell {
   display: grid;
   min-height: 100vh;
-  place-items: center;
+  align-content: center;
+  justify-items: center;
+  gap: 18px;
   padding: 22px;
   background:
     linear-gradient(135deg, color-mix(in srgb, var(--primary), transparent 86%), transparent 42%),
@@ -2937,7 +3018,6 @@ textarea {
   .task-strip,
   .two-column,
   .card-form,
-  .advanced-fields,
   .study-edit-form,
   .batch-toolbar,
   .study-session-controls,

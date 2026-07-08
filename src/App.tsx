@@ -63,7 +63,7 @@ declare global {
   }
 }
 
-const version = "0.4.7";
+const version = "0.4.8";
 const logExportPressCount = 6;
 const logExportKey = "a";
 const logExportResetMs = 1800;
@@ -584,6 +584,14 @@ function readStoredStudyDeckId(userId: number, decks: Deck[]) {
 function writeStoredStudyDeckId(userId: number | null, deckId: number | null) {
   if (!userId || !deckId) return;
   window.localStorage.setItem(studyDeckStorageKey(userId), String(deckId));
+}
+
+function IcpFooter() {
+  return (
+    <footer className="icp-footer">
+      <a href="https://beian.miit.gov.cn/" target="_blank" rel="noopener noreferrer">苏ICP备2026045295号-1</a>
+    </footer>
+  );
 }
 
 function nextStudyQueue(queue: Card[], card: Card, rating: ReviewRating, result: { stage: number; dueAt: string }) {
@@ -1295,6 +1303,7 @@ export default function App() {
         )}
 
         {view === "about" && <AboutView syncStatus={syncStatus} />}
+        <IcpFooter />
       </main>
     </div>
   );
@@ -1383,6 +1392,7 @@ function LoginView(props: { canRegister: boolean; onAuthed: (user: User) => void
           </button>
         )}
       </section>
+      <IcpFooter />
     </div>
   );
 }
@@ -1472,7 +1482,7 @@ function HomeView(props: {
         {props.rootDecks.map((deck) => (
           <button className="deck-card" key={deck.id} onClick={() => props.onStudy(deck.id)}>
             <span className="deck-icon"><BookOpen /></span>
-            <strong>{deck.name}</strong>
+            <span className="deck-card-title">{deck.name}</span>
             <span>{deck.total_card_count || deck.card_count || 0} 张 · {deck.due_count || 0} 到期</span>
           </button>
         ))}
@@ -1483,7 +1493,7 @@ function HomeView(props: {
       <div className="list">
         {props.dueCards.slice(0, 6).map((card) => (
           <div className="list-row" key={card.id}>
-            <strong>{card.front}</strong>
+            <span className="list-row-title">{card.front}</span>
             <span>{cardTypeLabels[card.card_type]} · {card.back}</span>
           </div>
         ))}
@@ -1637,7 +1647,7 @@ function DeckView(props: {
           {props.decks.map((deck) => (
             <div className={`deck-list-row depth-${Math.min(deck.depth, 5)}`} key={deck.id}>
               <button className={`deck-list-item ${deck.id === props.selectedDeckId ? "active" : ""}`} onClick={() => selectDeck(deck.id)}>
-                <span className="deck-name">{deck.depth > 1 && <i />}<strong>{deck.name}</strong></span>
+                <span className="deck-name">{deck.depth > 1 && <i />}<span>{deck.name}</span></span>
                 <span className="deck-count">{deck.total_card_count || deck.card_count || 0} 张</span>
               </button>
               <div className="deck-menu">
@@ -1673,7 +1683,7 @@ function DeckView(props: {
         {editingCard && <CardEditor card={editingCard} onCancel={() => setEditingCard(null)} onSubmit={async (payload) => { await props.onUpdateCard(editingCard.id, { ...payload, baseUpdatedAt: editingCard.updated_at }); setEditingCard(null); }} />}
         <div className="batch-toolbar">
           <button className="mini-button" title="全选" onClick={toggleAllCards}>{allVisibleSelected ? <SquareCheck /> : <Square />}</button>
-          <strong>{selectedCardIds.length ? `已选 ${selectedCardIds.length} 张` : "批量管理"}</strong>
+          <span className="batch-title">{selectedCardIds.length ? `已选 ${selectedCardIds.length} 张` : "批量管理"}</span>
           <select value={batchTargetDeckId ?? ""} onChange={(event) => setBatchTargetDeckId(event.target.value ? Number(event.target.value) : null)}>
             <option value="" disabled>移动到卡组</option>
             {props.decks.map((deck) => <option key={deck.id} value={deck.id}>{"　".repeat(Math.max(deck.depth - 1, 0))}{deck.name}</option>)}
@@ -1687,7 +1697,7 @@ function DeckView(props: {
               <div>
                 <div className="word-title">
                   <button className="mini-button" title="选择卡片" onClick={() => toggleCard(card.id)}>{selectedCardIds.includes(card.id) ? <SquareCheck /> : <Square />}</button>
-                  <strong>{card.front}</strong>
+                  <span className="word-card-title">{card.front}</span>
                   <span className="type-pill">{cardTypeLabels[card.card_type]}</span>
                   {isWordCard(card) && card.phonetic && <span className="phonetic">{card.phonetic}</span>}
                   <button className="mini-button" title="发音" onClick={() => props.onSpeak(card.front)}><Volume2 /></button>
@@ -1710,7 +1720,7 @@ function DeckView(props: {
           {props.cards.length === 0 && <EmptyState text="这个卡组还没有卡片。" />}
         </div>
       </div>
-      {detailCard && <CardDetail card={detailCard} onClose={() => setDetailCard(null)} />}
+      {detailCard && <CardPreview card={detailCard} onClose={() => setDetailCard(null)} />}
     </section>
   );
 }
@@ -1724,7 +1734,6 @@ function CardEditor(props: { card?: Card; onSubmit: (payload: CardPayload) => Pr
   const [mnemonic, setMnemonic] = useState(props.card?.mnemonic ?? "");
   const [note, setNote] = useState(props.card?.note ?? "");
   const [choices, setChoices] = useState(parseChoices(props.card?.choices).join(" | "));
-  const [advancedOpen, setAdvancedOpen] = useState(Boolean(props.card && (props.card.phonetic || props.card.example || props.card.mnemonic || props.card.note || parseChoices(props.card.choices).length > 0)));
   const [saving, setSaving] = useState(false);
 
   useEffect(() => {
@@ -1736,7 +1745,6 @@ function CardEditor(props: { card?: Card; onSubmit: (payload: CardPayload) => Pr
     setMnemonic(props.card?.mnemonic ?? "");
     setNote(props.card?.note ?? "");
     setChoices(parseChoices(props.card?.choices).join(" | "));
-    setAdvancedOpen(Boolean(props.card && (props.card.phonetic || props.card.example || props.card.mnemonic || props.card.note || parseChoices(props.card.choices).length > 0)));
   }, [props.card?.id, props.card?.updated_at]);
 
   async function submit(event: FormEvent) {
@@ -1764,7 +1772,6 @@ function CardEditor(props: { card?: Card; onSubmit: (payload: CardPayload) => Pr
         setNote("");
         setChoices("");
         setCardType("basic");
-        setAdvancedOpen(false);
       }
     } finally {
       setSaving(false);
@@ -1779,21 +1786,45 @@ function CardEditor(props: { card?: Card; onSubmit: (payload: CardPayload) => Pr
         <option value="choice">选择题卡</option>
         <option value="blank">填空题卡</option>
       </select></label>
-      <SmartTextField value={front} onChange={setFront} placeholder="正面 / 题目，填空题使用 [] 表示空格" required allowImageInsert />
-      <SmartTextField value={back} onChange={setBack} placeholder="背面 / 正确答案" required allowImageInsert />
-      <button className="primary-button secondary-button" type="button" onClick={() => setAdvancedOpen((value) => !value)}><SlidersHorizontal />高级字段</button>
-      {advancedOpen && (
-        <div className="advanced-fields">
-          {cardType === "choice" && <SmartTextField value={choices} onChange={setChoices} placeholder="选择题选项，用 |、; 分隔，或一行一个选项" multilineThreshold={28} />}
-          <SmartTextField value={phonetic} onChange={setPhonetic} placeholder="音标（可选）" />
-          <SmartTextField value={example} onChange={setExample} placeholder="例句 / 说明 / 解析（可选）" />
-          <SmartTextField value={mnemonic} onChange={setMnemonic} placeholder="助记（可选）" />
-          <SmartTextField value={note} onChange={setNote} placeholder="备注（可选）" />
-        </div>
+      <EditorField label={cardType === "word" ? "单词 / 正面" : cardType === "choice" ? "题目" : cardType === "blank" ? "题干" : "正面 / 问题"}>
+        <SmartTextField value={front} onChange={setFront} placeholder={cardType === "blank" ? "题干，使用 [] 表示空格" : "输入正面内容"} required allowImageInsert />
+      </EditorField>
+      {cardType === "choice" && (
+        <EditorField label="选项">
+          <SmartTextField value={choices} onChange={setChoices} placeholder="用 |、; 分隔，或一行一个选项" multilineThreshold={28} />
+        </EditorField>
       )}
+      {cardType === "word" && (
+        <EditorField label="音标">
+          <SmartTextField value={phonetic} onChange={setPhonetic} placeholder="音标（可选）" />
+        </EditorField>
+      )}
+      <EditorField label={cardType === "choice" ? "正确答案" : cardType === "blank" ? "填空答案" : cardType === "word" ? "释义 / 背面" : "背面 / 答案"}>
+        <SmartTextField value={back} onChange={setBack} placeholder="输入背面或答案内容" required allowImageInsert />
+      </EditorField>
+      <EditorField label={cardType === "choice" || cardType === "blank" ? "解析 / 说明" : cardType === "word" ? "例句 / 说明" : "说明 / 例子"}>
+        <SmartTextField value={example} onChange={setExample} placeholder="可选" />
+      </EditorField>
+      {cardType === "word" && (
+        <EditorField label="助记">
+          <SmartTextField value={mnemonic} onChange={setMnemonic} placeholder="可选" />
+        </EditorField>
+      )}
+      <EditorField label="备注">
+        <SmartTextField value={note} onChange={setNote} placeholder="可选" />
+      </EditorField>
       <button className="primary-button" disabled={saving}>{props.card ? <Save /> : <Plus />}{saving ? "处理中" : props.card ? "保存" : "添加"}</button>
       {props.onCancel && <button className="primary-button secondary-button" type="button" disabled={saving} onClick={props.onCancel}><XCircle />取消</button>}
     </form>
+  );
+}
+
+function EditorField(props: { label: string; children: ReactNode }) {
+  return (
+    <label className="editor-field">
+      <span>{props.label}</span>
+      {props.children}
+    </label>
   );
 }
 
@@ -2566,93 +2597,98 @@ function StudyView(props: {
             </div>
           </div>
           <div className="study-scroll" ref={studyScrollRef}>
-            {editingStudyCard && <CardEditor card={editingStudyCard} onCancel={() => setEditingStudyCard(null)} onSubmit={saveStudyCard} />}
-            {card.card_type === "basic" && (
-              <button ref={(node) => { cardFrameRef.current = node; }} className={`flip-card ${flipped ? "flipped" : ""}`} onClick={() => setFlipped((value) => !value)}>
-                <span className="flip-card-inner">
-                  <span className="flip-card-face flip-card-front"><CardFront card={card} /></span>
-                  <span className="flip-card-face flip-card-back"><CardBack card={card} layout={props.studyChoiceLayout} showFront={showBasicBackFront} /></span>
-                </span>
-              </button>
-            )}
-            {card.card_type === "word" && (
-              <button ref={(node) => { cardFrameRef.current = node; }} className={`flip-card ${flipped ? "flipped" : ""}`} onClick={() => setFlipped((value) => !value)}>
-                <span className="flip-card-inner">
-                  <span className="flip-card-face flip-card-front"><CardFront card={card} /></span>
-                  <span className="flip-card-face flip-card-back"><CardBack card={card} layout={props.studyChoiceLayout} /></span>
-                </span>
-              </button>
-            )}
-            {card.card_type === "choice" && (
-              <div ref={answerLayoutRef} className={`answer-layout ${showAnswerDock ? "with-dock" : ""}`}>
-                <div ref={(node) => { cardFrameRef.current = node; }} className={`question-box choice-question ${choiceLayoutClass(choices, props.studyChoiceLayout)}`}>
-                  <MarkdownText value={card.front} className="question-text" />
-                  <ChoiceArea choices={choices} answer={card.back} selected={selectedChoice} checked={checked} layout={props.studyChoiceLayout} onChoose={checkChoice}>
-                    {checked && <AnswerFeedback checked={checked} correct={displayCorrect} explanation={explanation} other={otherNote} selected={selectedChoice} />}
-                  </ChoiceArea>
-                </div>
-                {showAnswerDock && (
-                  <QuestionDock
-                    card={card}
-                    choices={choices}
-                    selected={selectedChoice}
-                    answer={card.back}
-                    onResize={resizeAnswerDock}
-                    onClose={() => setAnswerDockOpen(false)}
-                  />
+            {editingStudyCard ? (
+              <CardEditor card={editingStudyCard} onCancel={() => setEditingStudyCard(null)} onSubmit={saveStudyCard} />
+            ) : (
+              <>
+                {card.card_type === "basic" && (
+                  <button ref={(node) => { cardFrameRef.current = node; }} className={`flip-card ${flipped ? "flipped" : ""}`} onClick={() => setFlipped((value) => !value)}>
+                    <span className="flip-card-inner">
+                      <span className="flip-card-face flip-card-front"><CardFront card={card} /></span>
+                      <span className="flip-card-face flip-card-back"><CardBack card={card} layout={props.studyChoiceLayout} showFront={showBasicBackFront} /></span>
+                    </span>
+                  </button>
                 )}
-              </div>
-            )}
-            {card.card_type === "blank" && (
-              <div ref={answerLayoutRef} className={`answer-layout ${showAnswerDock ? "with-dock" : ""}`}>
-                <div ref={(node) => { cardFrameRef.current = node; }} className={`question-box choice-question blank-question ${choiceLayoutClass([card.front, card.example], props.studyChoiceLayout)}`}>
-                  <form className="blank-answer-form" onSubmit={submitBlankAnswer}>
-                    <MarkdownText
-                      value={card.front}
-                      className="question-text blank-question-text"
-                      renderBlank={(key) => (
-                        <input
-                          key={key}
-                          className={`blank-inline-input ${checked ?? ""}`}
-                          value={splitBlankAnswers(answer, currentBlankCount)[blankIndexFromKey(key)] ?? ""}
-                          onChange={(event) => {
-                            setAnswer(setBlankAnswerPart(answer, currentBlankCount, blankIndexFromKey(key), event.target.value));
-                            setChecked(null);
-                          }}
-                          aria-label="填空答案"
-                          autoComplete="off"
-                          disabled={Boolean(busy)}
-                        />
-                      )}
-                    />
-                    {!hasBlankMarker(card.front) && (
-                      <input
-                        className={`blank-inline-input standalone ${checked ?? ""}`}
-                        value={answer}
-                        onChange={(event) => { setAnswer(event.target.value); setChecked(null); }}
-                        aria-label="填空答案"
-                        autoComplete="off"
-                        disabled={Boolean(busy)}
+                {card.card_type === "word" && (
+                  <button ref={(node) => { cardFrameRef.current = node; }} className={`flip-card ${flipped ? "flipped" : ""}`} onClick={() => setFlipped((value) => !value)}>
+                    <span className="flip-card-inner">
+                      <span className="flip-card-face flip-card-front"><CardFront card={card} /></span>
+                      <span className="flip-card-face flip-card-back"><CardBack card={card} layout={props.studyChoiceLayout} /></span>
+                    </span>
+                  </button>
+                )}
+                {card.card_type === "choice" && (
+                  <div ref={answerLayoutRef} className={`answer-layout ${showAnswerDock ? "with-dock" : ""}`}>
+                    <div ref={(node) => { cardFrameRef.current = node; }} className={`question-box choice-question ${choiceLayoutClass(choices, props.studyChoiceLayout)}`}>
+                      <MarkdownText value={card.front} className="question-text" />
+                      <ChoiceArea choices={choices} answer={card.back} selected={selectedChoice} checked={checked} layout={props.studyChoiceLayout} onChoose={checkChoice}>
+                        {checked && <AnswerFeedback checked={checked} correct={displayCorrect} explanation={explanation} other={otherNote} selected={selectedChoice} />}
+                      </ChoiceArea>
+                    </div>
+                    {showAnswerDock && (
+                      <QuestionDock
+                        card={card}
+                        choices={choices}
+                        selected={selectedChoice}
+                        answer={card.back}
+                        onResize={resizeAnswerDock}
+                        onClose={() => setAnswerDockOpen(false)}
                       />
                     )}
-                    <button className="primary-button blank-submit-button" disabled={Boolean(busy) || !displayedBlankAnswer}>{busy ? "提交中" : "提交"}</button>
-                  </form>
-                  {checked && <AnswerFeedback checked={checked} correct={correctAnswer(card)} explanation={explanation} other={otherNote} selected={displayedBlankAnswer} />}
-                </div>
-                {showAnswerDock && (
-                  <QuestionDock
-                    card={card}
-                    selected={displayedBlankAnswer}
-                    answer={correctAnswer(card)}
-                    onResize={resizeAnswerDock}
-                    onClose={() => setAnswerDockOpen(false)}
-                  />
+                  </div>
                 )}
-              </div>
+                {card.card_type === "blank" && (
+                  <div ref={answerLayoutRef} className={`answer-layout ${showAnswerDock ? "with-dock" : ""}`}>
+                    <div ref={(node) => { cardFrameRef.current = node; }} className={`question-box choice-question blank-question ${choiceLayoutClass([card.front, card.example], props.studyChoiceLayout)}`}>
+                      <form className="blank-answer-form" onSubmit={submitBlankAnswer}>
+                        <MarkdownText
+                          value={card.front}
+                          className="question-text blank-question-text"
+                          renderBlank={(key) => (
+                            <input
+                              key={key}
+                              className={`blank-inline-input ${checked ?? ""}`}
+                              value={splitBlankAnswers(answer, currentBlankCount)[blankIndexFromKey(key)] ?? ""}
+                              onChange={(event) => {
+                                setAnswer(setBlankAnswerPart(answer, currentBlankCount, blankIndexFromKey(key), event.target.value));
+                                setChecked(null);
+                              }}
+                              aria-label="填空答案"
+                              autoComplete="off"
+                              disabled={Boolean(busy)}
+                            />
+                          )}
+                        />
+                        {!hasBlankMarker(card.front) && (
+                          <input
+                            className={`blank-inline-input standalone ${checked ?? ""}`}
+                            value={answer}
+                            onChange={(event) => { setAnswer(event.target.value); setChecked(null); }}
+                            aria-label="填空答案"
+                            autoComplete="off"
+                            disabled={Boolean(busy)}
+                          />
+                        )}
+                        <button className="primary-button blank-submit-button" disabled={Boolean(busy) || !displayedBlankAnswer}>{busy ? "提交中" : "提交"}</button>
+                      </form>
+                      {checked && <AnswerFeedback checked={checked} correct={correctAnswer(card)} explanation={explanation} other={otherNote} selected={displayedBlankAnswer} />}
+                    </div>
+                    {showAnswerDock && (
+                      <QuestionDock
+                        card={card}
+                        selected={displayedBlankAnswer}
+                        answer={correctAnswer(card)}
+                        onResize={resizeAnswerDock}
+                        onClose={() => setAnswerDockOpen(false)}
+                      />
+                    )}
+                  </div>
+                )}
+              </>
             )}
           </div>
           {ratingNotice && <RatingNotice feedback={ratingNotice} onClose={() => setRatingNotice(null)} />}
-          {showManualRatings && (
+          {!editingStudyCard && showManualRatings && (
             <div className="rating-row">
               <button className="rating unknown" disabled={Boolean(busy)} onClick={() => rate("unknown")}><XCircle />{busy === "rate-unknown" ? "提交中" : "不认识"}</button>
               <button className="rating fuzzy" disabled={Boolean(busy)} onClick={() => rate("fuzzy")}><RotateCcw />{busy === "rate-fuzzy" ? "提交中" : "模糊"}</button>
@@ -2702,7 +2738,7 @@ function QuestionDock(props: { card: Card; choices?: string[]; selected: string;
     <aside className="question-dock" aria-label="题目参考">
       <button className="question-dock-resizer" type="button" aria-label="调整题目参考宽度" onPointerDown={props.onResize} />
       <div className="question-dock-title">
-        <strong>题目参考</strong>
+        <span>题目参考</span>
         <button className="mini-button" title="隐藏题目参考" onClick={props.onClose}><XCircle /></button>
       </div>
       <div className="question-dock-body">
@@ -2931,6 +2967,7 @@ function AboutView(props: { syncStatus: SyncStatus | null }) {
       <div className="schedule-box"><h3>同步状态</h3><p>最近同步：{props.syncStatus ? fullDateTime(props.syncStatus.lastSyncAt) : "暂无"} · 数据更新：{props.syncStatus?.dataUpdatedAt ? fullDateTime(props.syncStatus.dataUpdatedAt) : "暂无"}</p></div>
       <div className="schedule-box changelog-box">
         <h3>更新日志</h3>
+        <div className="changelog-row"><strong>0.4.8</strong><span>2026-07-08</span><p>修复学习页编辑字段提示、布局和显示范围；卡片详情改为全屏学习预览；沉浸学习隐藏备案号，并收敛网页加粗使用。</p></div>
         <div className="changelog-row"><strong>0.4.7</strong><span>2026-07-05</span><p>阿里云 CosyVoice 英式朗读支持英文短语类单词卡，不再因空格直接回退到浏览器朗读。</p></div>
         <div className="changelog-row"><strong>0.4.6</strong><span>2026-07-05</span><p>卡片类型改为编辑时手动选择并随卡片保存；单词卡不再依赖例句判定，导入空例句不会被其他列补填，助记展示不再加粗，反面会显示备注。</p></div>
         <div className="changelog-row"><strong>0.4.5</strong><span>2026-07-05</span><p>修复死学模式到期复习卡插队后的本组数量、旧卡 practice 后反复插队、学习反馈提示与卡片右下角对齐，并在设置中增加导出最近日志。</p></div>
@@ -2972,31 +3009,59 @@ function AboutView(props: { syncStatus: SyncStatus | null }) {
   );
 }
 
-function CardDetail(props: { card: Card; onClose: () => void }) {
+function CardPreview(props: { card: Card; onClose: () => void }) {
+  const [flipped, setFlipped] = useState(false);
   const choices = parseChoices(props.card.choices);
+  const layout = choiceLayoutClass(props.card.card_type === "choice" ? choices : [props.card.front, props.card.example], "auto");
   return (
-    <div className="modal-backdrop">
-      <section className="modal-panel">
-        <div className="modal-title"><h2><MarkdownText value={props.card.front} /></h2><button className="mini-button" onClick={props.onClose}><XCircle /></button></div>
-        <div className="detail-grid">
-          <Detail label="类型" value={cardTypeLabels[props.card.card_type]} />
-          <Detail label="答案" value={props.card.back} />
-          <Detail label="阶段" value={`${props.card.stage}/10`} />
-          <Detail label="下次复习" value={fullDateTime(props.card.due_at)} />
-          <Detail label="相对时间" value={dueText(props.card.due_at)} />
-          <Detail label="音标" value={props.card.phonetic || "无"} />
-          <Detail label="例句" value={props.card.example || "无"} />
-          <Detail label="助记" value={props.card.mnemonic || "无"} />
-          <Detail label="选项" value={choices.length ? choices.join("\n") : "无"} />
-          <Detail label="备注" value={props.card.note || "无"} />
+    <div className="card-preview-overlay">
+      <section className="study-panel card-preview-panel align-center">
+        <div className="study-fixed-top">
+          <div className="study-actions preview-actions">
+            <span className="type-pill">{cardTypeLabels[props.card.card_type]}</span>
+            <span className="type-pill">阶段 {props.card.stage}/10</span>
+            <span className="type-pill">下次 {dueText(props.card.due_at)}</span>
+            <button className="mini-button" title="关闭预览" onClick={props.onClose}><XCircle /></button>
+          </div>
+        </div>
+        <div className="study-scroll card-preview-scroll">
+          {(props.card.card_type === "basic" || props.card.card_type === "word") && (
+            <button className={`flip-card ${flipped ? "flipped" : ""}`} onClick={() => setFlipped((value) => !value)}>
+              <span className="flip-card-inner">
+                <span className="flip-card-face flip-card-front"><CardFront card={props.card} /></span>
+                <span className="flip-card-face flip-card-back"><CardBack card={props.card} layout="auto" showFront={props.card.card_type === "basic"} /></span>
+              </span>
+            </button>
+          )}
+          {props.card.card_type === "choice" && (
+            <div className={`question-box choice-question ${layout}`}>
+              <MarkdownText value={props.card.front} className="question-text" />
+              <div className={`choice-area ${layout}`}>
+                <div className={`choice-grid ${layout}`}>
+                  {choices.map((choice, index) => (
+                    <div key={`${choice}-${index}`} className={answersMatch(choice, props.card.back) ? "preview-option correct" : "preview-option"}>
+                      <MarkdownText value={choice} />
+                    </div>
+                  ))}
+                </div>
+                <AnswerFeedback checked="right" correct={props.card.back} explanation={props.card.example} other={props.card.note} selected="" />
+              </div>
+            </div>
+          )}
+          {props.card.card_type === "blank" && (
+            <div className={`question-box choice-question blank-question ${layout}`}>
+              <MarkdownText
+                value={props.card.front}
+                className="question-text blank-question-text"
+                renderBlank={(key) => <span key={key} className="blank-dock-gap" />}
+              />
+              <AnswerFeedback checked="right" correct={correctAnswer(props.card)} explanation={props.card.example} other={props.card.note} selected="" />
+            </div>
+          )}
         </div>
       </section>
     </div>
   );
-}
-
-function Detail(props: { label: string; value: string }) {
-  return <div className="detail-item"><span>{props.label}</span><strong><MarkdownText value={props.value} /></strong></div>;
 }
 
 function ConflictDialog(props: { conflict: { id: number; payload: CardPayload; serverCard: Card }; onKeepServer: () => Promise<void>; onOverwrite: () => Promise<void> }) {
