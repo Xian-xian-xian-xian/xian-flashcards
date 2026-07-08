@@ -105,3 +105,14 @@ export type SyncStatus = {
   lastSyncAt: string;
   dataUpdatedAt: string;
 };
+
+export type ImportBatch = {
+  id: string;
+  deck_id: number;
+  deck_name: string;
+  imported: number;
+  skipped: number;
+  source: string;
+  created_at: string;
+  undone_at: string;
+};

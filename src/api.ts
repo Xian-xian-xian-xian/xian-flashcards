@@ -1,4 +1,4 @@
-import type { Card, DailyTask, Deck, ReviewRating, ReviewRemaining, ReviewSnapshot, Settings, Stats, SyncStatus, User } from "./types";
+import type { Card, DailyTask, Deck, ImportBatch, ReviewRating, ReviewRemaining, ReviewSnapshot, Settings, Stats, SyncStatus, User } from "./types";
 
 export type CardPayload = {
   card_type?: Card["card_type"];
@@ -105,7 +105,10 @@ export const api = {
     request<{ ok: true }>("/api/daily-task/settings", { method: "PUT", body: JSON.stringify(payload) }),
   syncStatus: () => request<SyncStatus>("/api/sync/status"),
   importCards: (form: FormData) =>
-    request<{ imported: number; skipped: number }>("/api/import", { method: "POST", body: form }),
+    request<{ imported: number; skipped: number; batchId: string; createdAt: string }>("/api/import", { method: "POST", body: form }),
+  recentImports: () => request<ImportBatch[]>("/api/import/recent"),
+  undoImport: (batchId: string) =>
+    request<{ ok: true; deleted: number }>(`/api/import/${encodeURIComponent(batchId)}/undo`, { method: "POST" }),
   synthesizeSpeech: (payload: { text: string; language?: string }) => audioRequest("/api/tts", payload),
   exportRecentLogs: () => download("/api/logs/recent?minutes=10")
 };

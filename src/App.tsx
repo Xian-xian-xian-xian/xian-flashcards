@@ -47,7 +47,7 @@ import Volume2 from "lucide-react/dist/esm/icons/volume-2";
 import XCircle from "lucide-react/dist/esm/icons/x-circle";
 import { CSSProperties, FormEvent, PointerEvent as ReactPointerEvent, ReactNode, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { api, type CardPayload, type ConflictError } from "./api";
-import type { Card, CardType, DailyTask, Deck, ReviewRating, ReviewRemaining, ReviewSnapshot, Settings, Stats, SyncStatus, ThemeMode, User } from "./types";
+import type { Card, CardType, DailyTask, Deck, ImportBatch, ReviewRating, ReviewRemaining, ReviewSnapshot, Settings, Stats, SyncStatus, ThemeMode, User } from "./types";
 
 type View = "home" | "deck" | "study" | "import" | "settings" | "about";
 type SyncState = "idle" | "syncing" | "success" | "error" | "conflict";
@@ -63,7 +63,7 @@ declare global {
   }
 }
 
-const version = "0.4.8";
+const version = "0.4.9";
 const logExportPressCount = 6;
 const logExportKey = "a";
 const logExportResetMs = 1800;
@@ -1780,12 +1780,14 @@ function CardEditor(props: { card?: Card; onSubmit: (payload: CardPayload) => Pr
 
   return (
     <form className={`card-form ${props.card ? "edit-card-form" : ""}`} onSubmit={submit}>
-      <label>卡片类型<select value={cardType} onChange={(event) => setCardType(event.target.value as CardType)}>
-        <option value="basic">普通卡</option>
-        <option value="word">单词卡</option>
-        <option value="choice">选择题卡</option>
-        <option value="blank">填空题卡</option>
-      </select></label>
+      <EditorField label="卡片类型">
+        <select value={cardType} onChange={(event) => setCardType(event.target.value as CardType)}>
+          <option value="basic">普通卡</option>
+          <option value="word">单词卡</option>
+          <option value="choice">选择题卡</option>
+          <option value="blank">填空题卡</option>
+        </select>
+      </EditorField>
       <EditorField label={cardType === "word" ? "单词 / 正面" : cardType === "choice" ? "题目" : cardType === "blank" ? "题干" : "正面 / 问题"}>
         <SmartTextField value={front} onChange={setFront} placeholder={cardType === "blank" ? "题干，使用 [] 表示空格" : "输入正面内容"} required allowImageInsert />
       </EditorField>
@@ -2397,6 +2399,12 @@ function StudyView(props: {
     setImmersive(true);
   }
 
+  async function restFromGrind() {
+    if (document.fullscreenElement) await document.exitFullscreen().catch(() => undefined);
+    resetSession();
+    setGrindMessage("已休息，准备好后再开始死学。");
+  }
+
   function editCurrentStudyCard() {
     if (!card) return;
     setEditingStudyCard(card);
@@ -2435,6 +2443,57 @@ function StudyView(props: {
     document.addEventListener("pointermove", onPointerMove);
     document.addEventListener("pointerup", onPointerUp, { once: true });
   }
+
+  useEffect(() => {
+    const onKeyDown = (event: KeyboardEvent) => {
+      const target = event.target as HTMLElement | null;
+      const tagName = target?.tagName ?? "";
+      const editable = Boolean(target?.isContentEditable || ["INPUT", "TEXTAREA", "SELECT"].includes(tagName));
+      if (editable || editingStudyCard || event.metaKey || event.ctrlKey || event.altKey || busyRef.current) return;
+
+      if ((event.key === "ArrowRight" || event.key === " ") && !card && total > 0) {
+        event.preventDefault();
+        if (studyMode === "grind" && grindMessage.startsWith("死学完成")) return;
+        if (studyMode === "grind") startGrindSession();
+        else startSession();
+        return;
+      }
+
+      if (!card) return;
+
+      if (event.key === "ArrowRight" || event.key === " ") {
+        if (card.card_type !== "basic" && card.card_type !== "word") return;
+        event.preventDefault();
+        setFlipped((value) => !value);
+        return;
+      }
+
+      if (event.key === "ArrowLeft") {
+        event.preventDefault();
+        undo();
+        return;
+      }
+
+      if (!showManualRatings) return;
+      if (event.key === "<") {
+        event.preventDefault();
+        rate("unknown");
+        return;
+      }
+      if (event.key === ">") {
+        event.preventDefault();
+        rate("fuzzy");
+        return;
+      }
+      if (event.key === "?") {
+        event.preventDefault();
+        rate("known");
+      }
+    };
+
+    window.addEventListener("keydown", onKeyDown);
+    return () => window.removeEventListener("keydown", onKeyDown);
+  }, [card?.id, card?.card_type, editingStudyCard, total, studyMode, grindMessage, showManualRatings, history.length, checked]);
 
   return (
     <section className={`stack study-view ${immersive ? "immersive" : ""}`}>
@@ -2500,10 +2559,7 @@ function StudyView(props: {
               total={total}
               completed={completed}
               onRestart={() => studyMode === "grind" ? startGrindSession() : startSession()}
-              onRest={studyMode === "grind" ? () => {
-                resetSession();
-                setGrindMessage("已休息，准备好后再开始死学。");
-              } : undefined}
+              onRest={studyMode === "grind" ? restFromGrind : undefined}
               restartLabel={studyMode === "grind" ? "继续下一组" : "再来一轮"}
               busy={busy === "session"}
             />
@@ -2714,7 +2770,6 @@ function RatingCelebration(props: { feedback: RatingFeedback }) {
       <span className="rating-celebration-badge">
         <RatingIcon rating={props.feedback.rating} />
         <strong>{props.feedback.title}</strong>
-        <small>{props.feedback.stageText} · {props.feedback.dueText}</small>
       </span>
       {Array.from({ length: 14 }, (_, index) => <i key={index} />)}
     </div>
@@ -2884,6 +2939,16 @@ function ImportView(props: { decks: Deck[]; selectedDeckId: number | null; onSel
   const [text, setText] = useState("card_type,front,back,option1,option2,option3,option4\nchoice,Which one means apple?,苹果,苹果,香蕉,橙子,葡萄\nblank,I eat [] every day.,apple,,,,");
   const [file, setFile] = useState<File | null>(null);
   const [importing, setImporting] = useState(false);
+  const [undoingBatchId, setUndoingBatchId] = useState("");
+  const [recentImports, setRecentImports] = useState<ImportBatch[]>([]);
+
+  async function loadRecentImports() {
+    setRecentImports(await api.recentImports());
+  }
+
+  useEffect(() => {
+    loadRecentImports().catch((error) => props.onError((error as Error).message));
+  }, []);
 
   async function submit(event: FormEvent) {
     event.preventDefault();
@@ -2896,6 +2961,7 @@ function ImportView(props: { decks: Deck[]; selectedDeckId: number | null; onSel
       else form.set("text", text);
       const result = await api.importCards(form);
       await props.onImported(`导入 ${result.imported} 张，跳过 ${result.skipped} 行`);
+      await loadRecentImports();
     } catch (error) {
       props.onError((error as Error).message);
     } finally {
@@ -2903,10 +2969,24 @@ function ImportView(props: { decks: Deck[]; selectedDeckId: number | null; onSel
     }
   }
 
+  async function undoImport(batch: ImportBatch) {
+    if (batch.undone_at || undoingBatchId) return;
+    setUndoingBatchId(batch.id);
+    try {
+      const result = await api.undoImport(batch.id);
+      await props.onImported(`已撤销最近导入，删除 ${result.deleted} 张卡片`);
+      await loadRecentImports();
+    } catch (error) {
+      props.onError((error as Error).message);
+    } finally {
+      setUndoingBatchId("");
+    }
+  }
+
   const templates = ["普通卡导入模板.xlsx", "单词卡导入模板.xlsx", "选择题卡导入模板.xlsx", "填空题卡导入模板.xlsx"];
 
   return (
-    <section className="panel">
+    <section className="panel import-panel">
       <form className="import-form" onSubmit={submit}>
         <label>目标卡组<select value={props.selectedDeckId ?? ""} onChange={(event) => props.onSelectDeck(Number(event.target.value))}><option value="" disabled>选择卡组</option>{props.decks.map((deck) => <option key={deck.id} value={deck.id}>{"　".repeat(Math.max(deck.depth - 1, 0))}{deck.name}</option>)}</select></label>
         <div className="template-links" aria-label="导入模板">
@@ -2917,6 +2997,33 @@ function ImportView(props: { decks: Deck[]; selectedDeckId: number | null; onSel
         <p className="hint">可自动识别题型：有选项列会导入为选择题，题干含 [] 或连续下划线会导入为填空题；也支持显式 card_type/type/卡片类型。</p>
         <button className="primary-button" disabled={importing || !props.selectedDeckId}><FileSpreadsheet />{importing ? "导入中" : "开始导入"}</button>
       </form>
+      <section className="recent-imports" aria-label="最近导入">
+        <div className="section-heading">
+          <div>
+            <p className="eyebrow">最近导入</p>
+            <h2>可撤销的导入批次</h2>
+          </div>
+          <button className="mini-button" title="刷新最近导入" type="button" onClick={() => loadRecentImports().catch((error) => props.onError((error as Error).message))}><RefreshCw /></button>
+        </div>
+        {recentImports.length === 0 ? (
+          <EmptyState text="暂无最近导入。" />
+        ) : (
+          <div className="recent-import-list">
+            {recentImports.map((batch) => (
+              <div className={`recent-import-row ${batch.undone_at ? "undone" : ""}`} key={batch.id}>
+                <div>
+                  <strong>{batch.deck_name}</strong>
+                  <span>{fullDateTime(batch.created_at)} · {batch.source || "导入"} · 导入 {batch.imported} 张，跳过 {batch.skipped} 行</span>
+                </div>
+                <span className="type-pill">{batch.undone_at ? "已撤销" : "可撤销"}</span>
+                <button className="primary-button secondary-button" type="button" disabled={Boolean(batch.undone_at) || Boolean(undoingBatchId)} onClick={() => undoImport(batch)}>
+                  <RotateCcw />{undoingBatchId === batch.id ? "撤销中" : "撤销"}
+                </button>
+              </div>
+            ))}
+          </div>
+        )}
+      </section>
     </section>
   );
 }
@@ -2967,6 +3074,7 @@ function AboutView(props: { syncStatus: SyncStatus | null }) {
       <div className="schedule-box"><h3>同步状态</h3><p>最近同步：{props.syncStatus ? fullDateTime(props.syncStatus.lastSyncAt) : "暂无"} · 数据更新：{props.syncStatus?.dataUpdatedAt ? fullDateTime(props.syncStatus.dataUpdatedAt) : "暂无"}</p></div>
       <div className="schedule-box changelog-box">
         <h3>更新日志</h3>
+        <div className="changelog-row"><strong>0.4.9</strong><span>2026-07-08</span><p>学习页新增快捷键、居中评级特效、隐藏翻页滚动条和全屏休息退出；编辑字段样式统一，并为导入增加最近导入撤销。</p></div>
         <div className="changelog-row"><strong>0.4.8</strong><span>2026-07-08</span><p>修复学习页编辑字段提示、布局和显示范围；卡片详情改为全屏学习预览；沉浸学习隐藏备案号，并收敛网页加粗使用。</p></div>
         <div className="changelog-row"><strong>0.4.7</strong><span>2026-07-05</span><p>阿里云 CosyVoice 英式朗读支持英文短语类单词卡，不再因空格直接回退到浏览器朗读。</p></div>
         <div className="changelog-row"><strong>0.4.6</strong><span>2026-07-05</span><p>卡片类型改为编辑时手动选择并随卡片保存；单词卡不再依赖例句判定，导入空例句不会被其他列补填，助记展示不再加粗，反面会显示备注。</p></div>

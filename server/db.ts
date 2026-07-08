@@ -116,6 +116,20 @@ export async function initDb() {
       created_at TEXT NOT NULL,
       FOREIGN KEY(user_id) REFERENCES users(id) ON DELETE CASCADE
     );
+
+    CREATE TABLE IF NOT EXISTS import_batches (
+      id TEXT PRIMARY KEY,
+      user_id INTEGER NOT NULL,
+      deck_id INTEGER NOT NULL,
+      imported INTEGER DEFAULT 0,
+      skipped INTEGER DEFAULT 0,
+      source TEXT DEFAULT '',
+      card_ids TEXT DEFAULT '[]',
+      created_at TEXT NOT NULL,
+      undone_at TEXT DEFAULT '',
+      FOREIGN KEY(user_id) REFERENCES users(id) ON DELETE CASCADE,
+      FOREIGN KEY(deck_id) REFERENCES decks(id) ON DELETE CASCADE
+    );
   `);
 
   const deckColumns = all<{ name: string }>("PRAGMA table_info(decks)").map((column) => column.name);
