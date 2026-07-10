@@ -1002,7 +1002,7 @@ export default function App() {
     window.speechSynthesis.speak(utterance);
   }
 
-  async function speak(text: string, language?: string) {
+  async function speak(text: string, language?: string, fallback?: string) {
     const speechLanguage = normalizeSpeechLanguage(language ?? selectedDeck?.language ?? settings.voiceLanguage);
     speechAudioRef.current?.pause();
     speechAudioRef.current = null;
@@ -1012,7 +1012,7 @@ export default function App() {
       return;
     }
     try {
-      const blob = await api.synthesizeSpeech({ text, language: speechLanguage });
+      const blob = await api.synthesizeSpeech({ text, language: speechLanguage, fallback });
       const url = URL.createObjectURL(blob);
       const audio = new Audio(url);
       speechAudioRef.current = audio;
@@ -1021,8 +1021,9 @@ export default function App() {
       await audio.play();
     } catch (error) {
       console.warn("英式音标发音不可用", error);
-      if (canBrowserSpeakText(text)) {
-        speakWithBrowser(text, speechLanguage);
+      const fallbackText = fallback || text;
+      if (canBrowserSpeakText(fallbackText)) {
+        speakWithBrowser(fallbackText, speechLanguage);
         return;
       }
       showToast((error as Error).message, "error");
@@ -1540,7 +1541,7 @@ function DeckView(props: {
   onDeleteCard: (id: number) => Promise<void>;
   onBatchCards: (cardIds: number[], action: "move" | "delete", deckId?: number) => Promise<void>;
   onToggleFavorite: (card: Card) => Promise<void>;
-  onSpeak: (text: string, language?: string) => void;
+  onSpeak: (text: string, language?: string, fallback?: string) => void;
 }) {
   const [deckName, setDeckName] = useState("");
   const [parentDeckId, setParentDeckId] = useState<number | null>(null);
@@ -1708,7 +1709,7 @@ function DeckView(props: {
                   <span className="word-card-title">{card.front}</span>
                   <span className="type-pill">{cardTypeLabels[card.card_type]}</span>
                   {isWordCard(card) && card.phonetic && <span className="phonetic">{card.phonetic}</span>}
-                  <button className="mini-button" title="发音" onClick={() => props.onSpeak(isWordCard(card) && card.phonetic ? card.phonetic : card.front)}><Volume2 /></button>
+                  <button className="mini-button" title="发音" onClick={() => props.onSpeak(isWordCard(card) && card.phonetic ? card.phonetic : card.front, undefined, card.front)}><Volume2 /></button>
                   <button className={`mini-button ${card.favorite ? "starred" : ""}`} title="收藏" disabled={busy === `favorite-${card.id}`} onClick={() => toggleFavorite(card)}><Star /></button>
                   <button className="mini-button" title="详情" onClick={() => setDetailCard(card)}><Eye /></button>
                   <button className="mini-button" title="编辑" onClick={() => { setEditingCard(card); scrollToPageTop(); }}><Edit3 /></button>
@@ -1900,7 +1901,7 @@ function StudyView(props: {
   onUndoAnswer: (card: Card, snapshot: ReviewSnapshot) => Promise<void>;
   onUndoPractice: (card: Card, snapshot: Pick<ReviewSnapshot, "dailyTaskPrevious">) => Promise<void>;
   onUpdateCard: (id: number, payload: CardPayload) => Promise<Card | null | undefined>;
-  onSpeak: (text: string, language?: string) => void;
+  onSpeak: (text: string, language?: string, fallback?: string) => void;
 }) {
   const [studyMode, setStudyMode] = useState<StudyMode>("review");
   const [sessionLimit, setSessionLimit] = useState(20);
@@ -1981,7 +1982,7 @@ function StudyView(props: {
     setEditingStudyCard(null);
     setCardMotion("entering");
     const timer = window.setTimeout(() => setCardMotion("idle"), 220);
-    if (props.autoSpeak && card && isWordCard(card)) props.onSpeak(card.front, card.language ?? props.selectedDeck?.language);
+    if (props.autoSpeak && card && isWordCard(card)) props.onSpeak(card.phonetic || card.front, card.language ?? props.selectedDeck?.language, card.front);
     return () => window.clearTimeout(timer);
   }, [card?.id, cardRevision, props.autoSpeak]);
 
@@ -2673,7 +2674,7 @@ function StudyView(props: {
               <button className="mini-button" title={immersive ? "退出沉浸学习" : "沉浸学习"} onClick={toggleImmersive}>{immersive ? <Minimize2 /> : <Maximize2 />}</button>
               <button className="mini-button" title="撤销上一张" disabled={history.length === 0 || Boolean(busy)} onClick={undo}><ArrowLeft /></button>
               <button className="mini-button" title="编辑当前卡片" onClick={editCurrentStudyCard}><Edit3 /></button>
-              <button className="mini-button" title="发音" onClick={() => props.onSpeak(isWordCard(card) && card.phonetic ? card.phonetic : card.front, card.language ?? props.selectedDeck?.language)}><Volume2 /></button>
+              <button className="mini-button" title="发音" onClick={() => props.onSpeak(isWordCard(card) && card.phonetic ? card.phonetic : card.front, card.language ?? props.selectedDeck?.language, card.front)}><Volume2 /></button>
             </div>
           </div>
           <div className="study-scroll" ref={studyScrollRef}>

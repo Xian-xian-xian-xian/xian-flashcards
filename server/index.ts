@@ -337,6 +337,15 @@ function normalizePronunciationText(value: unknown) {
   return text;
 }
 
+function normalizePronunciationFallback(value: unknown) {
+  const text = String(value ?? "")
+    .trim()
+    .replace(/[’‘]/g, "'")
+    .replace(/\s+/g, " ");
+  if (!text || text.length > 120 || /[\u0000-\u001f<>&"]/.test(text)) return "pronunciation";
+  return text;
+}
+
 function xmlEscape(value: string) {
   return value
     .replace(/&/g, "&amp;")
@@ -350,8 +359,8 @@ function pronunciationSsml(phoneme: string) {
   return `<speak><phoneme alphabet="ipa" ph="${xmlEscape(phoneme)}">pronunciation</phoneme></speak>`;
 }
 
-function aliyunPronunciationSsml(cmuPhonemes: string) {
-  return `<speak><phoneme alphabet="cmu" ph="${xmlEscape(cmuPhonemes)}">word</phoneme></speak>`;
+function aliyunPronunciationSsml(cmuPhonemes: string, fallback: string) {
+  return `<speak><phoneme alphabet="cmu" ph="${xmlEscape(cmuPhonemes)}">${xmlEscape(fallback)}</phoneme></speak>`;
 }
 
 type CmuToken = { phoneme: string; vowel?: boolean; schwa?: boolean };
@@ -556,19 +565,20 @@ function cacheKey(value: string) {
   return crypto.createHash("sha256").update(value).digest("hex").slice(0, 24);
 }
 
-function ttsCacheName(phoneme: string) {
+function ttsCacheName(phoneme: string, fallback = "") {
   const provider = ["aliyun", "amazon", "espeak"].includes(ttsProvider) ? ttsProvider : "espeak";
   const model = provider === "aliyun" ? aliyunTtsModel : provider === "amazon" ? amazonPollyEngine : "espeak-ng";
   const voice = provider === "aliyun" ? aliyunTtsVoice : provider === "amazon" ? amazonPollyVoice : espeakVoice;
   const safeModel = model.replace(/[^a-z0-9_-]/gi, "_");
   const safeVoice = voice.replace(/[^a-z0-9_-]/gi, "_");
   const extension = provider === "espeak" ? "wav" : "mp3";
-  return `${provider}-${safeModel}-${safeVoice}-${cacheKey(phoneme)}.${extension}`;
+  const key = provider === "aliyun" ? `${phoneme}\n${fallback}\ncmu-fallback-v2` : phoneme;
+  return `${provider}-${safeModel}-${safeVoice}-${cacheKey(key)}.${extension}`;
 }
 
-async function cachedTtsPath(phoneme: string) {
+async function cachedTtsPath(phoneme: string, fallback = "") {
   await fs.promises.mkdir(pronunciationCacheDir, { recursive: true });
-  const filePath = path.join(pronunciationCacheDir, ttsCacheName(phoneme));
+  const filePath = path.join(pronunciationCacheDir, ttsCacheName(phoneme, fallback));
   return fs.existsSync(filePath) ? filePath : null;
 }
 
@@ -624,9 +634,9 @@ function parseAliyunWsMessage(data: WebSocket.RawData) {
   }
 }
 
-async function synthesizeWithAliyun(phoneme: string) {
+async function synthesizeWithAliyun(phoneme: string, fallback: string) {
   if (!aliyunTtsApiKey) throw new Error("缺少 DASHSCOPE_API_KEY 或 ALIYUN_BAILIAN_API_KEY");
-  const ssml = aliyunPronunciationSsml(ipaToCmuPhonemes(phoneme));
+  const ssml = aliyunPronunciationSsml(ipaToCmuPhonemes(phoneme), fallback);
   const taskId = crypto.randomUUID();
   const chunks: Buffer[] = [];
 
@@ -684,7 +694,7 @@ async function synthesizeWithAliyun(phoneme: string) {
 
   if (!audio.length) throw new Error("阿里云语音合成未返回音频");
   await fs.promises.mkdir(pronunciationCacheDir, { recursive: true });
-  const filePath = path.join(pronunciationCacheDir, ttsCacheName(phoneme));
+  const filePath = path.join(pronunciationCacheDir, ttsCacheName(phoneme, fallback));
   await fs.promises.writeFile(filePath, audio);
   return filePath;
 }
@@ -753,9 +763,9 @@ async function synthesizeWithEspeak(phoneme: string) {
   return filePath;
 }
 
-async function synthesizePronunciation(phoneme: string) {
+async function synthesizePronunciation(phoneme: string, fallback: string) {
   if (ttsProvider === "espeak") return synthesizeWithEspeak(phoneme);
-  if (ttsProvider === "aliyun") return synthesizeWithAliyun(phoneme);
+  if (ttsProvider === "aliyun") return synthesizeWithAliyun(phoneme, fallback);
   if (ttsProvider !== "amazon") throw new Error(`未知 TTS_PROVIDER：${ttsProvider}`);
   return synthesizeWithAmazonPolly(phoneme);
 }
@@ -6387,6 +6397,7 @@ app.get("/api/templates/:name", (req, res) => {
 
 app.post("/api/tts", async (req, res) => {
   const phoneme = normalizePronunciationText(req.body.text);
+  const fallback = normalizePronunciationFallback(req.body.fallback);
   if (!phoneme) {
     res.status(400).json({ error: "音标不能为空" });
     return;
@@ -6397,8 +6408,8 @@ app.post("/api/tts", async (req, res) => {
   }
 
   try {
-    const cachedPath = await cachedTtsPath(phoneme);
-    const audioPath = cachedPath ?? await synthesizePronunciation(phoneme);
+    const cachedPath = await cachedTtsPath(phoneme, fallback);
+    const audioPath = cachedPath ?? await synthesizePronunciation(phoneme, fallback);
 
     res.setHeader("Content-Type", ttsContentType());
     res.setHeader("Cache-Control", "no-store");

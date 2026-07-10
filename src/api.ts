@@ -109,6 +109,6 @@ export const api = {
   recentImports: () => request<ImportBatch[]>("/api/import/recent"),
   undoImport: (batchId: string) =>
     request<{ ok: true; deleted: number }>(`/api/import/${encodeURIComponent(batchId)}/undo`, { method: "POST" }),
-  synthesizeSpeech: (payload: { text: string; language?: string }) => audioRequest("/api/tts", payload),
+  synthesizeSpeech: (payload: { text: string; language?: string; fallback?: string }) => audioRequest("/api/tts", payload),
   exportRecentLogs: () => download("/api/logs/recent?minutes=10")
 };
