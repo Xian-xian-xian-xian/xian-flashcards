@@ -59,6 +59,15 @@ ESPEAK_PITCH=50
 PRONUNCIATION_CACHE_DIR=runtime/pronunciations
 ```
 
+也可以切换到阿里云 CosyVoice SSML。应用内仍填写 IPA，后端会转换为 CMU 音标并发送 `<phoneme alphabet="cmu">`：
+
+```bash
+TTS_PROVIDER=aliyun
+DASHSCOPE_API_KEY=你的百炼APIKey
+ALIYUN_TTS_MODEL=cosyvoice-v2
+ALIYUN_TTS_VOICE=loongeric_v2
+```
+
 ## 发布到云端
 
 本地提交并推到 GitHub：

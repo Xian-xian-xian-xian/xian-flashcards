@@ -350,6 +350,126 @@ function pronunciationSsml(phoneme: string) {
   return `<speak><phoneme alphabet="ipa" ph="${xmlEscape(phoneme)}">pronunciation</phoneme></speak>`;
 }
 
+function aliyunPronunciationSsml(cmuPhonemes: string) {
+  return `<speak><phoneme alphabet="cmu" ph="${xmlEscape(cmuPhonemes)}">word</phoneme></speak>`;
+}
+
+type CmuToken = { phoneme: string; vowel?: boolean; schwa?: boolean };
+
+const ipaToCmuMap = new Map<string, CmuToken>([
+  ["tʃ", { phoneme: "CH" }],
+  ["dʒ", { phoneme: "JH" }],
+  ["eɪ", { phoneme: "EY", vowel: true }],
+  ["aɪ", { phoneme: "AY", vowel: true }],
+  ["ɔɪ", { phoneme: "OY", vowel: true }],
+  ["əʊ", { phoneme: "OW", vowel: true }],
+  ["oʊ", { phoneme: "OW", vowel: true }],
+  ["aʊ", { phoneme: "AW", vowel: true }],
+  ["ɪə", { phoneme: "IH R", vowel: true }],
+  ["eə", { phoneme: "EH R", vowel: true }],
+  ["ɛə", { phoneme: "EH R", vowel: true }],
+  ["ʊə", { phoneme: "UH R", vowel: true }],
+  ["ɑː", { phoneme: "AA", vowel: true }],
+  ["ɔː", { phoneme: "AO", vowel: true }],
+  ["ɜː", { phoneme: "ER", vowel: true }],
+  ["iː", { phoneme: "IY", vowel: true }],
+  ["uː", { phoneme: "UW", vowel: true }],
+  ["æ", { phoneme: "AE", vowel: true }],
+  ["ɑ", { phoneme: "AA", vowel: true }],
+  ["ɒ", { phoneme: "AA", vowel: true }],
+  ["ɔ", { phoneme: "AO", vowel: true }],
+  ["ʌ", { phoneme: "AH", vowel: true }],
+  ["ə", { phoneme: "AH", vowel: true, schwa: true }],
+  ["ɚ", { phoneme: "ER", vowel: true }],
+  ["ɝ", { phoneme: "ER", vowel: true }],
+  ["ɜ", { phoneme: "ER", vowel: true }],
+  ["ɪ", { phoneme: "IH", vowel: true }],
+  ["i", { phoneme: "IY", vowel: true }],
+  ["ʊ", { phoneme: "UH", vowel: true }],
+  ["u", { phoneme: "UW", vowel: true }],
+  ["ɛ", { phoneme: "EH", vowel: true }],
+  ["e", { phoneme: "EH", vowel: true }],
+  ["p", { phoneme: "P" }],
+  ["b", { phoneme: "B" }],
+  ["t", { phoneme: "T" }],
+  ["d", { phoneme: "D" }],
+  ["k", { phoneme: "K" }],
+  ["g", { phoneme: "G" }],
+  ["f", { phoneme: "F" }],
+  ["v", { phoneme: "V" }],
+  ["θ", { phoneme: "TH" }],
+  ["ð", { phoneme: "DH" }],
+  ["s", { phoneme: "S" }],
+  ["z", { phoneme: "Z" }],
+  ["ʃ", { phoneme: "SH" }],
+  ["ʒ", { phoneme: "ZH" }],
+  ["h", { phoneme: "HH" }],
+  ["m", { phoneme: "M" }],
+  ["n", { phoneme: "N" }],
+  ["ŋ", { phoneme: "NG" }],
+  ["l", { phoneme: "L" }],
+  ["r", { phoneme: "R" }],
+  ["j", { phoneme: "Y" }],
+  ["w", { phoneme: "W" }]
+]);
+
+function ipaToCmuPhonemes(ipa: string) {
+  const normalized = ipa
+    .normalize("NFC")
+    .replace(/[()]/g, "")
+    .replace(/[ˑ˞]/g, "")
+    .replace(/[ɡ]/g, "g");
+  const tokens: string[] = [];
+  let pendingStress: "1" | "2" | null = null;
+  let hasVowel = false;
+
+  for (let index = 0; index < normalized.length;) {
+    const mark = normalized[index];
+    if (mark === "ˈ") {
+      pendingStress = "1";
+      index += 1;
+      continue;
+    }
+    if (mark === "ˌ") {
+      pendingStress = "2";
+      index += 1;
+      continue;
+    }
+    if (mark === "." || mark === " " || mark === "ː") {
+      index += 1;
+      continue;
+    }
+
+    const three = normalized.slice(index, index + 3);
+    const two = normalized.slice(index, index + 2);
+    const one = normalized[index];
+    let token = ipaToCmuMap.get(three);
+    let length = 3;
+    if (!token) {
+      token = ipaToCmuMap.get(two);
+      length = 2;
+    }
+    if (!token) {
+      token = ipaToCmuMap.get(one);
+      length = 1;
+    }
+    if (!token) throw new Error(`暂不支持的音标符号：${one}`);
+
+    if (token.vowel) {
+      const stress = pendingStress ?? (token.schwa ? "0" : hasVowel ? "0" : "1");
+      tokens.push(...token.phoneme.split(" ").map((part) => `${part}${stress}`));
+      hasVowel = true;
+      pendingStress = null;
+    } else {
+      tokens.push(token.phoneme);
+    }
+    index += length;
+  }
+
+  if (!tokens.length) throw new Error("音标不能为空");
+  return tokens.join(" ");
+}
+
 const ipaToEspeakMap = new Map<string, string>([
   ["tʃ", "tS"],
   ["dʒ", "dZ"],
@@ -477,7 +597,7 @@ function aliyunTtsStartPayload() {
       rate: 1,
       pitch: 1,
       volume: 50,
-      enable_ssml: false
+      enable_ssml: true
     },
     input: {}
   };
@@ -504,8 +624,9 @@ function parseAliyunWsMessage(data: WebSocket.RawData) {
   }
 }
 
-async function synthesizeWithAliyun(word: string) {
+async function synthesizeWithAliyun(phoneme: string) {
   if (!aliyunTtsApiKey) throw new Error("缺少 DASHSCOPE_API_KEY 或 ALIYUN_BAILIAN_API_KEY");
+  const ssml = aliyunPronunciationSsml(ipaToCmuPhonemes(phoneme));
   const taskId = crypto.randomUUID();
   const chunks: Buffer[] = [];
 
@@ -538,7 +659,7 @@ async function synthesizeWithAliyun(word: string) {
       const message = parseAliyunWsMessage(data);
       const event = message?.header?.event;
       if (event === "task-started") {
-        send(aliyunTtsRequest("continue-task", taskId, { input: { text: word } }));
+        send(aliyunTtsRequest("continue-task", taskId, { input: { text: ssml } }));
         send(aliyunTtsRequest("finish-task", taskId, { input: {} }));
       } else if (event === "task-finished") {
         cleanup();
@@ -563,7 +684,7 @@ async function synthesizeWithAliyun(word: string) {
 
   if (!audio.length) throw new Error("阿里云语音合成未返回音频");
   await fs.promises.mkdir(pronunciationCacheDir, { recursive: true });
-  const filePath = path.join(pronunciationCacheDir, ttsCacheName(word));
+  const filePath = path.join(pronunciationCacheDir, ttsCacheName(phoneme));
   await fs.promises.writeFile(filePath, audio);
   return filePath;
 }
