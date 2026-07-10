@@ -31,8 +31,9 @@ export function ipaToCmuPhonemes(ipa: string) {
   let hasVowel = false;
   for (let index = 0; index < normalized.length;) {
     const mark = normalized[index];
-    if (mark === "ˈ" || mark === "ˌ") { pendingStress = mark === "ˈ" ? "1" : "2"; index += 1; continue; }
-    if (mark === "." || mark === " " || mark === "ː") { index += 1; continue; }
+    if (mark === "ˈ" || mark === "'") { pendingStress = "1"; index += 1; continue; }
+    if (mark === "ˌ" || mark === ",") { pendingStress = "2"; index += 1; continue; }
+    if (mark === "." || mark === " " || mark === "ː" || mark === ":") { index += 1; continue; }
     const token = ipaToCmuMap.get(normalized.slice(index, index + 3)) ?? ipaToCmuMap.get(normalized.slice(index, index + 2)) ?? ipaToCmuMap.get(mark);
     if (!token) throw new Error(`暂不支持的音标符号：${mark}`);
     const length = ipaToCmuMap.has(normalized.slice(index, index + 3)) ? 3 : ipaToCmuMap.has(normalized.slice(index, index + 2)) ? 2 : 1;

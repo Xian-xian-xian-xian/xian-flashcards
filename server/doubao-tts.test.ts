@@ -4,6 +4,7 @@ import { ipaToCmuPhonemes, parseDoubaoAudioChunks, pronunciationSsml } from "./d
 describe("豆包单词发音", () => {
   it("将英式 IPA 转为带重音的 CMU 音标并包裹 SSML", () => {
     expect(ipaToCmuPhonemes("kəmˈplaɪ")).toBe("K AH0 M P L AY1");
+    expect(ipaToCmuPhonemes("'kəmplaɪ")).toBe("K AH1 M P L AY0");
     expect(pronunciationSsml("comply", "kəmˈplaɪ")).toBe('<speak><phoneme alphabet="cmu" ph="K AH0 M P L AY1">comply</phoneme></speak>');
   });
 
