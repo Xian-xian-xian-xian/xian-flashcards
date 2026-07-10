@@ -1298,9 +1298,28 @@ textarea:focus {
 .study-actions {
   display: flex;
   align-items: center;
-  justify-content: flex-end;
+  justify-content: space-between;
   gap: 8px;
   flex-wrap: wrap;
+}
+
+.study-meta-left,
+.study-meta-right {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.study-meta-right {
+  justify-content: flex-end;
+  margin-left: auto;
+}
+
+.study-meta-left .type-pill:last-child {
+  max-width: min(280px, 32vw);
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 .text-tool {
@@ -3203,6 +3222,19 @@ textarea {
   .study-actions {
     justify-content: center;
     gap: 6px;
+  }
+
+  .study-meta-left,
+  .study-meta-right {
+    justify-content: center;
+  }
+
+  .study-meta-right {
+    margin-left: 0;
+  }
+
+  .study-meta-left .type-pill:last-child {
+    max-width: min(250px, 66vw);
   }
 
   .text-tool-popover {

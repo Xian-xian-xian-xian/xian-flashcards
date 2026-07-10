@@ -47,7 +47,7 @@ import Volume2 from "lucide-react/dist/esm/icons/volume-2";
 import XCircle from "lucide-react/dist/esm/icons/x-circle";
 import { CSSProperties, FormEvent, PointerEvent as ReactPointerEvent, ReactNode, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { api, type CardPayload, type ConflictError } from "./api";
-import type { Card, CardType, DailyTask, Deck, ImportBatch, ReviewRating, ReviewRemaining, ReviewSnapshot, Settings, Stats, SyncStatus, ThemeMode, User } from "./types";
+import type { Card, CardType, DailyTask, Deck, ImportBatch, ReviewRating, ReviewRemaining, ReviewSnapshot, Settings, Stats, SyncStatus, ThemeMode, TomatoState, User } from "./types";
 
 type View = "home" | "deck" | "study" | "import" | "settings" | "about";
 type SyncState = "idle" | "syncing" | "success" | "error" | "conflict";
@@ -63,7 +63,7 @@ declare global {
   }
 }
 
-const version = "0.4.11";
+const version = "0.5.1";
 const logExportPressCount = 6;
 const logExportKey = "a";
 const logExportResetMs = 1800;
@@ -93,6 +93,17 @@ const emptyDailyTask: DailyTask = {
 
 function normalizeAnswer(value: string) {
   return value.trim().toLowerCase().replace(/\s+/g, " ");
+}
+
+function formatPomodoroCountdown(state: TomatoState | null, now: number) {
+  const active = state?.activePomodoro;
+  if (!active) return "未开始";
+  const endAt = active.status === "running" && active.endAt ? new Date(active.endAt).getTime() : NaN;
+  const seconds = Number.isFinite(endAt)
+    ? Math.max(0, Math.ceil((endAt - now) / 1000))
+    : Math.max(0, Math.ceil(Number(active.remainingSeconds) || 0));
+  const minutes = Math.floor(seconds / 60);
+  return `${String(minutes).padStart(2, "0")}:${String(seconds % 60).padStart(2, "0")}`;
 }
 
 function normalizeSpeechLanguage(value?: string) {
@@ -1940,12 +1951,15 @@ function StudyView(props: {
   const [ratingResult, setRatingResult] = useState<RatingFeedback | null>(null);
   const [ratingNotice, setRatingNotice] = useState<RatingFeedback | null>(null);
   const [completionPlayed, setCompletionPlayed] = useState(false);
+  const [tomatoState, setTomatoState] = useState<TomatoState | null>(null);
+  const [pomodoroNow, setPomodoroNow] = useState(() => Date.now());
   const studyPanelRef = useRef<HTMLDivElement | null>(null);
   const cardFrameRef = useRef<HTMLElement | null>(null);
   const answerLayoutRef = useRef<HTMLDivElement | null>(null);
   const studyScrollRef = useRef<HTMLDivElement | null>(null);
   const busyRef = useRef(false);
   const card = queue[0];
+  const activePomodoro = tomatoState?.activePomodoro;
 
   useEffect(() => {
     if (studyMode === "grind") {
@@ -1959,6 +1973,26 @@ function StudyView(props: {
   useEffect(() => {
     loadRemaining().catch((error) => console.error(error));
   }, [props.selectedStudyDeckId]);
+
+  useEffect(() => {
+    let mounted = true;
+    const loadTomatoState = async () => {
+      try {
+        const payload = await api.tomatoState();
+        if (mounted) setTomatoState(payload.state);
+      } catch (error) {
+        console.error(error);
+      }
+    };
+    loadTomatoState();
+    const syncTimer = window.setInterval(loadTomatoState, 15_000);
+    const countdownTimer = window.setInterval(() => setPomodoroNow(Date.now()), 1_000);
+    return () => {
+      mounted = false;
+      window.clearInterval(syncTimer);
+      window.clearInterval(countdownTimer);
+    };
+  }, []);
 
   useEffect(() => {
     setFlipped(false);
@@ -2594,16 +2628,22 @@ function StudyView(props: {
               <span>{total}</span>
             </div>
             <div className="study-actions">
-              {studyMode === "grind" && <span className="type-pill">无尽模式</span>}
-              {studyMode === "grind" && <span className="type-pill">{props.selectedDeck?.name ?? "当前卡组"}</span>}
-              {studyMode === "grind" && <span className="type-pill">第 {grindGroupNumber} 组</span>}
-              {studyMode === "grind" && <span className="type-pill">目标 {grindGroupSize} · 已加入 {sessionCards.length}</span>}
-              <span className="type-pill">{cardTypeLabels[card.card_type]}</span>
-              <span className="type-pill study-schedule-pill" title={`下次复习：${fullDateTime(card.due_at)}（${dueText(card.due_at)}）`}>{studyScheduleText(card)}</span>
-              <span className="type-pill">待掌握 {queue.length}</span>
-              <span className="type-pill">新学剩余 {remaining.newRemaining}</span>
-              <span className="type-pill">复习剩余 {remaining.reviewRemaining}</span>
-              <TextToolButton icon={<SlidersHorizontal />} title="学习字号" active={activeTextTool === "scale"} onClick={() => setActiveTextTool(activeTextTool === "scale" ? null : "scale")}>
+              <div className="study-meta-left" aria-label="当前番茄钟">
+                <span className="type-pill">番茄钟 {formatPomodoroCountdown(tomatoState, pomodoroNow)}</span>
+                <span className="type-pill">第 {activePomodoro?.no ?? "—"} 个番茄</span>
+                <span className="type-pill" title={activePomodoro?.taskGoal || "当前未设置任务"}>任务 {activePomodoro?.taskGoal || "未设置"}</span>
+              </div>
+              <div className="study-meta-right">
+                {studyMode === "grind" && <span className="type-pill">无尽模式</span>}
+                {studyMode === "grind" && <span className="type-pill">{props.selectedDeck?.name ?? "当前卡组"}</span>}
+                {studyMode === "grind" && <span className="type-pill">第 {grindGroupNumber} 组</span>}
+                {studyMode === "grind" && <span className="type-pill">目标 {grindGroupSize} · 已加入 {sessionCards.length}</span>}
+                <span className="type-pill">{cardTypeLabels[card.card_type]}</span>
+                <span className="type-pill study-schedule-pill" title={`下次复习：${fullDateTime(card.due_at)}（${dueText(card.due_at)}）`}>{studyScheduleText(card)}</span>
+                <span className="type-pill">待掌握 {queue.length}</span>
+                <span className="type-pill">新学剩余 {remaining.newRemaining}</span>
+                <span className="type-pill">复习剩余 {remaining.reviewRemaining}</span>
+                <TextToolButton icon={<SlidersHorizontal />} title="学习字号" active={activeTextTool === "scale"} onClick={() => setActiveTextTool(activeTextTool === "scale" ? null : "scale")}>
                 {activeTextTool === "scale" && (
                   <div className="text-tool-popover">
                     {[0.85, 1, 1.15, 1.25, 1.35].map((value) => (
@@ -2611,8 +2651,8 @@ function StudyView(props: {
                     ))}
                   </div>
                 )}
-              </TextToolButton>
-              <TextToolButton icon={<MoreHorizontal />} title="学习行距" active={activeTextTool === "lineHeight"} onClick={() => setActiveTextTool(activeTextTool === "lineHeight" ? null : "lineHeight")}>
+                </TextToolButton>
+                <TextToolButton icon={<MoreHorizontal />} title="学习行距" active={activeTextTool === "lineHeight"} onClick={() => setActiveTextTool(activeTextTool === "lineHeight" ? null : "lineHeight")}>
                 {activeTextTool === "lineHeight" && (
                   <div className="text-tool-popover compact">
                     {[1.2, 1.4, 1.5, 1.6, 1.8, 2].map((value) => (
@@ -2620,16 +2660,16 @@ function StudyView(props: {
                     ))}
                   </div>
                 )}
-              </TextToolButton>
-              <TextToolButton icon={props.studyTextAlign === "left" ? <AlignLeft /> : <AlignCenter />} title="学习文本对齐" active={activeTextTool === "align"} onClick={() => setActiveTextTool(activeTextTool === "align" ? null : "align")}>
+                </TextToolButton>
+                <TextToolButton icon={props.studyTextAlign === "left" ? <AlignLeft /> : <AlignCenter />} title="学习文本对齐" active={activeTextTool === "align"} onClick={() => setActiveTextTool(activeTextTool === "align" ? null : "align")}>
                 {activeTextTool === "align" && (
                   <div className="text-tool-popover compact">
                     <button className={props.studyTextAlign === "left" ? "active" : ""} onClick={() => saveTextAlign("left")}><AlignLeft />左对齐</button>
                     <button className={props.studyTextAlign === "center" ? "active" : ""} onClick={() => saveTextAlign("center")}><AlignCenter />居中</button>
                   </div>
                 )}
-              </TextToolButton>
-              <TextToolButton icon={props.studyChoiceLayout === "one" ? <Rows2 /> : <Columns2 />} title="列数" active={activeTextTool === "choiceLayout"} onClick={() => setActiveTextTool(activeTextTool === "choiceLayout" ? null : "choiceLayout")}>
+                </TextToolButton>
+                <TextToolButton icon={props.studyChoiceLayout === "one" ? <Rows2 /> : <Columns2 />} title="列数" active={activeTextTool === "choiceLayout"} onClick={() => setActiveTextTool(activeTextTool === "choiceLayout" ? null : "choiceLayout")}>
                 {activeTextTool === "choiceLayout" && (
                   <div className="text-tool-popover compact">
                     <button className={props.studyChoiceLayout === "auto" ? "active" : ""} onClick={() => saveChoiceLayout("auto")}><SlidersHorizontal />自动</button>
@@ -2637,8 +2677,8 @@ function StudyView(props: {
                     <button className={props.studyChoiceLayout === "two" ? "active" : ""} onClick={() => saveChoiceLayout("two")}><Columns2 />两列</button>
                   </div>
                 )}
-              </TextToolButton>
-              <TextToolButton icon={<Type />} title="学习字体" active={activeTextTool === "font"} onClick={() => setActiveTextTool(activeTextTool === "font" ? null : "font")}>
+                </TextToolButton>
+                <TextToolButton icon={<Type />} title="学习字体" active={activeTextTool === "font"} onClick={() => setActiveTextTool(activeTextTool === "font" ? null : "font")}>
                 {activeTextTool === "font" && (
                   <div className="text-tool-popover font-popover">
                     {studyFontOptions.map((option) => (
@@ -2651,19 +2691,20 @@ function StudyView(props: {
                     ))}
                   </div>
                 )}
-              </TextToolButton>
-              <button
+                </TextToolButton>
+                <button
                 className={`mini-button ${showReferenceDock ? "active" : ""}`}
                 title={answerDockOpen ? "隐藏题目参考" : "显示题目参考"}
                 disabled={!canToggleReferenceDock}
                 onClick={() => setAnswerDockOpen((open) => !open)}
               >
                 {answerDockOpen ? <EyeOff /> : <Eye />}
-              </button>
-              <button className="mini-button" title={immersive ? "退出沉浸学习" : "沉浸学习"} onClick={toggleImmersive}>{immersive ? <Minimize2 /> : <Maximize2 />}</button>
-              <button className="mini-button" title="撤销上一张" disabled={history.length === 0 || Boolean(busy)} onClick={undo}><ArrowLeft /></button>
-              <button className="mini-button" title="编辑当前卡片" onClick={editCurrentStudyCard}><Edit3 /></button>
-              <button className="mini-button" title="发音" onClick={() => props.onSpeak(isWordCard(card) && card.phonetic ? card.phonetic : card.front, card.language ?? props.selectedDeck?.language, card.front)}><Volume2 /></button>
+                </button>
+                <button className="mini-button" title={immersive ? "退出沉浸学习" : "沉浸学习"} onClick={toggleImmersive}>{immersive ? <Minimize2 /> : <Maximize2 />}</button>
+                <button className="mini-button" title="撤销上一张" disabled={history.length === 0 || Boolean(busy)} onClick={undo}><ArrowLeft /></button>
+                <button className="mini-button" title="编辑当前卡片" onClick={editCurrentStudyCard}><Edit3 /></button>
+                <button className="mini-button" title="发音" onClick={() => props.onSpeak(isWordCard(card) && card.phonetic ? card.phonetic : card.front, card.language ?? props.selectedDeck?.language, card.front)}><Volume2 /></button>
+              </div>
             </div>
           </div>
           <div className="study-scroll" ref={studyScrollRef}>

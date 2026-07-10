@@ -106,6 +106,19 @@ export type SyncStatus = {
   dataUpdatedAt: string;
 };
 
+export type ActivePomodoro = {
+  no?: number;
+  taskGoal?: string;
+  remainingSeconds?: number;
+  status?: "running" | "paused" | "awaitingSubmission";
+  phase?: "focus" | "break" | "complete";
+  endAt?: string | null;
+};
+
+export type TomatoState = {
+  activePomodoro?: ActivePomodoro | null;
+};
+
 export type ImportBatch = {
   id: string;
   deck_id: number;

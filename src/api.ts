@@ -1,4 +1,4 @@
-import type { Card, DailyTask, Deck, ImportBatch, ReviewRating, ReviewRemaining, ReviewSnapshot, Settings, Stats, SyncStatus, User } from "./types";
+import type { Card, DailyTask, Deck, ImportBatch, ReviewRating, ReviewRemaining, ReviewSnapshot, Settings, Stats, SyncStatus, TomatoState, User } from "./types";
 
 export type CardPayload = {
   card_type?: Card["card_type"];
@@ -104,6 +104,7 @@ export const api = {
   saveDailyTaskSettings: (payload: { dailyWordGoal: number }) =>
     request<{ ok: true }>("/api/daily-task/settings", { method: "PUT", body: JSON.stringify(payload) }),
   syncStatus: () => request<SyncStatus>("/api/sync/status"),
+  tomatoState: () => request<{ state: TomatoState | null }>("/api/tomatoes/state"),
   importCards: (form: FormData) =>
     request<{ imported: number; skipped: number; batchId: string; createdAt: string }>("/api/import", { method: "POST", body: form }),
   recentImports: () => request<ImportBatch[]>("/api/import/recent"),
