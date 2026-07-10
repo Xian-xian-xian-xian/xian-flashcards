@@ -21,7 +21,7 @@ SSH 登录服务器后执行：
 
 ```bash
 sudo apt update
-sudo apt install -y curl git nginx espeak-ng
+sudo apt install -y curl git nginx
 curl -fsSL https://deb.nodesource.com/setup_22.x | sudo -E bash -
 sudo apt install -y nodejs
 sudo npm install -g pnpm pm2

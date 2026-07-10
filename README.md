@@ -42,30 +42,13 @@ pnpm remote
 PORT=8080 pnpm start:remote
 ```
 
-英语音标发音默认使用服务器本地 `espeak-ng` 英式英语，生成结果会缓存到 `runtime/pronunciations`。服务器需要安装系统包：
+英语音标发音使用阿里云 CosyVoice SSML。应用内填写 IPA，后端会转换为 CMU 音标并发送 `<phoneme alphabet="cmu">`；生成结果会缓存到 `runtime/pronunciations`，同一音标和单词第二次会直接读取服务器缓存。
 
 ```bash
-sudo apt install -y espeak-ng
-```
-
-可选配置：
-
-```bash
-TTS_PROVIDER=espeak
-ESPEAK_VOICE=en-gb
-ESPEAK_SPEED=150
-ESPEAK_AMPLITUDE=120
-ESPEAK_PITCH=50
-PRONUNCIATION_CACHE_DIR=runtime/pronunciations
-```
-
-也可以切换到阿里云 CosyVoice SSML。应用内仍填写 IPA，后端会转换为 CMU 音标并发送 `<phoneme alphabet="cmu">`：
-
-```bash
-TTS_PROVIDER=aliyun
 DASHSCOPE_API_KEY=你的百炼APIKey
 ALIYUN_TTS_MODEL=cosyvoice-v2
 ALIYUN_TTS_VOICE=loongeric_v2
+PRONUNCIATION_CACHE_DIR=runtime/pronunciations
 ```
 
 ## 发布到云端
@@ -101,7 +84,7 @@ curl https://card.beyour.top/api/health
 - 卡片支持创建、搜索、收藏、编辑、删除。
 - CSV、TSV、XLSX 或粘贴表格批量导入，并提供普通卡、单词卡、选择题卡、填空题卡模板。
 - 学习页按卡片类型自动显示闪记卡、选择题或填空题，并支持沉浸式学习和学习字号调整。
-- 浏览器 `speechSynthesis` 手动发音，学习页自动发音可在设置中开启或关闭。
+- 阿里云 SSML 音标发音，学习页自动发音可在设置中开启或关闭。
 - 严格固定艾宾浩斯间隔：5 分钟、30 分钟、12 小时、1 天、2 天、4 天、7 天、15 天、30 天、90 天。
 - 认识 / 模糊 / 不认识反馈：
   - 认识：进入下一阶段。

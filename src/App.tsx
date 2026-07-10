@@ -100,10 +100,6 @@ function normalizeSpeechLanguage(value?: string) {
   return language || "en-GB";
 }
 
-function canBrowserSpeakText(value: string) {
-  return /^[a-zA-Z\s'-]+$/.test(value.trim());
-}
-
 function optionKey(value: string) {
   const normalized = normalizeAnswer(value);
   const match = normalized.match(/^([a-h])(?:[\s.)、:：-]+|$)/i);
@@ -792,6 +788,7 @@ export default function App() {
   const [pending, setPending] = useState<Record<string, boolean>>({});
   const [conflict, setConflict] = useState<{ id: number; payload: CardPayload; serverCard: Card } | null>(null);
   const speechAudioRef = useRef<HTMLAudioElement | null>(null);
+  const speechRequestRef = useRef(0);
 
   const rootDecks = useMemo(() => decks.filter((deck) => deck.depth === 1), [decks]);
   const selectedDeck = decks.find((deck) => deck.id === selectedDeckId) ?? decks[0];
@@ -994,25 +991,19 @@ export default function App() {
     return () => window.clearTimeout(timer);
   }, [dueCards.length, settings.notifications, studyDeck?.name]);
 
-  function speakWithBrowser(text: string, language?: string) {
-    window.speechSynthesis.cancel();
-    const utterance = new SpeechSynthesisUtterance(text);
-    utterance.lang = normalizeSpeechLanguage(language ?? selectedDeck?.language ?? settings.voiceLanguage);
-    utterance.rate = 0.9;
-    window.speechSynthesis.speak(utterance);
-  }
-
   async function speak(text: string, language?: string, fallback?: string) {
+    const requestId = speechRequestRef.current + 1;
+    speechRequestRef.current = requestId;
     const speechLanguage = normalizeSpeechLanguage(language ?? selectedDeck?.language ?? settings.voiceLanguage);
     speechAudioRef.current?.pause();
     speechAudioRef.current = null;
-    window.speechSynthesis.cancel();
     if (!speechLanguage.toLowerCase().startsWith("en")) {
-      speakWithBrowser(text, speechLanguage);
+      showToast("音标发音当前仅支持英语", "error");
       return;
     }
     try {
       const blob = await api.synthesizeSpeech({ text, language: speechLanguage, fallback });
+      if (speechRequestRef.current !== requestId) return;
       const url = URL.createObjectURL(blob);
       const audio = new Audio(url);
       speechAudioRef.current = audio;
@@ -1020,12 +1011,8 @@ export default function App() {
       audio.addEventListener("error", () => URL.revokeObjectURL(url), { once: true });
       await audio.play();
     } catch (error) {
+      if (speechRequestRef.current !== requestId) return;
       console.warn("英式音标发音不可用", error);
-      const fallbackText = fallback || text;
-      if (canBrowserSpeakText(fallbackText)) {
-        speakWithBrowser(fallbackText, speechLanguage);
-        return;
-      }
       showToast((error as Error).message, "error");
     }
   }
