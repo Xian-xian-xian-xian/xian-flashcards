@@ -14,6 +14,8 @@ Do not overuse bold text in the web UI. Use bold only for important hierarchy, s
 
 ## ECS Deploy
 
+每次完成代码或配置修改后，除提交并推送 GitHub 外，必须部署到 ECS，并在部署完成后验证健康检查；不得只完成 GitHub 推送就报告任务完成。
+
 Do not use the retired server IP as a public entry. Current production entry points are:
 
 - Flashcards: `https://card.beyour.top/`
