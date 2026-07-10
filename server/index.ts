@@ -418,17 +418,17 @@ function ipaToCmuPhonemes(ipa: string) {
 
   for (let index = 0; index < normalized.length;) {
     const mark = normalized[index];
-    if (mark === "ˈ") {
+    if (mark === "ˈ" || mark === "'") {
       pendingStress = "1";
       index += 1;
       continue;
     }
-    if (mark === "ˌ") {
+    if (mark === "ˌ" || mark === ",") {
       pendingStress = "2";
       index += 1;
       continue;
     }
-    if (mark === "." || mark === " " || mark === "ː") {
+    if (mark === "." || mark === " " || mark === "ː" || mark === ":") {
       index += 1;
       continue;
     }
