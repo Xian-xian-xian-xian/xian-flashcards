@@ -63,7 +63,7 @@ declare global {
   }
 }
 
-const version = "0.5.4";
+const version = "0.5.5";
 const logExportPressCount = 6;
 const logExportKey = "a";
 const logExportResetMs = 1800;
@@ -2647,8 +2647,7 @@ function StudyView(props: {
                   <span className="type-pill">番茄数量 {activePomodoro?.no ?? "—"}</span>
                   <span className="type-pill" title={activePomodoro?.taskGoal || "当前未设置任务"}>任务 {activePomodoro?.taskGoal || "未设置"}</span>
                   <svg className="pomodoro-progress-ring" viewBox="0 0 100 30" preserveAspectRatio="none" aria-hidden="true">
-                    <rect className="pomodoro-progress-track" x="1" y="1" width="98" height="28" rx="5" pathLength="100" />
-                    <rect className="pomodoro-progress-value" x="1" y="1" width="98" height="28" rx="5" pathLength="100" />
+                    <rect className="pomodoro-progress-value" x="0" y="0" width="100" height="30" pathLength="100" />
                   </svg>
                 </div>
                 <span className="type-pill">{cardTypeLabels[card.card_type]}</span>

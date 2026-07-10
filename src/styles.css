@@ -1322,7 +1322,7 @@ textarea:focus {
   align-items: center;
   flex: 0 0 auto;
   gap: 8px;
-  padding: 3px;
+  padding: 0;
 }
 
 .pomodoro-progress-ring {
@@ -1337,10 +1337,6 @@ textarea:focus {
   fill: none;
   stroke-width: 1.4;
   vector-effect: non-scaling-stroke;
-}
-
-.pomodoro-progress-track {
-  stroke: color-mix(in srgb, var(--primary), transparent 84%);
 }
 
 .pomodoro-progress-value {
