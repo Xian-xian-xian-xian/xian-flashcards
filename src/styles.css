@@ -141,6 +141,7 @@ body.resizing-answer-dock {
 }
 
 .tts-generate { white-space: nowrap; }
+.tts-actions { display: flex; flex-wrap: wrap; gap: 10px; justify-content: flex-end; }
 
 .tts-status { margin: 15px 0 0; color: var(--green); font-size: 14px; }
 .tts-status.error { color: var(--red); }
@@ -171,6 +172,7 @@ body.resizing-answer-dock {
   .tts-layout { grid-template-columns: 1fr; }
   .tts-textarea { min-height: 190px; }
   .tts-editor-footer { align-items: flex-start; flex-direction: column; }
+  .tts-actions { justify-content: flex-start; }
 }
 
 button,

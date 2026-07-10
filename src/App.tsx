@@ -1422,18 +1422,20 @@ function AliyunTtsView() {
 
   useEffect(() => () => audioRef.current?.pause(), []);
 
-  async function synthesize(event: FormEvent) {
+  async function synthesize(event: FormEvent, provider: "aliyun" | "mimo") {
     event.preventDefault();
     if (!text.trim()) {
       setError("请输入需要试听的文本");
       return;
     }
     setError("");
-    setStatus("正在生成语音…");
+    setStatus(`正在使用${provider === "aliyun" ? "阿里云 CosyVoice" : "小米 MiMo"}生成语音…`);
     setPlaying(true);
     audioRef.current?.pause();
     try {
-      const blob = await api.synthesizeAliyunSpeech({ text, model, voice, rate, pitch, volume });
+      const blob = provider === "aliyun"
+        ? await api.synthesizeAliyunSpeech({ text, model, voice, rate, pitch, volume })
+        : await api.synthesizeMimoSpeech({ text });
       const url = URL.createObjectURL(blob);
       const audio = new Audio(url);
       audioRef.current = audio;
@@ -1448,7 +1450,7 @@ function AliyunTtsView() {
         URL.revokeObjectURL(url);
       }, { once: true });
       await audio.play();
-      setStatus("正在播放");
+      setStatus(`正在播放${provider === "aliyun" ? "阿里云 CosyVoice" : "小米 MiMo"}语音`);
     } catch (requestError) {
       setPlaying(false);
       setStatus("");
@@ -1463,13 +1465,16 @@ function AliyunTtsView() {
         <h2>让文字开口说话</h2>
         <p>使用服务端已配置的阿里云百炼 API Key。仅登录后的闪记账号可以使用，密钥不会发送到浏览器。</p>
       </div>
-      <form className="tts-layout" onSubmit={synthesize}>
+      <form className="tts-layout" onSubmit={(event) => synthesize(event, "aliyun")}>
         <section className="tts-editor-card">
           <label className="tts-text-label">试听文本 <span>{text.length} / 2000</span></label>
           <textarea className="tts-textarea" value={text} maxLength={2000} onChange={(event) => setText(event.target.value)} placeholder="输入想要朗读的文字…" />
           <div className="tts-editor-footer">
             <span>支持中文、英文等多语种文本</span>
-            <button className="primary-button tts-generate" disabled={playing}><Volume2 />{playing ? "生成中…" : "生成并播放"}</button>
+            <div className="tts-actions">
+              <button className="primary-button tts-generate" disabled={playing}><Volume2 />{playing ? "生成中…" : "阿里云试听"}</button>
+              <button className="primary-button secondary-button tts-generate" type="button" disabled={playing} onClick={(event) => synthesize(event, "mimo")}><Volume2 />{playing ? "生成中…" : "小米 MiMo 试听"}</button>
+            </div>
           </div>
           {(status || error) && <p className={`tts-status ${error ? "error" : ""}`}>{error || status}</p>}
         </section>

@@ -415,6 +415,36 @@ async function synthesizeWithXiaomi(phoneme: string, fallback: string) {
   return Buffer.from(audioData.replace(/^data:audio\/\w+;base64,/, ""), "base64");
 }
 
+async function synthesizeMimoPreview(text: string) {
+  if (!xiaomiTtsApiKey) throw new Error("缺少 XIAOMI_MIMO_API_KEY");
+  const response = await fetch(xiaomiTtsUrl, {
+    method: "POST",
+    headers: { "Content-Type": "application/json", Authorization: `Bearer ${xiaomiTtsApiKey}` },
+    body: JSON.stringify({
+      model: xiaomiTtsModel,
+      modalities: ["text", "audio"],
+      audio: { voice: xiaomiTtsVoice, format: "wav" },
+      messages: [
+        { role: "user", content: "请将下一条 assistant 消息中的内容合成为语音。若其中包含 SSML，请按你支持的方式处理；不要补充解释或改写内容。" },
+        { role: "assistant", content: text }
+      ]
+    })
+  });
+  if (!response.ok) {
+    const body = await response.text().catch(() => "");
+    throw new Error(`小米 MiMo 语音合成失败：${response.status}${body ? ` ${body.slice(0, 300)}` : ""}`);
+  }
+  const result = await response.json() as { choices?: Array<{ message?: { audio?: unknown } }>; audio?: unknown; data?: unknown };
+  const audioData = parseXiaomiAudioData(result.choices?.[0]?.message?.audio ?? result.audio ?? result.data);
+  if (!audioData) throw new Error("小米 MiMo 语音合成未返回音频");
+  if (/^https?:\/\//i.test(audioData)) {
+    const audioResponse = await fetch(audioData);
+    if (!audioResponse.ok) throw new Error(`小米 MiMo 音频下载失败：${audioResponse.status}`);
+    return Buffer.from(await audioResponse.arrayBuffer());
+  }
+  return Buffer.from(audioData.replace(/^data:audio\/\w+;base64,/, ""), "base64");
+}
+
 function parseCookies(header: string | undefined) {
   return Object.fromEntries(
     (header ?? "")
@@ -6116,6 +6146,26 @@ app.post("/api/aliyun-tts", async (req, res) => {
     res.send(audio);
   } catch (error) {
     res.status(502).json({ error: (error as Error).message || "阿里云语音合成暂不可用" });
+  }
+});
+
+app.post("/api/mimo-tts", async (req, res) => {
+  const text = String(req.body?.text ?? "").trim();
+  if (!text) {
+    res.status(400).json({ error: "请输入需要试听的文本" });
+    return;
+  }
+  if (text.length > 2000) {
+    res.status(400).json({ error: "单次试听最多 2000 个字符" });
+    return;
+  }
+  try {
+    const audio = await synthesizeMimoPreview(text);
+    res.setHeader("Content-Type", "audio/wav");
+    res.setHeader("Cache-Control", "no-store");
+    res.send(audio);
+  } catch (error) {
+    res.status(502).json({ error: (error as Error).message || "小米 MiMo 语音合成暂不可用" });
   }
 });
 
