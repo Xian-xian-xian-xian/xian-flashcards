@@ -63,7 +63,7 @@ declare global {
   }
 }
 
-const version = "0.5.7";
+const version = "0.5.8";
 const logExportPressCount = 6;
 const logExportKey = "a";
 const logExportResetMs = 1800;
@@ -1965,7 +1965,9 @@ function StudyView(props: {
   const [moreToolsOpen, setMoreToolsOpen] = useState(false);
   const [tomatoState, setTomatoState] = useState<TomatoState | null>(null);
   const [pomodoroNow, setPomodoroNow] = useState(() => Date.now());
+  const [pomodoroRingSize, setPomodoroRingSize] = useState({ width: 0, height: 0 });
   const studyPanelRef = useRef<HTMLDivElement | null>(null);
+  const pomodoroMetaRef = useRef<HTMLDivElement | null>(null);
   const cardFrameRef = useRef<HTMLElement | null>(null);
   const answerLayoutRef = useRef<HTMLDivElement | null>(null);
   const studyScrollRef = useRef<HTMLDivElement | null>(null);
@@ -1973,6 +1975,10 @@ function StudyView(props: {
   const card = queue[0];
   const activePomodoro = tomatoState?.activePomodoro;
   const pomodoroProgress = activePomodoro ? 1 - pomodoroRemainingRatio(tomatoState, pomodoroNow) : 0;
+  const pomodoroRingWidth = Math.max(0, pomodoroRingSize.width - 2);
+  const pomodoroRingHeight = Math.max(0, pomodoroRingSize.height - 2);
+  const pomodoroRingRadius = Math.min(10, pomodoroRingWidth / 2, pomodoroRingHeight / 2);
+  const pomodoroRingPerimeter = Math.max(1, 2 * (pomodoroRingWidth + pomodoroRingHeight - 4 * pomodoroRingRadius) + 2 * Math.PI * pomodoroRingRadius);
 
   useEffect(() => {
     if (studyMode === "grind") {
@@ -1986,6 +1992,19 @@ function StudyView(props: {
   useEffect(() => {
     loadRemaining().catch((error) => console.error(error));
   }, [props.selectedStudyDeckId]);
+
+  useLayoutEffect(() => {
+    const node = pomodoroMetaRef.current;
+    if (!node) return;
+    const updateSize = () => {
+      const rect = node.getBoundingClientRect();
+      setPomodoroRingSize({ width: rect.width, height: rect.height });
+    };
+    updateSize();
+    const observer = new ResizeObserver(updateSize);
+    observer.observe(node);
+    return () => observer.disconnect();
+  }, [card?.id]);
 
   useEffect(() => {
     let mounted = true;
@@ -2642,20 +2661,20 @@ function StudyView(props: {
             </div>
             <div className="study-actions">
               <div className="study-meta-left" aria-label="当前番茄钟">
-                <div className="pomodoro-meta">
+                <div className="pomodoro-meta" ref={pomodoroMetaRef}>
                   <span className="type-pill">番茄钟 {formatPomodoroCountdown(tomatoState, pomodoroNow)}</span>
                   <span className="type-pill">番茄数量 {activePomodoro?.no ?? "—"}</span>
                   <span className="type-pill" title={activePomodoro?.taskGoal || "当前未设置任务"}>任务 {activePomodoro?.taskGoal || "未设置"}</span>
-                  <svg className="pomodoro-progress-ring" viewBox="0 0 100 30" preserveAspectRatio="none" aria-hidden="true">
+                  <svg className="pomodoro-progress-ring" viewBox={`0 0 ${pomodoroRingSize.width || 1} ${pomodoroRingSize.height || 1}`} preserveAspectRatio="none" aria-hidden="true">
                     <rect
                       className="pomodoro-progress-value"
-                      x="0.8"
-                      y="0.8"
-                      width="98.4"
-                      height="28.4"
-                      rx="5"
-                      pathLength="100"
-                      strokeDasharray={`${pomodoroProgress * 100} ${(1 - pomodoroProgress) * 100}`}
+                      x="1"
+                      y="1"
+                      width={pomodoroRingWidth}
+                      height={pomodoroRingHeight}
+                      rx={pomodoroRingRadius}
+                      strokeDasharray={`${pomodoroProgress * pomodoroRingPerimeter} ${pomodoroRingPerimeter + 1}`}
+                      opacity={pomodoroProgress > 0 ? 1 : 0}
                     />
                   </svg>
                 </div>
