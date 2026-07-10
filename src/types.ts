@@ -64,10 +64,9 @@ export type ReviewRemaining = {
 
 export type Settings = {
   theme: ThemeMode;
-  voiceLanguage: string;
   notifications: "on" | "off";
   autoSpeak: "on" | "off";
-  dailyNewGoal: number;
+  dailyWordGoal: number;
   studyTextScale: number;
   studyTextAlign: "center" | "left";
   studyChoiceLayout: "auto" | "one" | "two";
@@ -82,7 +81,8 @@ export type User = {
 
 export type DailyTask = {
   date: string;
-  daily_new_goal: number;
+  daily_word_goal: number;
+  progress_words: number;
   new_completed: number;
   new_mastered: number;
   review_total: number;

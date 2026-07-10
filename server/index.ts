@@ -4142,7 +4142,7 @@ function normalizeExistingCards(userId: number) {
 }
 
 function getDailyGoal(userId: number) {
-  return Math.max(0, Number(getUserSetting(userId, "dailyNewGoal", "20")) || 0);
+  return Math.max(1, Number(getUserSetting(userId, "dailyWordGoal", getUserSetting(userId, "dailyNewGoal", "20"))) || 20);
 }
 
 function deckRows(userId: number) {
@@ -4521,7 +4521,8 @@ function dailyTaskSummary(userId: number) {
     : [];
   const reviewCompleted = reviewRows.filter((row) => sameShanghaiDay(String(row.updated_at), date)).length;
   const newCompleted = newIds.length;
-  const completed = newMasteredIds.length >= Number(task.daily_new_goal) && reviewCompleted >= reviewIds.length;
+  const progressWords = reviewCompleted + newCompleted * 5;
+  const completed = progressWords >= Math.max(1, Number(task.daily_new_goal));
   if (completed && !task.completed_at) {
     const now = nowIso();
     run("UPDATE daily_tasks SET completed_at = ?, updated_at = ? WHERE user_id = ? AND date = ?", [now, now, userId, date]);
@@ -4545,7 +4546,8 @@ function dailyTaskSummary(userId: number) {
   }
   return {
     date,
-    daily_new_goal: Number(task.daily_new_goal),
+    daily_word_goal: Number(task.daily_new_goal),
+    progress_words: progressWords,
     new_completed: newCompleted,
     new_mastered: newMasteredIds.length,
     review_total: reviewIds.length,
@@ -6509,8 +6511,8 @@ app.get("/api/daily-task", (_req, res) => {
 
 app.put("/api/daily-task/settings", (req, res) => {
   const userId = currentUserId(res);
-  const goal = Math.max(0, Math.floor(Number(req.body.dailyNewGoal ?? 0)));
-  setUserSetting(userId, "dailyNewGoal", String(goal));
+  const goal = Math.max(1, Math.floor(Number(req.body.dailyWordGoal ?? req.body.dailyNewGoal ?? 20)));
+  setUserSetting(userId, "dailyWordGoal", String(goal));
   const task = ensureDailyTask(userId);
   const now = nowIso();
   run("UPDATE daily_tasks SET daily_new_goal = ?, updated_at = ? WHERE user_id = ? AND date = ?", [
@@ -6552,10 +6554,9 @@ app.get("/api/settings", (_req, res) => {
   const userId = currentUserId(res);
   res.json({
     theme: getUserSetting(userId, "theme", "system"),
-    voiceLanguage: normalizeVoiceLanguage(getUserSetting(userId, "voiceLanguage", "en-GB")),
     notifications: getUserSetting(userId, "notifications", "off"),
     autoSpeak: getUserSetting(userId, "autoSpeak", "off"),
-    dailyNewGoal: getDailyGoal(userId),
+    dailyWordGoal: getDailyGoal(userId),
     studyTextScale: clampStudyTextScale(getUserSetting(userId, "studyTextScale", "1")),
     studyTextAlign: getUserSetting(userId, "studyTextAlign", "center") === "left" ? "left" : "center",
     studyChoiceLayout: ["one", "two"].includes(getUserSetting(userId, "studyChoiceLayout", "auto")) ? getUserSetting(userId, "studyChoiceLayout", "auto") : "auto",
@@ -6566,7 +6567,7 @@ app.get("/api/settings", (_req, res) => {
 
 app.put("/api/settings", (req, res) => {
   const userId = currentUserId(res);
-  for (const key of ["theme", "voiceLanguage", "notifications", "autoSpeak", "dailyNewGoal", "studyTextScale", "studyTextAlign", "studyChoiceLayout", "studyLineHeight", "studyFontFamily"]) {
+  for (const key of ["theme", "notifications", "autoSpeak", "dailyWordGoal", "studyTextScale", "studyTextAlign", "studyChoiceLayout", "studyLineHeight", "studyFontFamily"]) {
     if (key === "studyTextScale" && (typeof req.body[key] === "string" || typeof req.body[key] === "number")) {
       setUserSetting(userId, key, String(clampStudyTextScale(req.body[key])));
       continue;
@@ -6587,12 +6588,8 @@ app.put("/api/settings", (req, res) => {
       setUserSetting(userId, key, req.body[key]);
       continue;
     }
-    if (key === "voiceLanguage" && typeof req.body[key] === "string") {
-      setUserSetting(userId, key, normalizeVoiceLanguage(req.body[key]));
-      continue;
-    }
     if (typeof req.body[key] === "string") setUserSetting(userId, key, req.body[key]);
-    if (key === "dailyNewGoal" && typeof req.body[key] === "number") setUserSetting(userId, key, String(req.body[key]));
+    if (key === "dailyWordGoal" && typeof req.body[key] === "number") setUserSetting(userId, key, String(Math.max(1, Math.floor(req.body[key]))));
   }
   res.json({ ok: true });
 });

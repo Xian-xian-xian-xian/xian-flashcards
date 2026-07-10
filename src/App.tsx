@@ -63,7 +63,7 @@ declare global {
   }
 }
 
-const version = "0.4.10";
+const version = "0.4.11";
 const logExportPressCount = 6;
 const logExportKey = "a";
 const logExportResetMs = 1800;
@@ -79,7 +79,8 @@ const cardTypeLabels: Record<CardType, string> = {
 
 const emptyDailyTask: DailyTask = {
   date: "",
-  daily_new_goal: 20,
+  daily_word_goal: 20,
+  progress_words: 0,
   new_completed: 0,
   new_mastered: 0,
   review_total: 0,
@@ -770,10 +771,9 @@ export default function App() {
   const [stats, setStats] = useState<Stats>({ total_cards: 0, mastered_cards: 0, due_cards: 0 });
   const [settings, setSettings] = useState<Settings>({
     theme: "system",
-    voiceLanguage: "en-GB",
     notifications: "off",
     autoSpeak: "off",
-    dailyNewGoal: 20,
+    dailyWordGoal: 20,
     studyTextScale: 1,
     studyTextAlign: "center",
     studyChoiceLayout: "auto",
@@ -994,7 +994,7 @@ export default function App() {
   async function speak(text: string, language?: string, fallback?: string) {
     const requestId = speechRequestRef.current + 1;
     speechRequestRef.current = requestId;
-    const speechLanguage = normalizeSpeechLanguage(language ?? selectedDeck?.language ?? settings.voiceLanguage);
+    const speechLanguage = normalizeSpeechLanguage(language ?? selectedDeck?.language ?? "en-GB");
     speechAudioRef.current?.pause();
     speechAudioRef.current = null;
     if (!speechLanguage.toLowerCase().startsWith("en")) {
@@ -1133,7 +1133,7 @@ export default function App() {
             onSelectDeck={setSelectedDeckId}
             onCreateDeck={async (name, parentId) => {
               try {
-                const result = await api.createDeck({ name, parentId, language: settings.voiceLanguage });
+                const result = await api.createDeck({ name, parentId, language: "en-GB" });
                 setSelectedDeckId(result.id);
                 await afterMutation();
               } catch (error) {
@@ -1281,7 +1281,7 @@ export default function App() {
                 setSettings(merged);
                 applyTheme(merged.theme);
                 try {
-                  if (next.dailyNewGoal !== undefined) await api.saveDailyTaskSettings({ dailyNewGoal: Number(next.dailyNewGoal) });
+                  if (next.dailyWordGoal !== undefined) await api.saveDailyTaskSettings({ dailyWordGoal: Number(next.dailyWordGoal) });
                   await api.saveSettings(next);
                   await afterMutation("设置已保存");
                 } catch (error) {
@@ -1434,10 +1434,9 @@ function HomeView(props: {
   onStudy: (id: number) => void;
 }) {
   const mastered = props.stats.total_cards ? Math.round((props.stats.mastered_cards / props.stats.total_cards) * 100) : 0;
-  const dailyTarget = Math.max(props.dailyTask.daily_new_goal + props.dailyTask.review_total, 1);
-  const dailyDone = Math.min(props.dailyTask.new_mastered, props.dailyTask.daily_new_goal) + Math.min(props.dailyTask.review_completed, props.dailyTask.review_total);
-  const dailyProgress = props.dailyTask.completed ? 100 : Math.round((dailyDone / dailyTarget) * 100);
-  const reviewMasterRate = props.dailyTask.review_total ? Math.round((props.dailyTask.review_mastered / props.dailyTask.review_total) * 100) : 0;
+  const dailyTarget = Math.max(props.dailyTask.daily_word_goal, 1);
+  const dailyDone = props.dailyTask.progress_words;
+  const dailyProgress = props.dailyTask.completed ? 100 : Math.min(100, Math.round((dailyDone / dailyTarget) * 100));
   return (
     <section className="stack">
       <div className={`hero-panel daily-hero ${props.dailyTask.completed ? "complete" : ""}`}>
@@ -1445,12 +1444,14 @@ function HomeView(props: {
         <div>
           <p className="eyebrow">今日打卡</p>
           <div className="streak-heading">
-            <h2>{props.dailyTask.completed ? "已完成" : `${props.dailyTask.new_mastered}/${props.dailyTask.daily_new_goal} 新学掌握`}</h2>
+            <h2>{props.dailyTask.completed ? "已完成" : `${dailyDone}/${dailyTarget} 单词`}</h2>
             <span className={`streak-badge ${props.dailyTask.completed ? "done" : ""}`}><CheckCircle2 />连续 {props.dailyTask.streak} 天</span>
           </div>
-          <p>新学接触 {props.dailyTask.new_completed} · 复习处理 {props.dailyTask.review_completed}/{props.dailyTask.review_total} · 掌握 {props.dailyTask.review_mastered} 张</p>
-          <div className="daily-progress" aria-label={`今日进度 ${dailyProgress}%`}>
-            <span style={{ width: `${dailyProgress}%` }} />
+          <p>复习 {props.dailyTask.review_completed} × 1 · 新学 {props.dailyTask.new_completed} × 5</p>
+          <div className="progress-line" aria-label={`今日进度 ${dailyProgress}%`} style={{ "--progress-ratio": String(dailyProgress / 100) } as CSSProperties}>
+            <span>{dailyDone}</span>
+            <div><i /></div>
+            <span>{dailyTarget}</span>
           </div>
         </div>
         <div className="daily-medal" aria-hidden="true">
@@ -1469,8 +1470,8 @@ function HomeView(props: {
       </div>
 
       <div className="task-strip">
-        <TaskItem icon={<Target />} label="每日新学" value={`${props.dailyTask.new_mastered}/${props.dailyTask.daily_new_goal} 掌握 · 接触 ${props.dailyTask.new_completed}`} done={props.dailyTask.new_mastered >= props.dailyTask.daily_new_goal} />
-        <TaskItem icon={<ListChecks />} label="既有复习" value={`${props.dailyTask.review_completed}/${props.dailyTask.review_total} 处理 · 掌握率 ${reviewMasterRate}%`} done={props.dailyTask.review_completed >= props.dailyTask.review_total} />
+        <TaskItem icon={<Target />} label="每日目标" value={`${dailyDone}/${dailyTarget} 单词`} done={props.dailyTask.completed} />
+        <TaskItem icon={<ListChecks />} label="今日学习" value={`复习 ${props.dailyTask.review_completed} × 1 · 新学 ${props.dailyTask.new_completed} × 5`} done={props.dailyTask.completed} />
         <TaskItem icon={<CheckCircle2 />} label="连续打卡" value={`${props.dailyTask.streak} 天`} done={props.dailyTask.completed} />
       </div>
 
@@ -1949,7 +1950,7 @@ function StudyView(props: {
   useEffect(() => {
     if (studyMode === "grind") {
       resetSession();
-      setGrindMessage("请选择卡组并点击开始死学。");
+      setGrindMessage("请选择卡组并点击开始无尽学习。");
       return;
     }
     startSession().catch((error) => console.error(error));
@@ -2118,7 +2119,7 @@ function StudyView(props: {
       setSessionCards(nextCards);
       setQueue(nextCards);
       setCompletionPlayed(false);
-      setGrindMessage(nextCards.length > 0 ? "死学模式已开始。" : "死学完成：当前卡组下暂无到期复习卡和新卡。");
+      setGrindMessage(nextCards.length > 0 ? "无尽模式已开始。" : "无尽模式完成：当前卡组下暂无到期复习卡和新卡。");
       await loadRemaining();
     } finally {
       busyRef.current = false;
@@ -2179,7 +2180,7 @@ function StudyView(props: {
           if (latestRemaining.reviewRemaining > 0 || latestRemaining.newRemaining > 0) {
             setGrindMessage("本组完成，可以继续下一组或休息一下。");
           } else {
-            setGrindMessage("死学完成：当前卡组下暂无到期复习卡和新卡。");
+            setGrindMessage("无尽模式完成：当前卡组下暂无到期复习卡和新卡。");
           }
         }
       }
@@ -2415,7 +2416,7 @@ function StudyView(props: {
       setImmersive(Boolean(document.fullscreenElement));
     }
     resetSession();
-    setGrindMessage("已休息，准备好后再开始死学。");
+    setGrindMessage("已休息，准备好后再开始无尽学习。");
   }
 
   function editCurrentStudyCard() {
@@ -2466,7 +2467,7 @@ function StudyView(props: {
 
       if ((event.key === "ArrowRight" || event.key === " ") && !card && total > 0) {
         event.preventDefault();
-        if (studyMode === "grind" && grindMessage.startsWith("死学完成")) return;
+        if (studyMode === "grind" && grindMessage.startsWith("无尽模式完成")) return;
         if (studyMode === "grind") startGrindSession();
         else startSession();
         return;
@@ -2530,7 +2531,7 @@ function StudyView(props: {
           <div className="mode-tabs compact-tabs">
             <button className={studyMode === "review" ? "active" : ""} onClick={() => setStudyMode("review")}>复习</button>
             <button className={studyMode === "new" ? "active" : ""} onClick={() => setStudyMode("new")}>新学</button>
-            <button className={studyMode === "grind" ? "active" : ""} onClick={() => setStudyMode("grind")}>死学模式</button>
+            <button className={studyMode === "grind" ? "active" : ""} onClick={() => setStudyMode("grind")}>无尽模式</button>
           </div>
           {studyMode === "grind" ? (
             <>
@@ -2538,7 +2539,7 @@ function StudyView(props: {
                 每组卡片数
                 <input type="number" min={1} max={100} value={grindGroupSize} onChange={(event) => setGrindGroupSize(clampGrindGroupSize(event.target.value))} />
               </label>
-              <button className="primary-button" disabled={busy === "session" || !props.selectedStudyDeckId} onClick={() => startGrindSession()}><Sparkles />{busy === "session" ? "载入中" : "开始死学"}</button>
+              <button className="primary-button" disabled={busy === "session" || !props.selectedStudyDeckId} onClick={() => startGrindSession()}><Sparkles />{busy === "session" ? "载入中" : "开始无尽学习"}</button>
             </>
           ) : (
             <>
@@ -2554,8 +2555,8 @@ function StudyView(props: {
           )}
         </div>
         {studyMode === "grind" && (
-          <div className="study-remaining" aria-label="死学模式状态">
-            <span>当前模式：死学模式</span>
+          <div className="study-remaining" aria-label="无尽模式状态">
+            <span>当前模式：无尽模式</span>
             <span>卡组：{props.selectedDeck?.name ?? "未选择"}</span>
             <span>第 {grindGroupNumber || 0} 组</span>
             <span>本组目标 {grindGroupSize}</span>
@@ -2566,8 +2567,8 @@ function StudyView(props: {
       </div>
 
       {!card ? total > 0 ? (
-        studyMode === "grind" && grindMessage.startsWith("死学完成")
-          ? <EmptyState text="死学完成：当前卡组下暂无到期复习卡和新卡。" />
+        studyMode === "grind" && grindMessage.startsWith("无尽模式完成")
+          ? <EmptyState text="无尽模式完成：当前卡组下暂无到期复习卡和新卡。" />
           : <StudyComplete
               total={total}
               completed={completed}
@@ -2576,7 +2577,7 @@ function StudyView(props: {
               restartLabel={studyMode === "grind" ? "继续下一组" : "再来一轮"}
               busy={busy === "session"}
             />
-      ) : <EmptyState text={studyMode === "grind" ? (props.selectedStudyDeckId ? "请选择开始死学。" : "请先选择一个卡组。") : studyMode === "new" ? "这个卡组暂无可新学卡片。" : "这个卡组暂无到期复习卡片。"} /> : (
+      ) : <EmptyState text={studyMode === "grind" ? (props.selectedStudyDeckId ? "请选择开始无尽学习。" : "请先选择一个卡组。") : studyMode === "new" ? "这个卡组暂无可新学卡片。" : "这个卡组暂无到期复习卡片。"} /> : (
         <div ref={studyPanelRef} key={`${card.id}-${cardRevision}`} className={`study-panel ${cardMotion} align-${props.studyTextAlign} ${checked === "right" ? "celebrating" : ""}`} style={studyStyle}>
           {checked === "right" && (
             <div className="answer-celebration" key={celebrationKey} aria-hidden="true">
@@ -2593,7 +2594,7 @@ function StudyView(props: {
               <span>{total}</span>
             </div>
             <div className="study-actions">
-              {studyMode === "grind" && <span className="type-pill">死学模式</span>}
+              {studyMode === "grind" && <span className="type-pill">无尽模式</span>}
               {studyMode === "grind" && <span className="type-pill">{props.selectedDeck?.name ?? "当前卡组"}</span>}
               {studyMode === "grind" && <span className="type-pill">第 {grindGroupNumber} 组</span>}
               {studyMode === "grind" && <span className="type-pill">目标 {grindGroupSize} · 已加入 {sessionCards.length}</span>}
@@ -3067,9 +3068,8 @@ function SettingsView(props: { settings: Settings; onThemeChange: (theme: ThemeM
   return (
     <form className="panel settings-panel" onSubmit={save}>
       <label>主题<select value={draft.theme} onChange={(event) => changeTheme(event.target.value as ThemeMode)}><option value="system">跟随系统</option><option value="light">浅色</option><option value="dark">暗黑</option></select></label>
-      <label>默认发音语言<select value={normalizeSpeechLanguage(draft.voiceLanguage)} onChange={(event) => updateDraft({ voiceLanguage: event.target.value })}><option value="en-GB">英语-英国 en-GB</option><option value="ja-JP">日语 ja-JP</option><option value="ko-KR">韩语 ko-KR</option><option value="fr-FR">法语 fr-FR</option><option value="de-DE">德语 de-DE</option></select></label>
       <label>自动发音<select value={draft.autoSpeak} onChange={(event) => updateDraft({ autoSpeak: event.target.value as Settings["autoSpeak"] })}><option value="off">关闭</option><option value="on">开启</option></select></label>
-      <label>每日新学目标<input type="number" min={0} value={draft.dailyNewGoal} onChange={(event) => updateDraft({ dailyNewGoal: Number(event.target.value) })} /></label>
+      <label>每日目标（单词）<input type="number" min={1} value={draft.dailyWordGoal} onChange={(event) => updateDraft({ dailyWordGoal: Number(event.target.value) })} /></label>
       <div className="settings-actions">
         <button className="primary-button" disabled={props.saving}><Save />{props.saving ? "保存中" : "保存设置"}</button>
         <button className="primary-button secondary-button" type="button" disabled={props.notifying} onClick={props.onNotify}><Bell />{props.notifying ? "授权中" : "开启浏览器通知"}</button>
@@ -3087,6 +3087,7 @@ function AboutView(props: { syncStatus: SyncStatus | null }) {
       <div className="schedule-box"><h3>同步状态</h3><p>最近同步：{props.syncStatus ? fullDateTime(props.syncStatus.lastSyncAt) : "暂无"} · 数据更新：{props.syncStatus?.dataUpdatedAt ? fullDateTime(props.syncStatus.dataUpdatedAt) : "暂无"}</p></div>
       <div className="schedule-box changelog-box">
         <h3>更新日志</h3>
+        <div className="changelog-row"><strong>0.4.11</strong><span>2026-07-10</span><p>死学模式更名为无尽模式；每日打卡改为词数目标，新学计 5、复习计 1，并使用学习页统一进度条。</p></div>
         <div className="changelog-row"><strong>0.4.10</strong><span>2026-07-10</span><p>学习字号现覆盖助记、备注、反馈和题目参考；死学休息可靠退出全屏，并彻底隐藏卡片翻页滚动条。</p></div>
         <div className="changelog-row"><strong>0.4.9</strong><span>2026-07-08</span><p>学习页新增快捷键、居中评级特效、隐藏翻页滚动条和全屏休息退出；编辑字段样式统一，并为导入增加最近导入撤销。</p></div>
         <div className="changelog-row"><strong>0.4.8</strong><span>2026-07-08</span><p>修复学习页编辑字段提示、布局和显示范围；卡片详情改为全屏学习预览；沉浸学习隐藏备案号，并收敛网页加粗使用。</p></div>
