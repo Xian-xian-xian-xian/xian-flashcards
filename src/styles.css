@@ -998,7 +998,7 @@ textarea:focus {
 .study-fixed-top {
   display: grid;
   gap: 12px;
-  padding: 0 2px 12px;
+  padding: 0 2px 6px;
 }
 
 .study-scroll {
