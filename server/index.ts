@@ -330,7 +330,7 @@ function cacheKey(value: string) {
 }
 
 function doubaoTtsCacheName(phoneme: string, fallback: string) {
-  return `doubao-${doubaoTtsResourceId}-${doubaoTtsVoice}-${cacheKey(`${phoneme}\n${fallback}\n${doubaoTtsPrompt}\nssml-cmu-v1`)}.mp3`;
+  return `doubao-${doubaoTtsResourceId}-${doubaoTtsVoice}-${cacheKey(`${phoneme}\n${fallback}\n${doubaoTtsPrompt}\nssml-cmudict-v2`)}.mp3`;
 }
 
 async function cachedDoubaoTtsPath(phoneme: string, fallback: string) {
