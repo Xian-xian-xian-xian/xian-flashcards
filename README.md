@@ -47,7 +47,7 @@ PORT=8080 pnpm start:remote
 ```bash
 DASHSCOPE_API_KEY=你的百炼APIKey
 ALIYUN_TTS_MODEL=cosyvoice-v2
-ALIYUN_TTS_VOICE=loongeric_v2
+ALIYUN_TTS_VOICE=longshu_v2
 PRONUNCIATION_CACHE_DIR=runtime/pronunciations
 ```
 
