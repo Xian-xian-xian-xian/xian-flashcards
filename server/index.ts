@@ -6061,6 +6061,7 @@ app.post("/api/aliyun-tts", async (req, res) => {
   const text = String(req.body?.text ?? "").trim();
   const model = String(req.body?.model ?? "cosyvoice-v3-flash").trim();
   const voice = String(req.body?.voice ?? "longanyang").trim();
+  const enableSsml = /^<speak(?:\s|>)/i.test(text);
   const numberInRange = (value: unknown, fallback: number, min: number, max: number) => {
     const parsed = Number(value);
     return Number.isFinite(parsed) ? Math.min(max, Math.max(min, parsed)) : fallback;
@@ -6090,6 +6091,7 @@ app.post("/api/aliyun-tts", async (req, res) => {
           voice,
           format: "mp3",
           sample_rate: 24000,
+          enable_ssml: enableSsml,
           rate: numberInRange(req.body?.rate, 1, 0.5, 2),
           pitch: numberInRange(req.body?.pitch, 1, 0.5, 2),
           volume: numberInRange(req.body?.volume, 50, 0, 100)
