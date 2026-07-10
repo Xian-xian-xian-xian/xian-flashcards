@@ -1322,29 +1322,33 @@ textarea:focus {
   align-items: center;
   flex: 0 0 auto;
   gap: 8px;
-  padding-bottom: 3px;
+  padding: 3px;
 }
 
-.pomodoro-progress-line {
-  position: absolute;
-  right: 0;
-  bottom: 0;
-  left: 0;
-  height: 2px;
-  overflow: hidden;
-  border-radius: 999px;
-  background: color-mix(in srgb, var(--primary), transparent 82%);
-}
-
-.pomodoro-progress-line::after {
+.pomodoro-progress-ring {
   position: absolute;
   inset: 0;
-  content: "";
-  border-radius: inherit;
-  background: var(--primary);
-  transform: scaleX(var(--pomodoro-remaining, 0));
-  transform-origin: left center;
-  transition: transform 900ms linear;
+  width: 100%;
+  height: 100%;
+  pointer-events: none;
+}
+
+.pomodoro-progress-ring rect {
+  fill: none;
+  stroke-width: 1.4;
+  vector-effect: non-scaling-stroke;
+}
+
+.pomodoro-progress-track {
+  stroke: color-mix(in srgb, var(--primary), transparent 84%);
+}
+
+.pomodoro-progress-value {
+  stroke: var(--primary);
+  stroke-dasharray: 100;
+  stroke-dashoffset: var(--pomodoro-offset, 100);
+  stroke-linecap: round;
+  transition: stroke-dashoffset 900ms linear;
 }
 
 .pomodoro-meta .type-pill:nth-child(3) {

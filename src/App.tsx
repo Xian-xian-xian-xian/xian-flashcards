@@ -63,7 +63,7 @@ declare global {
   }
 }
 
-const version = "0.5.3";
+const version = "0.5.4";
 const logExportPressCount = 6;
 const logExportKey = "a";
 const logExportResetMs = 1800;
@@ -1972,6 +1972,7 @@ function StudyView(props: {
   const busyRef = useRef(false);
   const card = queue[0];
   const activePomodoro = tomatoState?.activePomodoro;
+  const pomodoroRatio = pomodoroRemainingRatio(tomatoState, pomodoroNow);
 
   useEffect(() => {
     if (studyMode === "grind") {
@@ -2641,11 +2642,14 @@ function StudyView(props: {
             </div>
             <div className="study-actions">
               <div className="study-meta-left" aria-label="当前番茄钟">
-                <div className="pomodoro-meta" style={{ "--pomodoro-remaining": String(pomodoroRemainingRatio(tomatoState, pomodoroNow)) } as CSSProperties}>
+                <div className="pomodoro-meta" style={{ "--pomodoro-offset": String(100 * (1 - pomodoroRatio)) } as CSSProperties}>
                   <span className="type-pill">番茄钟 {formatPomodoroCountdown(tomatoState, pomodoroNow)}</span>
                   <span className="type-pill">番茄数量 {activePomodoro?.no ?? "—"}</span>
                   <span className="type-pill" title={activePomodoro?.taskGoal || "当前未设置任务"}>任务 {activePomodoro?.taskGoal || "未设置"}</span>
-                  <i className="pomodoro-progress-line" aria-hidden="true" />
+                  <svg className="pomodoro-progress-ring" viewBox="0 0 100 30" preserveAspectRatio="none" aria-hidden="true">
+                    <rect className="pomodoro-progress-track" x="1" y="1" width="98" height="28" rx="5" pathLength="100" />
+                    <rect className="pomodoro-progress-value" x="1" y="1" width="98" height="28" rx="5" pathLength="100" />
+                  </svg>
                 </div>
                 <span className="type-pill">{cardTypeLabels[card.card_type]}</span>
                 <span className="type-pill study-schedule-pill" title={`下次复习：${fullDateTime(card.due_at)}（${dueText(card.due_at)}）`}>{studyScheduleText(card)}</span>
