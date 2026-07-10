@@ -63,7 +63,7 @@ declare global {
   }
 }
 
-const version = "0.4.9";
+const version = "0.4.10";
 const logExportPressCount = 6;
 const logExportKey = "a";
 const logExportResetMs = 1800;
