@@ -330,7 +330,7 @@ function cacheKey(value: string) {
 }
 
 function doubaoTtsCacheName(phoneme: string, fallback: string) {
-  return `doubao-${doubaoTtsResourceId}-${doubaoTtsVoice}-${cacheKey(`${phoneme}\n${fallback}\n${doubaoTtsPrompt}\nssml-cmudict-v2`)}.mp3`;
+  return `doubao-${doubaoTtsResourceId}-${doubaoTtsVoice}-${cacheKey(`${phoneme}\n${fallback}\n${doubaoTtsPrompt}\nssml-british-ipa-v3`)}.mp3`;
 }
 
 async function cachedDoubaoTtsPath(phoneme: string, fallback: string) {
@@ -367,10 +367,12 @@ async function synthesizeWithDoubao(phoneme: string, fallback: string) {
         text: fallback,
         ssml,
         speaker: doubaoTtsVoice,
-        explicit_language: "en-gb",
-        context_texts: [doubaoTtsPrompt]
-      },
-      audio_params: { format: "mp3", sample_rate: 24000 }
+        audio_params: { format: "mp3", sample_rate: 24000 },
+        additions: JSON.stringify({
+          explicit_language: "en",
+          context_texts: [doubaoTtsPrompt]
+        })
+      }
     })
   });
   if (!response.ok) {

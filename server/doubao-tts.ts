@@ -1,5 +1,3 @@
-import { dictionary as cmuDictionary } from "cmu-pronouncing-dictionary";
-
 export const doubaoTtsEndpoint = "https://openspeech.bytedance.com/api/v3/tts/unidirectional";
 export const doubaoTtsResourceId = "seed-tts-2.0";
 export const doubaoTtsVoice = "zh_female_yingyujiaoxue_uranus_bigtts";
@@ -24,13 +22,6 @@ const ipaToCmuMap = new Map<string, CmuToken>([
 
 function xmlEscape(value: string) {
   return value.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;").replace(/'/g, "&apos;");
-}
-
-export function cmuPronunciationForWord(word: string) {
-  const parts = word.trim().toLowerCase().replace(/[’‘]/g, "'").split(/\s+/);
-  if (!parts.length || parts.some((part) => !/^[a-z]+(?:['-][a-z]+)*$/.test(part))) return null;
-  const pronunciations = parts.map((part) => cmuDictionary[part]?.replace(/\s+#.*$/, ""));
-  return pronunciations.every(Boolean) ? pronunciations.join(" ") : null;
 }
 
 export function ipaToCmuPhonemes(ipa: string) {
@@ -60,7 +51,7 @@ export function ipaToCmuPhonemes(ipa: string) {
 
 export function pronunciationSsml(word: string, ipa?: string) {
   const safeWord = xmlEscape(word);
-  const cmuPhonemes = cmuPronunciationForWord(word) ?? (ipa ? ipaToCmuPhonemes(ipa) : null);
+  const cmuPhonemes = ipa ? ipaToCmuPhonemes(ipa) : null;
   if (!cmuPhonemes) return `<speak>${safeWord}</speak>`;
   return `<speak><phoneme alphabet="cmu" ph="${xmlEscape(cmuPhonemes)}">${safeWord}</phoneme></speak>`;
 }

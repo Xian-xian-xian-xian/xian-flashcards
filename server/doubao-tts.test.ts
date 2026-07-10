@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { cmuPronunciationForWord, ipaToCmuPhonemes, parseDoubaoAudioChunks, pronunciationSsml } from "./doubao-tts.js";
+import { ipaToCmuPhonemes, parseDoubaoAudioChunks, pronunciationSsml } from "./doubao-tts.js";
 
 describe("豆包单词发音", () => {
   it("将英式 IPA 转为带重音的 CMU 音标并包裹 SSML", () => {
@@ -8,9 +8,9 @@ describe("豆包单词发音", () => {
     expect(pronunciationSsml("comply", "kəmˈplaɪ")).toBe('<speak><phoneme alphabet="cmu" ph="K AH0 M P L AY1">comply</phoneme></speak>');
   });
 
-  it("优先使用 CMU 词典恢复英式 IPA 中省略的 r", () => {
-    expect(cmuPronunciationForWord("performer")).toBe("P ER0 F AO1 R M ER0");
-    expect(pronunciationSsml("performer", "pəˈfɔːmə")).toBe('<speak><phoneme alphabet="cmu" ph="P ER0 F AO1 R M ER0">performer</phoneme></speak>');
+  it("保留英式非卷舌发音，不从美式拼写补入 r", () => {
+    expect(ipaToCmuPhonemes("pəˈfɔːmə")).toBe("P AH0 F AO1 M AH0");
+    expect(pronunciationSsml("performer", "pəˈfɔːmə")).toBe('<speak><phoneme alphabet="cmu" ph="P AH0 F AO1 M AH0">performer</phoneme></speak>');
   });
 
   it("无 IPA 时直接以 SSML 朗读并转义单词", () => {
