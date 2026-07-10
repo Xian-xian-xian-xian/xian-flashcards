@@ -330,7 +330,7 @@ function cacheKey(value: string) {
 }
 
 function doubaoTtsCacheName(phoneme: string, fallback: string) {
-  return `doubao-${doubaoTtsResourceId}-${doubaoTtsVoice}-${cacheKey(`${phoneme}\n${fallback}\n${doubaoTtsPrompt}\ncmudict-ipa-match-v4`)}.mp3`;
+  return `doubao-${doubaoTtsResourceId}-${doubaoTtsVoice}-${cacheKey(`${phoneme}\n${fallback}\n${doubaoTtsPrompt}\ncmudict-ipa-match-v5-non-rhotic`)}.mp3`;
 }
 
 async function cachedDoubaoTtsPath(phoneme: string, fallback: string) {
@@ -355,9 +355,12 @@ async function synthesizeWithDoubao(phoneme: string, fallback: string) {
   console.info("Pronunciation selected", {
     word: pronunciation.word,
     ipa: pronunciation.normalizedIpa,
-    cmu: pronunciation.cmu,
-    source: pronunciation.source,
-    confidence: pronunciation.confidence
+    selectedCmu: pronunciation.selectedCmu,
+    finalCmu: pronunciation.cmu,
+    rhoticConflict: pronunciation.rhoticConflict,
+    finalSource: pronunciation.source,
+    confidence: pronunciation.confidence,
+    finalSsmlMode: pronunciation.finalSsmlMode
   });
   if (ssml.length > 150) throw new Error("单词及音标生成的 SSML 超过 150 个字符");
   const response = await fetch(doubaoTtsEndpoint, {

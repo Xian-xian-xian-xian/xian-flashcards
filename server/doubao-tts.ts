@@ -5,10 +5,10 @@ import { dictionary as cmuDictionary } from "cmu-pronouncing-dictionary";
 export const doubaoTtsEndpoint = "https://openspeech.bytedance.com/api/v3/tts/unidirectional";
 export const doubaoTtsResourceId = "seed-tts-2.0";
 export const doubaoTtsVoice = "zh_female_yingyujiaoxue_uranus_bigtts";
-export const doubaoTtsPrompt = "你是一个英式英语朗读专家，你正在给在线词典的单词配音，请保证每个发音准确无误，并且严格按照英式英语发音，发音沉稳稳重";
+export const doubaoTtsPrompt = "请使用标准、自然、非卷舌的英式英语词典发音，只朗读给定的单词一次。单独朗读词条时，不要读出词尾可选的连接音或侵入音 /r/，语气中性，发音清晰，不要解释。";
 
-export type PronunciationSource = "override" | "cmudict-unique" | "cmudict-ipa-match" | "cmudict-default" | "plain-text-fallback";
-export type PronunciationResult = { word: string; originalIpa: string | null; normalizedIpa: string | null; cmu: string | null; ssml: string; source: PronunciationSource; confidence: number };
+export type PronunciationSource = "override" | "cmudict-unique" | "cmudict-ipa-match" | "cmudict-default" | "british-non-rhotic-fallback" | "plain-text-fallback";
+export type PronunciationResult = { word: string; originalIpa: string | null; normalizedIpa: string | null; cmu: string | null; selectedCmu: string | null; ssml: string; source: PronunciationSource; confidence: number; rhoticConflict: boolean; finalSsmlMode: "cmu" | "plain-text" };
 
 const overrides = JSON.parse(fs.readFileSync(path.resolve(process.cwd(), "server/pronunciation-overrides.json"), "utf8")) as Record<string, string>;
 const validCmuToken = /^(AA|AE|AH|AO|AW|AY|B|CH|D|DH|EH|ER|EY|F|G|HH|IH|IY|JH|K|L|M|N|NG|OW|OY|P|R|S|SH|T|TH|UH|UW|V|W|Y|Z|ZH)([012])?$/;
@@ -20,7 +20,7 @@ export function normalizeIpa(input: string) {
 }
 export function escapeXml(value: string) { return value.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;").replace(/'/g, "&apos;"); }
 export function buildCmuSsml(word: string, cmu: string) { return `<speak>\n  <phoneme alphabet="cmu" ph="${escapeXml(cmu)}">${escapeXml(word)}</phoneme>\n</speak>`; }
-function plainSsml(word: string) { return `<speak>${escapeXml(word)}</speak>`; }
+export function buildPlainTextSsml(word: string) { return `<speak>\n  ${escapeXml(word)}\n</speak>`; }
 export function isValidCmu(cmu: string) { return cmu.trim().split(/\s+/).every((token) => validCmuToken.test(token)); }
 
 function cmuCandidates(word: string) {
@@ -47,18 +47,30 @@ function chooseCandidate(candidates: string[], ipa: string) {
   const best = scored[0]; const next = scored[1]; const confidence = Math.max(0.5, Math.min(1, 1 - best.score / Math.max(ipa.length, 1) + (next ? Math.min(0.15, (next.score - best.score) / 10) : 0)));
   return { cmu: best.cmu, confidence };
 }
+export type RhoticConflictResult = { hasConflict: boolean; ipaHasPronouncedR: boolean; cmuHasRhoticPhone: boolean };
+export function detectBritishRhoticConflict(normalizedIpa: string | null | undefined, cmu: string | null | undefined): RhoticConflictResult {
+  if (!normalizedIpa || !cmu) return { hasConflict: false, ipaHasPronouncedR: false, cmuHasRhoticPhone: false };
+  const ipaWithoutOptionalR = normalizedIpa.replace(/\(\s*[rɹ]\s*\)/g, "");
+  const ipaHasPronouncedR = /[rɹ]/.test(ipaWithoutOptionalR);
+  const cmuHasRhoticPhone = cmu.trim().toUpperCase().split(/\s+/).some((token) => token === "R" || /^ER[012]?$/.test(token));
+  return { hasConflict: cmuHasRhoticPhone && !ipaHasPronouncedR, ipaHasPronouncedR, cmuHasRhoticPhone };
+}
 export function buildWordPronunciation(wordInput: string, ipaInput?: string | null): PronunciationResult {
   const word = normalizeWord(wordInput); const originalIpa = ipaInput?.trim() || null; const normalizedIpa = originalIpa ? normalizeIpa(originalIpa) : null;
   try {
     if (!word || !/^[a-z]+(?:['-][a-z]+)*$/.test(word)) throw new Error("invalid word");
     const override = normalizedIpa ? overrides[`${word}|${normalizedIpa}`] : undefined;
-    if (override && isValidCmu(override)) return { word, originalIpa, normalizedIpa, cmu: override, ssml: buildCmuSsml(word, override), source: "override", confidence: 1 };
+    let selectedCmu: string | null = null; let source: PronunciationSource = "plain-text-fallback"; let confidence = 0;
+    if (override && isValidCmu(override)) { selectedCmu = override; source = "override"; confidence = 1; }
     const candidates = cmuCandidates(word);
-    if (candidates.length === 1) return { word, originalIpa, normalizedIpa, cmu: candidates[0], ssml: buildCmuSsml(word, candidates[0]), source: "cmudict-unique", confidence: 1 };
-    if (candidates.length > 1 && normalizedIpa) { const chosen = chooseCandidate(candidates, normalizedIpa); return { word, originalIpa, normalizedIpa, cmu: chosen.cmu, ssml: buildCmuSsml(word, chosen.cmu), source: "cmudict-ipa-match", confidence: chosen.confidence }; }
-    if (candidates.length > 1) return { word, originalIpa, normalizedIpa, cmu: candidates[0], ssml: buildCmuSsml(word, candidates[0]), source: "cmudict-default", confidence: 0.55 };
+    if (!selectedCmu && candidates.length === 1) { selectedCmu = candidates[0]; source = "cmudict-unique"; confidence = 1; }
+    if (!selectedCmu && candidates.length > 1 && normalizedIpa) { const chosen = chooseCandidate(candidates, normalizedIpa); selectedCmu = chosen.cmu; source = "cmudict-ipa-match"; confidence = chosen.confidence; }
+    if (!selectedCmu && candidates.length > 1) { selectedCmu = candidates[0]; source = "cmudict-default"; confidence = 0.55; }
+    const rhotic = detectBritishRhoticConflict(normalizedIpa, selectedCmu);
+    if (rhotic.hasConflict) return { word, originalIpa, normalizedIpa, cmu: null, selectedCmu, ssml: buildPlainTextSsml(word), source: "british-non-rhotic-fallback", confidence, rhoticConflict: true, finalSsmlMode: "plain-text" };
+    if (selectedCmu) return { word, originalIpa, normalizedIpa, cmu: selectedCmu, selectedCmu, ssml: buildCmuSsml(word, selectedCmu), source, confidence, rhoticConflict: false, finalSsmlMode: "cmu" };
   } catch { /* fall through */ }
-  return { word, originalIpa, normalizedIpa, cmu: null, ssml: plainSsml(wordInput), source: "plain-text-fallback", confidence: 0 };
+  return { word, originalIpa, normalizedIpa, cmu: null, selectedCmu: null, ssml: buildPlainTextSsml(wordInput), source: "plain-text-fallback", confidence: 0, rhoticConflict: false, finalSsmlMode: "plain-text" };
 }
 export function pronunciationSsml(word: string, ipa?: string) { return buildWordPronunciation(word, ipa).ssml; }
 export function parseDoubaoAudioChunks(body: string) { const chunks: Buffer[] = []; for (const line of body.split(/\r?\n/)) { if (!line.trim()) continue; let message: { code?: number; message?: string; data?: string }; try { message = JSON.parse(line); } catch { continue; } if (message.code && message.code !== 0 && message.message !== "OK") throw new Error(message.message || `豆包语音合成失败：${message.code}`); if (message.data) chunks.push(Buffer.from(message.data, "base64")); } if (!chunks.length) throw new Error("豆包语音合成未返回音频"); return Buffer.concat(chunks); }
