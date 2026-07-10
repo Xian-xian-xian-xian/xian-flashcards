@@ -63,7 +63,7 @@ declare global {
   }
 }
 
-const version = "0.5.1";
+const version = "0.5.2";
 const logExportPressCount = 6;
 const logExportKey = "a";
 const logExportResetMs = 1800;
@@ -1951,6 +1951,7 @@ function StudyView(props: {
   const [ratingResult, setRatingResult] = useState<RatingFeedback | null>(null);
   const [ratingNotice, setRatingNotice] = useState<RatingFeedback | null>(null);
   const [completionPlayed, setCompletionPlayed] = useState(false);
+  const [moreToolsOpen, setMoreToolsOpen] = useState(false);
   const [tomatoState, setTomatoState] = useState<TomatoState | null>(null);
   const [pomodoroNow, setPomodoroNow] = useState(() => Date.now());
   const studyPanelRef = useRef<HTMLDivElement | null>(null);
@@ -2630,80 +2631,39 @@ function StudyView(props: {
             <div className="study-actions">
               <div className="study-meta-left" aria-label="当前番茄钟">
                 <span className="type-pill">番茄钟 {formatPomodoroCountdown(tomatoState, pomodoroNow)}</span>
-                <span className="type-pill">第 {activePomodoro?.no ?? "—"} 个番茄</span>
+                <span className="type-pill">番茄数量 {activePomodoro?.no ?? "—"}</span>
                 <span className="type-pill" title={activePomodoro?.taskGoal || "当前未设置任务"}>任务 {activePomodoro?.taskGoal || "未设置"}</span>
-              </div>
-              <div className="study-meta-right">
-                {studyMode === "grind" && <span className="type-pill">无尽模式</span>}
-                {studyMode === "grind" && <span className="type-pill">{props.selectedDeck?.name ?? "当前卡组"}</span>}
-                {studyMode === "grind" && <span className="type-pill">第 {grindGroupNumber} 组</span>}
-                {studyMode === "grind" && <span className="type-pill">目标 {grindGroupSize} · 已加入 {sessionCards.length}</span>}
                 <span className="type-pill">{cardTypeLabels[card.card_type]}</span>
                 <span className="type-pill study-schedule-pill" title={`下次复习：${fullDateTime(card.due_at)}（${dueText(card.due_at)}）`}>{studyScheduleText(card)}</span>
-                <span className="type-pill">待掌握 {queue.length}</span>
                 <span className="type-pill">新学剩余 {remaining.newRemaining}</span>
-                <span className="type-pill">复习剩余 {remaining.reviewRemaining}</span>
-                <TextToolButton icon={<SlidersHorizontal />} title="学习字号" active={activeTextTool === "scale"} onClick={() => setActiveTextTool(activeTextTool === "scale" ? null : "scale")}>
-                {activeTextTool === "scale" && (
-                  <div className="text-tool-popover">
-                    {[0.85, 1, 1.15, 1.25, 1.35].map((value) => (
-                      <button key={value} className={Math.abs(scaleDraft - value) < 0.01 ? "active" : ""} onClick={() => saveScale(value)}>{scaleSaving && Math.abs(scaleDraft - value) < 0.01 ? "保存中" : `${Math.round(value * 100)}%`}</button>
-                    ))}
-                  </div>
-                )}
-                </TextToolButton>
-                <TextToolButton icon={<MoreHorizontal />} title="学习行距" active={activeTextTool === "lineHeight"} onClick={() => setActiveTextTool(activeTextTool === "lineHeight" ? null : "lineHeight")}>
-                {activeTextTool === "lineHeight" && (
-                  <div className="text-tool-popover compact">
-                    {[1.2, 1.4, 1.5, 1.6, 1.8, 2].map((value) => (
-                      <button key={value} className={Math.abs(props.studyLineHeight - value) < 0.01 ? "active" : ""} onClick={() => saveLineHeight(value)}>{value.toFixed(value === 2 ? 0 : 1)}</button>
-                    ))}
-                  </div>
-                )}
-                </TextToolButton>
-                <TextToolButton icon={props.studyTextAlign === "left" ? <AlignLeft /> : <AlignCenter />} title="学习文本对齐" active={activeTextTool === "align"} onClick={() => setActiveTextTool(activeTextTool === "align" ? null : "align")}>
-                {activeTextTool === "align" && (
-                  <div className="text-tool-popover compact">
-                    <button className={props.studyTextAlign === "left" ? "active" : ""} onClick={() => saveTextAlign("left")}><AlignLeft />左对齐</button>
-                    <button className={props.studyTextAlign === "center" ? "active" : ""} onClick={() => saveTextAlign("center")}><AlignCenter />居中</button>
-                  </div>
-                )}
-                </TextToolButton>
-                <TextToolButton icon={props.studyChoiceLayout === "one" ? <Rows2 /> : <Columns2 />} title="列数" active={activeTextTool === "choiceLayout"} onClick={() => setActiveTextTool(activeTextTool === "choiceLayout" ? null : "choiceLayout")}>
-                {activeTextTool === "choiceLayout" && (
-                  <div className="text-tool-popover compact">
-                    <button className={props.studyChoiceLayout === "auto" ? "active" : ""} onClick={() => saveChoiceLayout("auto")}><SlidersHorizontal />自动</button>
-                    <button className={props.studyChoiceLayout === "one" ? "active" : ""} onClick={() => saveChoiceLayout("one")}><Rows2 />一列</button>
-                    <button className={props.studyChoiceLayout === "two" ? "active" : ""} onClick={() => saveChoiceLayout("two")}><Columns2 />两列</button>
-                  </div>
-                )}
-                </TextToolButton>
-                <TextToolButton icon={<Type />} title="学习字体" active={activeTextTool === "font"} onClick={() => setActiveTextTool(activeTextTool === "font" ? null : "font")}>
-                {activeTextTool === "font" && (
-                  <div className="text-tool-popover font-popover">
-                    {studyFontOptions.map((option) => (
-                      <button key={option.value} className={props.studyFontFamily === option.value ? "active" : ""} onClick={() => saveFontFamily(option.value)}>{option.label}</button>
-                    ))}
-                    <button onClick={loadFonts}>{fontLoading ? "读取中" : "读取系统字体"}</button>
-                    <small>{fontStatus}</small>
-                    {installedFonts.map((font) => (
-                      <button key={font} className={props.studyFontFamily === font ? "active" : ""} style={{ fontFamily: studyFontStack(font) }} onClick={() => saveFontFamily(font)}>{font}</button>
-                    ))}
-                  </div>
-                )}
-                </TextToolButton>
-                <button
-                className={`mini-button ${showReferenceDock ? "active" : ""}`}
-                title={answerDockOpen ? "隐藏题目参考" : "显示题目参考"}
-                disabled={!canToggleReferenceDock}
-                onClick={() => setAnswerDockOpen((open) => !open)}
-              >
-                {answerDockOpen ? <EyeOff /> : <Eye />}
-                </button>
-                <button className="mini-button" title={immersive ? "退出沉浸学习" : "沉浸学习"} onClick={toggleImmersive}>{immersive ? <Minimize2 /> : <Maximize2 />}</button>
-                <button className="mini-button" title="撤销上一张" disabled={history.length === 0 || Boolean(busy)} onClick={undo}><ArrowLeft /></button>
-                <button className="mini-button" title="编辑当前卡片" onClick={editCurrentStudyCard}><Edit3 /></button>
+                <span className="type-pill">旧卡剩余 {remaining.reviewRemaining}</span>
+              </div>
+              <div className="study-quick-actions">
                 <button className="mini-button" title="发音" onClick={() => props.onSpeak(isWordCard(card) && card.phonetic ? card.phonetic : card.front, card.language ?? props.selectedDeck?.language, card.front)}><Volume2 /></button>
+                <button className="mini-button" title={immersive ? "退出沉浸学习" : "沉浸学习"} onClick={toggleImmersive}>{immersive ? <Minimize2 /> : <Maximize2 />}</button>
+                <button className="mini-button" title="编辑当前卡片" onClick={editCurrentStudyCard}><Edit3 /></button>
+                <TextToolButton icon={<MoreHorizontal />} title="更多学习工具" active={moreToolsOpen} onClick={() => setMoreToolsOpen((open) => !open)}>
+                  {moreToolsOpen && (
+                    <div className="text-tool-popover study-more-popover">
+                      <strong>学习设置</strong>
+                      <div className="study-more-options">
+                        {[0.85, 1, 1.15, 1.25, 1.35].map((value) => <button key={value} className={Math.abs(scaleDraft - value) < 0.01 ? "active" : ""} onClick={() => saveScale(value)}>字号 {Math.round(value * 100)}%</button>)}
+                        {[1.2, 1.4, 1.5, 1.6, 1.8, 2].map((value) => <button key={value} className={Math.abs(props.studyLineHeight - value) < 0.01 ? "active" : ""} onClick={() => saveLineHeight(value)}>行距 {value.toFixed(value === 2 ? 0 : 1)}</button>)}
+                        <button className={props.studyTextAlign === "left" ? "active" : ""} onClick={() => saveTextAlign("left")}><AlignLeft />左对齐</button>
+                        <button className={props.studyTextAlign === "center" ? "active" : ""} onClick={() => saveTextAlign("center")}><AlignCenter />居中</button>
+                        <button className={props.studyChoiceLayout === "auto" ? "active" : ""} onClick={() => saveChoiceLayout("auto")}><SlidersHorizontal />自动列数</button>
+                        <button className={props.studyChoiceLayout === "one" ? "active" : ""} onClick={() => saveChoiceLayout("one")}><Rows2 />一列</button>
+                        <button className={props.studyChoiceLayout === "two" ? "active" : ""} onClick={() => saveChoiceLayout("two")}><Columns2 />两列</button>
+                        {studyFontOptions.map((option) => <button key={option.value} className={props.studyFontFamily === option.value ? "active" : ""} onClick={() => saveFontFamily(option.value)}><Type />{option.label}</button>)}
+                        <button onClick={loadFonts}>{fontLoading ? "读取字体中" : "读取系统字体"}</button>
+                        {installedFonts.map((font) => <button key={font} className={props.studyFontFamily === font ? "active" : ""} style={{ fontFamily: studyFontStack(font) }} onClick={() => saveFontFamily(font)}>{font}</button>)}
+                        <button className={showReferenceDock ? "active" : ""} disabled={!canToggleReferenceDock} onClick={() => setAnswerDockOpen((open) => !open)}>{answerDockOpen ? <EyeOff /> : <Eye />}{answerDockOpen ? "隐藏题目参考" : "显示题目参考"}</button>
+                        <button disabled={history.length === 0 || Boolean(busy)} onClick={undo}><ArrowLeft />撤销上一张</button>
+                      </div>
+                      <small>{fontStatus}</small>
+                    </div>
+                  )}
+                </TextToolButton>
               </div>
             </div>
           </div>
