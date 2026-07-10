@@ -11,6 +11,7 @@ import * as XLSX from "xlsx";
 import type { SqlValue } from "sql.js";
 import { all, get, getUserSetting, initDb, lastTableId, nowIso, run, setUserSetting } from "./db.js";
 import { nextReviewState, type ReviewRating } from "./ebbinghaus.js";
+import { doubaoTtsEndpoint, doubaoTtsPrompt, doubaoTtsResourceId, doubaoTtsVoice, parseDoubaoAudioChunks, pronunciationSsml } from "./doubao-tts.js";
 
 const app = express();
 const upload = multer({ storage: multer.memoryStorage() });
@@ -63,13 +64,7 @@ const sessionDays = 30;
 const appVersion = "0.4.10";
 const timeZone = "Asia/Shanghai";
 const pronunciationCacheDir = process.env.PRONUNCIATION_CACHE_DIR ?? path.resolve(process.cwd(), "runtime/pronunciations");
-const xiaomiTtsApiKey = process.env.XIAOMI_MIMO_API_KEY ?? "";
-const xiaomiTtsUrl = process.env.XIAOMI_MIMO_TTS_URL ?? "https://api.xiaomimimo.com/v1/chat/completions";
-const xiaomiTtsModel = process.env.XIAOMI_MIMO_TTS_MODEL ?? "mimo-v2.5-tts";
-const xiaomiTtsVoice = process.env.XIAOMI_MIMO_TTS_VOICE ?? "Dean";
-const xiaomiTtsPrompt = process.env.XIAOMI_MIMO_TTS_PROMPT
-  ?? "你是一个英式英语朗读专家，正在给在线词典的单词配音。请保证发音准确无误，严格采用自然、清晰、标准的英式英语发音。";
-const aliyunDashscopeApiKey = process.env.DASHSCOPE_API_KEY ?? "";
+const doubaoTtsApiKey = process.env.DOUBAO_TTS_API_KEY ?? "";
 const normalizedUsers = new Set<number>();
 const recentLogWindowMs = 10 * 60 * 1000;
 const maxRecentLogEntries = 2000;
@@ -334,115 +329,55 @@ function cacheKey(value: string) {
   return crypto.createHash("sha256").update(value).digest("hex").slice(0, 24);
 }
 
-function xiaomiTtsCacheName(phoneme: string, fallback: string) {
-  const safeModel = xiaomiTtsModel.replace(/[^a-z0-9_-]/gi, "_");
-  const safeVoice = xiaomiTtsVoice.replace(/[^a-z0-9_-]/gi, "_");
-  return `mimo-${safeModel}-${safeVoice}-${cacheKey(`${phoneme}\n${fallback}\n${xiaomiTtsPrompt}\nv1`)}.wav`;
+function doubaoTtsCacheName(phoneme: string, fallback: string) {
+  return `doubao-${doubaoTtsResourceId}-${doubaoTtsVoice}-${cacheKey(`${phoneme}\n${fallback}\n${doubaoTtsPrompt}\nssml-cmu-v1`)}.mp3`;
 }
 
-async function cachedXiaomiTtsPath(phoneme: string, fallback: string) {
+async function cachedDoubaoTtsPath(phoneme: string, fallback: string) {
   await fs.promises.mkdir(pronunciationCacheDir, { recursive: true });
-  const filePath = path.join(pronunciationCacheDir, xiaomiTtsCacheName(phoneme, fallback));
+  const filePath = path.join(pronunciationCacheDir, doubaoTtsCacheName(phoneme, fallback));
   return fs.existsSync(filePath) ? filePath : null;
 }
 
-async function writeXiaomiTtsCache(phoneme: string, fallback: string, audio: Buffer) {
+async function writeDoubaoTtsCache(phoneme: string, fallback: string, audio: Buffer) {
   await fs.promises.mkdir(pronunciationCacheDir, { recursive: true });
-  const filePath = path.join(pronunciationCacheDir, xiaomiTtsCacheName(phoneme, fallback));
+  const filePath = path.join(pronunciationCacheDir, doubaoTtsCacheName(phoneme, fallback));
   const tempPath = `${filePath}.${crypto.randomUUID()}.tmp`;
   await fs.promises.writeFile(tempPath, audio);
   await fs.promises.rename(tempPath, filePath);
   return filePath;
 }
 
-function xiaomiTtsUserPrompt(phoneme: string, fallback: string) {
-  return `${xiaomiTtsPrompt}\n\n朗读对象：${fallback}\n参考音标：/${phoneme}/\n请只输出朗读音频，不要朗读解释、标点说明或音标符号本身。`;
-}
-
-function parseXiaomiAudioData(value: unknown): string | null {
-  if (typeof value === "string" && value.trim()) return value.trim();
-  if (!value || typeof value !== "object") return null;
-  const record = value as Record<string, unknown>;
-  return parseXiaomiAudioData(record.data ?? record.audio ?? record.url);
-}
-
-async function synthesizeWithXiaomi(phoneme: string, fallback: string) {
-  if (!xiaomiTtsApiKey) throw new Error("缺少 XIAOMI_MIMO_API_KEY");
-
-  const response = await fetch(xiaomiTtsUrl, {
+async function synthesizeWithDoubao(phoneme: string, fallback: string) {
+  if (!doubaoTtsApiKey) throw new Error("缺少 DOUBAO_TTS_API_KEY");
+  const ssml = pronunciationSsml(fallback, phoneme);
+  if (ssml.length > 150) throw new Error("单词及音标生成的 SSML 超过 150 个字符");
+  const response = await fetch(doubaoTtsEndpoint, {
     method: "POST",
     headers: {
       "Content-Type": "application/json",
-      Authorization: `Bearer ${xiaomiTtsApiKey}`
+      "X-Api-Key": doubaoTtsApiKey,
+      "X-Api-Resource-Id": doubaoTtsResourceId,
+      "X-Api-Request-Id": crypto.randomUUID(),
+      "X-Control-Require-Usage-Tokens-Return": "*"
     },
     body: JSON.stringify({
-      model: xiaomiTtsModel,
-      modalities: ["text", "audio"],
-      audio: {
-        voice: xiaomiTtsVoice,
-        format: "wav"
+      user: { uid: "flashcards" },
+      req_params: {
+        text: fallback,
+        ssml,
+        speaker: doubaoTtsVoice,
+        explicit_language: "en-gb",
+        context_texts: [doubaoTtsPrompt]
       },
-      messages: [
-        { role: "user", content: xiaomiTtsUserPrompt(phoneme, fallback) },
-        { role: "assistant", content: fallback }
-      ]
-    })
-  });
-
-  if (!response.ok) {
-    const body = await response.text().catch(() => "");
-    throw new Error(`小米 MiMo 语音合成失败：${response.status}${body ? ` ${body.slice(0, 300)}` : ""}`);
-  }
-
-  const result = await response.json() as {
-    choices?: Array<{
-      message?: {
-        audio?: unknown;
-      };
-    }>;
-    audio?: unknown;
-    data?: unknown;
-  };
-  const audioData = parseXiaomiAudioData(result.choices?.[0]?.message?.audio ?? result.audio ?? result.data);
-  if (!audioData) throw new Error("小米 MiMo 语音合成未返回音频");
-
-  if (/^https?:\/\//i.test(audioData)) {
-    const audioResponse = await fetch(audioData);
-    if (!audioResponse.ok) throw new Error(`小米 MiMo 音频下载失败：${audioResponse.status}`);
-    return Buffer.from(await audioResponse.arrayBuffer());
-  }
-
-  return Buffer.from(audioData.replace(/^data:audio\/\w+;base64,/, ""), "base64");
-}
-
-async function synthesizeMimoPreview(text: string) {
-  if (!xiaomiTtsApiKey) throw new Error("缺少 XIAOMI_MIMO_API_KEY");
-  const response = await fetch(xiaomiTtsUrl, {
-    method: "POST",
-    headers: { "Content-Type": "application/json", Authorization: `Bearer ${xiaomiTtsApiKey}` },
-    body: JSON.stringify({
-      model: xiaomiTtsModel,
-      modalities: ["text", "audio"],
-      audio: { voice: xiaomiTtsVoice, format: "wav" },
-      messages: [
-        { role: "user", content: "请将下一条 assistant 消息中的内容合成为语音。若其中包含 SSML，请按你支持的方式处理；不要补充解释或改写内容。" },
-        { role: "assistant", content: text }
-      ]
+      audio_params: { format: "mp3", sample_rate: 24000 }
     })
   });
   if (!response.ok) {
     const body = await response.text().catch(() => "");
-    throw new Error(`小米 MiMo 语音合成失败：${response.status}${body ? ` ${body.slice(0, 300)}` : ""}`);
+    throw new Error(`豆包语音合成失败：${response.status}${body ? ` ${body.slice(0, 300)}` : ""}`);
   }
-  const result = await response.json() as { choices?: Array<{ message?: { audio?: unknown } }>; audio?: unknown; data?: unknown };
-  const audioData = parseXiaomiAudioData(result.choices?.[0]?.message?.audio ?? result.audio ?? result.data);
-  if (!audioData) throw new Error("小米 MiMo 语音合成未返回音频");
-  if (/^https?:\/\//i.test(audioData)) {
-    const audioResponse = await fetch(audioData);
-    if (!audioResponse.ok) throw new Error(`小米 MiMo 音频下载失败：${audioResponse.status}`);
-    return Buffer.from(await audioResponse.arrayBuffer());
-  }
-  return Buffer.from(audioData.replace(/^data:audio\/\w+;base64,/, ""), "base64");
+  return parseDoubaoAudioChunks(await response.text());
 }
 
 function parseCookies(header: string | undefined) {
@@ -6059,113 +5994,28 @@ app.get("/api/templates/:name", (req, res) => {
 app.post("/api/tts", async (req, res) => {
   const phoneme = normalizePronunciationText(req.body.text);
   const fallback = normalizePronunciationFallback(req.body.fallback);
-  if (!phoneme) {
-    res.status(400).json({ error: "音标不能为空" });
-    return;
-  }
   if (!isEnglishVoiceLanguage(req.body.language)) {
     res.status(422).json({ error: "英式音标发音当前仅支持英语" });
     return;
   }
 
   try {
-    const cachedPath = await cachedXiaomiTtsPath(phoneme, fallback);
+    const cachePhoneme = phoneme ?? "";
+    const cachedPath = await cachedDoubaoTtsPath(cachePhoneme, fallback);
     const audio = cachedPath
       ? await fs.promises.readFile(cachedPath)
-      : await synthesizeWithXiaomi(phoneme, fallback).then((result) => writeXiaomiTtsCache(phoneme, fallback, result).then(() => result));
+      : await synthesizeWithDoubao(cachePhoneme, fallback).then((result) => writeDoubaoTtsCache(cachePhoneme, fallback, result).then(() => result));
 
-    res.setHeader("Content-Type", "audio/wav");
+    res.setHeader("Content-Type", "audio/mpeg");
     res.setHeader("Cache-Control", "no-store");
-    res.setHeader("X-Pronunciation-Source", cachedPath ? "cache" : "mimo");
-    res.setHeader("X-Pronunciation-Model", xiaomiTtsModel);
-    res.setHeader("X-Pronunciation-Voice", xiaomiTtsVoice);
-    res.setHeader("X-Pronunciation-Phoneme", encodeURIComponent(phoneme));
+    res.setHeader("X-Pronunciation-Source", cachedPath ? "cache" : "doubao");
+    res.setHeader("X-Pronunciation-Model", doubaoTtsResourceId);
+    res.setHeader("X-Pronunciation-Voice", doubaoTtsVoice);
+    res.setHeader("X-Pronunciation-Phoneme", encodeURIComponent(cachePhoneme));
     res.send(audio);
   } catch (error) {
     console.warn("Pronunciation synthesis failed", error);
-    res.status(502).json({ error: (error as Error).message || "小米 MiMo 语音合成暂不可用" });
-  }
-});
-
-app.post("/api/aliyun-tts", async (req, res) => {
-  const text = String(req.body?.text ?? "").trim();
-  const model = String(req.body?.model ?? "cosyvoice-v3-flash").trim();
-  const voice = String(req.body?.voice ?? "longanyang").trim();
-  const enableSsml = /^<speak(?:\s|>)/i.test(text);
-  const numberInRange = (value: unknown, fallback: number, min: number, max: number) => {
-    const parsed = Number(value);
-    return Number.isFinite(parsed) ? Math.min(max, Math.max(min, parsed)) : fallback;
-  };
-
-  if (!aliyunDashscopeApiKey) {
-    res.status(503).json({ error: "服务端尚未配置 DASHSCOPE_API_KEY" });
-    return;
-  }
-  if (!text) {
-    res.status(400).json({ error: "请输入需要试听的文本" });
-    return;
-  }
-  if (text.length > 2000) {
-    res.status(400).json({ error: "单次试听最多 2000 个字符" });
-    return;
-  }
-
-  try {
-    const response = await fetch("https://dashscope.aliyuncs.com/api/v1/services/audio/tts/SpeechSynthesizer", {
-      method: "POST",
-      headers: { Authorization: `Bearer ${aliyunDashscopeApiKey}`, "Content-Type": "application/json" },
-      body: JSON.stringify({
-        model,
-        input: {
-          text,
-          voice,
-          format: "mp3",
-          sample_rate: 24000,
-          enable_ssml: enableSsml,
-          rate: numberInRange(req.body?.rate, 1, 0.5, 2),
-          pitch: numberInRange(req.body?.pitch, 1, 0.5, 2),
-          volume: numberInRange(req.body?.volume, 50, 0, 100)
-        }
-      })
-    });
-    const result = await response.json().catch(() => ({})) as { message?: string; code?: string; output?: { audio?: { url?: string } } };
-    if (!response.ok) {
-      res.status(502).json({ error: result.message || result.code || "阿里云语音合成请求失败" });
-      return;
-    }
-    const audioUrl = result.output?.audio?.url;
-    if (!audioUrl || !/^https?:\/\//.test(audioUrl)) {
-      res.status(502).json({ error: "阿里云未返回可播放的音频" });
-      return;
-    }
-    const audioResponse = await fetch(audioUrl);
-    if (!audioResponse.ok) throw new Error("无法获取阿里云生成的音频");
-    const audio = Buffer.from(await audioResponse.arrayBuffer());
-    res.setHeader("Content-Type", audioResponse.headers.get("content-type") || "audio/mpeg");
-    res.setHeader("Cache-Control", "no-store");
-    res.send(audio);
-  } catch (error) {
-    res.status(502).json({ error: (error as Error).message || "阿里云语音合成暂不可用" });
-  }
-});
-
-app.post("/api/mimo-tts", async (req, res) => {
-  const text = String(req.body?.text ?? "").trim();
-  if (!text) {
-    res.status(400).json({ error: "请输入需要试听的文本" });
-    return;
-  }
-  if (text.length > 2000) {
-    res.status(400).json({ error: "单次试听最多 2000 个字符" });
-    return;
-  }
-  try {
-    const audio = await synthesizeMimoPreview(text);
-    res.setHeader("Content-Type", "audio/wav");
-    res.setHeader("Cache-Control", "no-store");
-    res.send(audio);
-  } catch (error) {
-    res.status(502).json({ error: (error as Error).message || "小米 MiMo 语音合成暂不可用" });
+    res.status(502).json({ error: (error as Error).message || "豆包语音合成暂不可用" });
   }
 });
 

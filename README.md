@@ -42,22 +42,12 @@ pnpm remote
 PORT=8080 pnpm start:remote
 ```
 
-英语音标发音使用小米 MiMo-V2.5-TTS。应用内填写 IPA，后端会把单词和参考音标发送给 MiMo，并使用英式英语朗读提示词与 Dean 音色生成音频；生成结果会缓存到 `runtime/pronunciations`，同一音标和单词第二次会直接读取服务器缓存。
+单词卡英语发音使用豆包语音合成大模型 2.0。应用内填写 IPA 时，后端会转换为 CMU 音标并以 SSML `<phoneme alphabet="cmu">` 合成；缺少 IPA 时会以 SSML 直接朗读单词。服务固定使用英式英语 Tina老师 2.0 音色，生成结果缓存到 `runtime/pronunciations`。
 
 ```bash
-XIAOMI_MIMO_API_KEY=你的小米MiMo API Key
-XIAOMI_MIMO_TTS_MODEL=mimo-v2.5-tts
-XIAOMI_MIMO_TTS_VOICE=Dean
+DOUBAO_TTS_API_KEY=你的豆包语音 API Key
 PRONUNCIATION_CACHE_DIR=runtime/pronunciations
 ```
-
-阿里云百炼语音试听使用与闪记相同的登录会话，仅已登录用户可调用。将现有百炼 API Key 配置在服务器环境变量中（不要写入前端或提交到仓库）：
-
-```bash
-DASHSCOPE_API_KEY=你的阿里云百炼北京地域API-Key
-```
-
-重启服务后，侧边栏的“语音试听”即可使用 CosyVoice 生成并播放音频。
 
 ## 发布到云端
 
@@ -92,7 +82,7 @@ curl https://card.beyour.top/api/health
 - 卡片支持创建、搜索、收藏、编辑、删除。
 - CSV、TSV、XLSX 或粘贴表格批量导入，并提供普通卡、单词卡、选择题卡、填空题卡模板。
 - 学习页按卡片类型自动显示闪记卡、选择题或填空题，并支持沉浸式学习和学习字号调整。
-- 小米 MiMo 英式音标发音，学习页自动发音可在设置中开启或关闭。
+- 豆包语音英式英语单词发音，学习页自动发音可在设置中开启或关闭。
 - 严格固定艾宾浩斯间隔：5 分钟、30 分钟、12 小时、1 天、2 天、4 天、7 天、15 天、30 天、90 天。
 - 认识 / 模糊 / 不认识反馈：
   - 认识：进入下一阶段。

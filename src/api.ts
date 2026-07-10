@@ -110,8 +110,5 @@ export const api = {
   undoImport: (batchId: string) =>
     request<{ ok: true; deleted: number }>(`/api/import/${encodeURIComponent(batchId)}/undo`, { method: "POST" }),
   synthesizeSpeech: (payload: { text: string; language?: string; fallback?: string }) => audioRequest("/api/tts", payload),
-  synthesizeAliyunSpeech: (payload: { text: string; model: string; voice: string; rate: number; pitch: number; volume: number }) =>
-    audioRequest("/api/aliyun-tts", payload),
-  synthesizeMimoSpeech: (payload: { text: string }) => audioRequest("/api/mimo-tts", payload),
   exportRecentLogs: () => download("/api/logs/recent?minutes=10")
 };
