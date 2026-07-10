@@ -2,7 +2,7 @@
 set -euo pipefail
 
 ECS_HOST="${ECS_HOST:-ecs-user@114.55.96.20}"
-ECS_KEY="${ECS_KEY:-$HOME/.ssh/codex_aliyun_flashcards}"
+ECS_KEY="${ECS_KEY:-$HOME/.ssh/codex_flashcards}"
 REMOTE_DIR="${REMOTE_DIR:-/srv/beyour/flashcards}"
 CONTROL_PATH="${CONTROL_PATH:-/tmp/xfcecs-%C}"
 

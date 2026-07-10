@@ -42,12 +42,12 @@ pnpm remote
 PORT=8080 pnpm start:remote
 ```
 
-英语音标发音使用阿里云 CosyVoice SSML。应用内填写 IPA，后端会转换为 CMU 音标并发送 `<phoneme alphabet="cmu">`；生成结果会缓存到 `runtime/pronunciations`，同一音标和单词第二次会直接读取服务器缓存。
+英语音标发音使用小米 MiMo-V2.5-TTS。应用内填写 IPA，后端会把单词和参考音标发送给 MiMo，并使用英式英语朗读提示词与 Dean 音色生成音频；生成结果会缓存到 `runtime/pronunciations`，同一音标和单词第二次会直接读取服务器缓存。
 
 ```bash
-DASHSCOPE_API_KEY=你的百炼APIKey
-ALIYUN_TTS_MODEL=cosyvoice-v2
-ALIYUN_TTS_VOICE=longshu_v2
+XIAOMI_MIMO_API_KEY=你的小米MiMo API Key
+XIAOMI_MIMO_TTS_MODEL=mimo-v2.5-tts
+XIAOMI_MIMO_TTS_VOICE=Dean
 PRONUNCIATION_CACHE_DIR=runtime/pronunciations
 ```
 
@@ -58,7 +58,7 @@ PRONUNCIATION_CACHE_DIR=runtime/pronunciations
 ```bash
 git add README.md package.json server src vite.config.ts scripts 模版
 git commit -m "Release 0.2.7"
-GIT_SSH_COMMAND="ssh -i ~/.ssh/codex_aliyun_flashcards -o IdentitiesOnly=yes" git push origin main
+GIT_SSH_COMMAND="ssh -i ~/.ssh/codex_flashcards -o IdentitiesOnly=yes" git push origin main
 ```
 
 推到 GitHub 只更新仓库，不会自动更新 ECS。推荐用部署脚本发布当前 Git 提交；脚本会复用 SSH 连接、只备份数据库、优先增量上传已提交文件、在服务器重新构建并重启 PM2：
@@ -84,7 +84,7 @@ curl https://card.beyour.top/api/health
 - 卡片支持创建、搜索、收藏、编辑、删除。
 - CSV、TSV、XLSX 或粘贴表格批量导入，并提供普通卡、单词卡、选择题卡、填空题卡模板。
 - 学习页按卡片类型自动显示闪记卡、选择题或填空题，并支持沉浸式学习和学习字号调整。
-- 阿里云 SSML 音标发音，学习页自动发音可在设置中开启或关闭。
+- 小米 MiMo 英式音标发音，学习页自动发音可在设置中开启或关闭。
 - 严格固定艾宾浩斯间隔：5 分钟、30 分钟、12 小时、1 天、2 天、4 天、7 天、15 天、30 天、90 天。
 - 认识 / 模糊 / 不认识反馈：
   - 认识：进入下一阶段。

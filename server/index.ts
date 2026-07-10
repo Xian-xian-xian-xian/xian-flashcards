@@ -6,7 +6,6 @@ import fs from "node:fs";
 import crypto from "node:crypto";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import WebSocket from "ws";
 import { parse } from "csv-parse/sync";
 import * as XLSX from "xlsx";
 import type { SqlValue } from "sql.js";
@@ -64,16 +63,12 @@ const sessionDays = 30;
 const appVersion = "0.4.10";
 const timeZone = "Asia/Shanghai";
 const pronunciationCacheDir = process.env.PRONUNCIATION_CACHE_DIR ?? path.resolve(process.cwd(), "runtime/pronunciations");
-const aliyunTtsModel = process.env.ALIYUN_TTS_MODEL ?? "cosyvoice-v2";
-const aliyunTtsVoice = process.env.ALIYUN_TTS_VOICE ?? "longshu_v2";
-const aliyunTtsRegion = process.env.ALIYUN_TTS_REGION ?? "cn-beijing";
-const aliyunTtsWorkspaceId = process.env.ALIYUN_TTS_WORKSPACE_ID ?? process.env.DASHSCOPE_WORKSPACE_ID ?? "";
-const aliyunTtsApiKey = process.env.DASHSCOPE_API_KEY ?? process.env.ALIYUN_BAILIAN_API_KEY ?? "";
-const aliyunTtsUrl = process.env.ALIYUN_TTS_WS_URL ?? (
-  aliyunTtsWorkspaceId
-    ? `wss://${aliyunTtsWorkspaceId}.${aliyunTtsRegion}.maas.aliyuncs.com/api-ws/v1/inference`
-    : "wss://dashscope.aliyuncs.com/api-ws/v1/inference"
-);
+const xiaomiTtsApiKey = process.env.XIAOMI_MIMO_API_KEY ?? "";
+const xiaomiTtsUrl = process.env.XIAOMI_MIMO_TTS_URL ?? "https://api.xiaomimimo.com/v1/chat/completions";
+const xiaomiTtsModel = process.env.XIAOMI_MIMO_TTS_MODEL ?? "mimo-v2.5-tts";
+const xiaomiTtsVoice = process.env.XIAOMI_MIMO_TTS_VOICE ?? "Dean";
+const xiaomiTtsPrompt = process.env.XIAOMI_MIMO_TTS_PROMPT
+  ?? "你是一个英式英语朗读专家，正在给在线词典的单词配音。请保证发音准确无误，严格采用自然、清晰、标准的英式英语发音。";
 const normalizedUsers = new Set<number>();
 const recentLogWindowMs = 10 * 60 * 1000;
 const maxRecentLogEntries = 2000;
@@ -334,272 +329,89 @@ function normalizePronunciationFallback(value: unknown) {
   return text;
 }
 
-function xmlEscape(value: string) {
-  return value
-    .replace(/&/g, "&amp;")
-    .replace(/</g, "&lt;")
-    .replace(/>/g, "&gt;")
-    .replace(/"/g, "&quot;")
-    .replace(/'/g, "&apos;");
-}
-
-function aliyunPronunciationSsml(cmuPhonemes: string, fallback: string) {
-  return `<speak><phoneme alphabet="cmu" ph="${xmlEscape(cmuPhonemes)}">${xmlEscape(fallback)}</phoneme></speak>`;
-}
-
-type CmuToken = { phoneme: string; vowel?: boolean; schwa?: boolean };
-
-const ipaToCmuMap = new Map<string, CmuToken>([
-  ["tʃ", { phoneme: "CH" }],
-  ["dʒ", { phoneme: "JH" }],
-  ["eɪ", { phoneme: "EY", vowel: true }],
-  ["aɪ", { phoneme: "AY", vowel: true }],
-  ["ɔɪ", { phoneme: "OY", vowel: true }],
-  ["əʊ", { phoneme: "OW", vowel: true }],
-  ["oʊ", { phoneme: "OW", vowel: true }],
-  ["aʊ", { phoneme: "AW", vowel: true }],
-  ["ɪə", { phoneme: "IH R", vowel: true }],
-  ["eə", { phoneme: "EH R", vowel: true }],
-  ["ɛə", { phoneme: "EH R", vowel: true }],
-  ["ʊə", { phoneme: "UH R", vowel: true }],
-  ["ɑː", { phoneme: "AA", vowel: true }],
-  ["ɔː", { phoneme: "AO", vowel: true }],
-  ["ɜː", { phoneme: "ER", vowel: true }],
-  ["iː", { phoneme: "IY", vowel: true }],
-  ["uː", { phoneme: "UW", vowel: true }],
-  ["æ", { phoneme: "AE", vowel: true }],
-  ["ɑ", { phoneme: "AA", vowel: true }],
-  ["ɒ", { phoneme: "AA", vowel: true }],
-  ["ɔ", { phoneme: "AO", vowel: true }],
-  ["ʌ", { phoneme: "AH", vowel: true }],
-  ["ə", { phoneme: "AH", vowel: true, schwa: true }],
-  ["ɚ", { phoneme: "ER", vowel: true }],
-  ["ɝ", { phoneme: "ER", vowel: true }],
-  ["ɜ", { phoneme: "ER", vowel: true }],
-  ["ɪ", { phoneme: "IH", vowel: true }],
-  ["i", { phoneme: "IY", vowel: true }],
-  ["ʊ", { phoneme: "UH", vowel: true }],
-  ["u", { phoneme: "UW", vowel: true }],
-  ["ɛ", { phoneme: "EH", vowel: true }],
-  ["e", { phoneme: "EH", vowel: true }],
-  ["p", { phoneme: "P" }],
-  ["b", { phoneme: "B" }],
-  ["t", { phoneme: "T" }],
-  ["d", { phoneme: "D" }],
-  ["k", { phoneme: "K" }],
-  ["g", { phoneme: "G" }],
-  ["f", { phoneme: "F" }],
-  ["v", { phoneme: "V" }],
-  ["θ", { phoneme: "TH" }],
-  ["ð", { phoneme: "DH" }],
-  ["s", { phoneme: "S" }],
-  ["z", { phoneme: "Z" }],
-  ["ʃ", { phoneme: "SH" }],
-  ["ʒ", { phoneme: "ZH" }],
-  ["h", { phoneme: "HH" }],
-  ["m", { phoneme: "M" }],
-  ["n", { phoneme: "N" }],
-  ["ŋ", { phoneme: "NG" }],
-  ["l", { phoneme: "L" }],
-  ["r", { phoneme: "R" }],
-  ["j", { phoneme: "Y" }],
-  ["w", { phoneme: "W" }]
-]);
-
-function ipaToCmuPhonemes(ipa: string) {
-  const normalized = ipa
-    .normalize("NFC")
-    .replace(/[()]/g, "")
-    .replace(/[ˑ˞]/g, "")
-    .replace(/[ɡ]/g, "g");
-  const tokens: string[] = [];
-  let pendingStress: "1" | "2" | null = null;
-  let hasVowel = false;
-
-  for (let index = 0; index < normalized.length;) {
-    const mark = normalized[index];
-    if (mark === "ˈ" || mark === "'") {
-      pendingStress = "1";
-      index += 1;
-      continue;
-    }
-    if (mark === "ˌ" || mark === ",") {
-      pendingStress = "2";
-      index += 1;
-      continue;
-    }
-    if (mark === "." || mark === " " || mark === "ː" || mark === ":") {
-      index += 1;
-      continue;
-    }
-
-    const three = normalized.slice(index, index + 3);
-    const two = normalized.slice(index, index + 2);
-    const one = normalized[index];
-    let token = ipaToCmuMap.get(three);
-    let length = 3;
-    if (!token) {
-      token = ipaToCmuMap.get(two);
-      length = 2;
-    }
-    if (!token) {
-      token = ipaToCmuMap.get(one);
-      length = 1;
-    }
-    if (!token) throw new Error(`暂不支持的音标符号：${one}`);
-
-    if (token.vowel) {
-      const stress = pendingStress ?? (token.schwa ? "0" : hasVowel ? "0" : "1");
-      tokens.push(...token.phoneme.split(" ").map((part) => `${part}${stress}`));
-      hasVowel = true;
-      pendingStress = null;
-    } else {
-      tokens.push(token.phoneme);
-    }
-    index += length;
-  }
-
-  if (!tokens.length) throw new Error("音标不能为空");
-  return tokens.join(" ");
-}
-
 function cacheKey(value: string) {
   return crypto.createHash("sha256").update(value).digest("hex").slice(0, 24);
 }
 
-function aliyunTtsCacheName(phoneme: string, fallback: string) {
-  const safeModel = aliyunTtsModel.replace(/[^a-z0-9_-]/gi, "_");
-  const safeVoice = aliyunTtsVoice.replace(/[^a-z0-9_-]/gi, "_");
-  return `aliyun-${safeModel}-${safeVoice}-${cacheKey(`${phoneme}\n${fallback}\ncmu-ssml-v3`)}.mp3`;
+function xiaomiTtsCacheName(phoneme: string, fallback: string) {
+  const safeModel = xiaomiTtsModel.replace(/[^a-z0-9_-]/gi, "_");
+  const safeVoice = xiaomiTtsVoice.replace(/[^a-z0-9_-]/gi, "_");
+  return `mimo-${safeModel}-${safeVoice}-${cacheKey(`${phoneme}\n${fallback}\n${xiaomiTtsPrompt}\nv1`)}.wav`;
 }
 
-async function cachedAliyunTtsPath(phoneme: string, fallback: string) {
+async function cachedXiaomiTtsPath(phoneme: string, fallback: string) {
   await fs.promises.mkdir(pronunciationCacheDir, { recursive: true });
-  const filePath = path.join(pronunciationCacheDir, aliyunTtsCacheName(phoneme, fallback));
+  const filePath = path.join(pronunciationCacheDir, xiaomiTtsCacheName(phoneme, fallback));
   return fs.existsSync(filePath) ? filePath : null;
 }
 
-async function writeAliyunTtsCache(phoneme: string, fallback: string, audio: Buffer) {
+async function writeXiaomiTtsCache(phoneme: string, fallback: string, audio: Buffer) {
   await fs.promises.mkdir(pronunciationCacheDir, { recursive: true });
-  const filePath = path.join(pronunciationCacheDir, aliyunTtsCacheName(phoneme, fallback));
+  const filePath = path.join(pronunciationCacheDir, xiaomiTtsCacheName(phoneme, fallback));
   const tempPath = `${filePath}.${crypto.randomUUID()}.tmp`;
   await fs.promises.writeFile(tempPath, audio);
   await fs.promises.rename(tempPath, filePath);
   return filePath;
 }
 
-function aliyunTtsRequest(action: string, taskId: string, payload: Record<string, unknown> = {}) {
-  return {
-    header: {
-      action,
-      task_id: taskId,
-      streaming: "duplex"
+function xiaomiTtsUserPrompt(phoneme: string, fallback: string) {
+  return `${xiaomiTtsPrompt}\n\n朗读对象：${fallback}\n参考音标：/${phoneme}/\n请只输出朗读音频，不要朗读解释、标点说明或音标符号本身。`;
+}
+
+function parseXiaomiAudioData(value: unknown): string | null {
+  if (typeof value === "string" && value.trim()) return value.trim();
+  if (!value || typeof value !== "object") return null;
+  const record = value as Record<string, unknown>;
+  return parseXiaomiAudioData(record.data ?? record.audio ?? record.url);
+}
+
+async function synthesizeWithXiaomi(phoneme: string, fallback: string) {
+  if (!xiaomiTtsApiKey) throw new Error("缺少 XIAOMI_MIMO_API_KEY");
+
+  const response = await fetch(xiaomiTtsUrl, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      Authorization: `Bearer ${xiaomiTtsApiKey}`
     },
-    payload
-  };
-}
-
-function aliyunTtsStartPayload() {
-  return {
-    task_group: "audio",
-    task: "tts",
-    function: "SpeechSynthesizer",
-    model: aliyunTtsModel,
-    parameters: {
-      text_type: "PlainText",
-      voice: aliyunTtsVoice,
-      format: "mp3",
-      sample_rate: 22050,
-      rate: 1,
-      pitch: 1,
-      volume: 50,
-      enable_ssml: true
-    },
-    input: {}
-  };
-}
-
-function parseAliyunWsMessage(data: WebSocket.RawData) {
-  const text = Array.isArray(data)
-    ? Buffer.concat(data).toString("utf8")
-    : Buffer.isBuffer(data)
-      ? data.toString("utf8")
-      : Buffer.from(data as ArrayBuffer).toString("utf8");
-  try {
-    return JSON.parse(text) as {
-      header?: {
-        event?: string;
-        code?: string;
-        message?: string;
-        error_code?: string;
-        error_message?: string;
-      };
-    };
-  } catch {
-    return null;
-  }
-}
-
-async function synthesizeWithAliyun(phoneme: string, fallback: string) {
-  if (!aliyunTtsApiKey) throw new Error("缺少 DASHSCOPE_API_KEY 或 ALIYUN_BAILIAN_API_KEY");
-  const ssml = aliyunPronunciationSsml(ipaToCmuPhonemes(phoneme), fallback);
-  const taskId = crypto.randomUUID();
-  const chunks: Buffer[] = [];
-
-  const audio = await new Promise<Buffer>((resolve, reject) => {
-    const ws = new WebSocket(aliyunTtsUrl, {
-      headers: {
-        Authorization: `bearer ${aliyunTtsApiKey}`,
-        "X-DashScope-DataInspection": "enable"
-      }
-    });
-
-    const timeout = setTimeout(() => {
-      ws.close();
-      reject(new Error("阿里云语音合成超时"));
-    }, 30000);
-
-    const cleanup = () => clearTimeout(timeout);
-    const send = (message: unknown) => ws.send(JSON.stringify(message));
-
-    ws.on("open", () => {
-      send(aliyunTtsRequest("run-task", taskId, aliyunTtsStartPayload()));
-    });
-
-    ws.on("message", (data, isBinary) => {
-      if (isBinary) {
-        chunks.push(Buffer.isBuffer(data) ? data : Buffer.from(data as ArrayBuffer));
-        return;
-      }
-
-      const message = parseAliyunWsMessage(data);
-      const event = message?.header?.event;
-      if (event === "task-started") {
-        send(aliyunTtsRequest("continue-task", taskId, { input: { text: ssml } }));
-        send(aliyunTtsRequest("finish-task", taskId, { input: {} }));
-      } else if (event === "task-finished") {
-        cleanup();
-        ws.close();
-        resolve(Buffer.concat(chunks));
-      } else if (event === "task-failed") {
-        cleanup();
-        reject(new Error(message?.header?.error_message ?? message?.header?.message ?? message?.header?.error_code ?? message?.header?.code ?? "阿里云语音合成失败"));
-      }
-    });
-
-    ws.on("error", (error) => {
-      cleanup();
-      reject(error);
-    });
-
-    ws.on("close", () => {
-      cleanup();
-      if (!chunks.length) reject(new Error("阿里云语音合成未返回音频"));
-    });
+    body: JSON.stringify({
+      model: xiaomiTtsModel,
+      modalities: ["text", "audio"],
+      audio: {
+        voice: xiaomiTtsVoice,
+        format: "wav"
+      },
+      messages: [
+        { role: "user", content: xiaomiTtsUserPrompt(phoneme, fallback) },
+        { role: "assistant", content: fallback }
+      ]
+    })
   });
 
-  if (!audio.length) throw new Error("阿里云语音合成未返回音频");
-  return audio;
+  if (!response.ok) {
+    const body = await response.text().catch(() => "");
+    throw new Error(`小米 MiMo 语音合成失败：${response.status}${body ? ` ${body.slice(0, 300)}` : ""}`);
+  }
+
+  const result = await response.json() as {
+    choices?: Array<{
+      message?: {
+        audio?: unknown;
+      };
+    }>;
+    audio?: unknown;
+    data?: unknown;
+  };
+  const audioData = parseXiaomiAudioData(result.choices?.[0]?.message?.audio ?? result.audio ?? result.data);
+  if (!audioData) throw new Error("小米 MiMo 语音合成未返回音频");
+
+  if (/^https?:\/\//i.test(audioData)) {
+    const audioResponse = await fetch(audioData);
+    if (!audioResponse.ok) throw new Error(`小米 MiMo 音频下载失败：${audioResponse.status}`);
+    return Buffer.from(await audioResponse.arrayBuffer());
+  }
+
+  return Buffer.from(audioData.replace(/^data:audio\/\w+;base64,/, ""), "base64");
 }
 
 function parseCookies(header: string | undefined) {
@@ -6226,21 +6038,21 @@ app.post("/api/tts", async (req, res) => {
   }
 
   try {
-    const cachedPath = await cachedAliyunTtsPath(phoneme, fallback);
+    const cachedPath = await cachedXiaomiTtsPath(phoneme, fallback);
     const audio = cachedPath
       ? await fs.promises.readFile(cachedPath)
-      : await synthesizeWithAliyun(phoneme, fallback).then((result) => writeAliyunTtsCache(phoneme, fallback, result).then(() => result));
+      : await synthesizeWithXiaomi(phoneme, fallback).then((result) => writeXiaomiTtsCache(phoneme, fallback, result).then(() => result));
 
-    res.setHeader("Content-Type", "audio/mpeg");
+    res.setHeader("Content-Type", "audio/wav");
     res.setHeader("Cache-Control", "no-store");
-    res.setHeader("X-Pronunciation-Source", cachedPath ? "cache" : "aliyun");
-    res.setHeader("X-Pronunciation-Model", aliyunTtsModel);
-    res.setHeader("X-Pronunciation-Voice", aliyunTtsVoice);
+    res.setHeader("X-Pronunciation-Source", cachedPath ? "cache" : "mimo");
+    res.setHeader("X-Pronunciation-Model", xiaomiTtsModel);
+    res.setHeader("X-Pronunciation-Voice", xiaomiTtsVoice);
     res.setHeader("X-Pronunciation-Phoneme", encodeURIComponent(phoneme));
     res.send(audio);
   } catch (error) {
     console.warn("Pronunciation synthesis failed", error);
-    res.status(502).json({ error: (error as Error).message || "阿里云音标发音暂不可用" });
+    res.status(502).json({ error: (error as Error).message || "小米 MiMo 语音合成暂不可用" });
   }
 });
 
