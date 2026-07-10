@@ -1341,7 +1341,6 @@ textarea:focus {
 
 .pomodoro-progress-value {
   stroke: var(--primary);
-  stroke-dasharray: var(--pomodoro-progress, 0) 100;
   stroke-dashoffset: 0;
   stroke-linecap: round;
   transition: stroke-dasharray 900ms linear;
