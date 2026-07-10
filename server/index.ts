@@ -11,7 +11,7 @@ import * as XLSX from "xlsx";
 import type { SqlValue } from "sql.js";
 import { all, get, getUserSetting, initDb, lastTableId, nowIso, run, setUserSetting } from "./db.js";
 import { nextReviewState, type ReviewRating } from "./ebbinghaus.js";
-import { doubaoTtsEndpoint, doubaoTtsPrompt, doubaoTtsResourceId, doubaoTtsVoice, parseDoubaoAudioChunks, pronunciationSsml } from "./doubao-tts.js";
+import { buildWordPronunciation, doubaoTtsEndpoint, doubaoTtsPrompt, doubaoTtsResourceId, doubaoTtsVoice, parseDoubaoAudioChunks } from "./doubao-tts.js";
 
 const app = express();
 const upload = multer({ storage: multer.memoryStorage() });
@@ -330,7 +330,7 @@ function cacheKey(value: string) {
 }
 
 function doubaoTtsCacheName(phoneme: string, fallback: string) {
-  return `doubao-${doubaoTtsResourceId}-${doubaoTtsVoice}-${cacheKey(`${phoneme}\n${fallback}\n${doubaoTtsPrompt}\nssml-british-ipa-v3`)}.mp3`;
+  return `doubao-${doubaoTtsResourceId}-${doubaoTtsVoice}-${cacheKey(`${phoneme}\n${fallback}\n${doubaoTtsPrompt}\ncmudict-ipa-match-v4`)}.mp3`;
 }
 
 async function cachedDoubaoTtsPath(phoneme: string, fallback: string) {
@@ -350,7 +350,15 @@ async function writeDoubaoTtsCache(phoneme: string, fallback: string, audio: Buf
 
 async function synthesizeWithDoubao(phoneme: string, fallback: string) {
   if (!doubaoTtsApiKey) throw new Error("缺少 DOUBAO_TTS_API_KEY");
-  const ssml = pronunciationSsml(fallback, phoneme);
+  const pronunciation = buildWordPronunciation(fallback, phoneme || undefined);
+  const ssml = pronunciation.ssml;
+  console.info("Pronunciation selected", {
+    word: pronunciation.word,
+    ipa: pronunciation.normalizedIpa,
+    cmu: pronunciation.cmu,
+    source: pronunciation.source,
+    confidence: pronunciation.confidence
+  });
   if (ssml.length > 150) throw new Error("单词及音标生成的 SSML 超过 150 个字符");
   const response = await fetch(doubaoTtsEndpoint, {
     method: "POST",

@@ -1,26 +1,10 @@
 import { describe, expect, it } from "vitest";
-import { ipaToCmuPhonemes, parseDoubaoAudioChunks, pronunciationSsml } from "./doubao-tts.js";
+import { buildWordPronunciation, isValidCmu, normalizeIpa, normalizeWord, parseDoubaoAudioChunks } from "./doubao-tts.js";
 
-describe("豆包单词发音", () => {
-  it("将英式 IPA 转为带重音的 CMU 音标并包裹 SSML", () => {
-    expect(ipaToCmuPhonemes("kəmˈplaɪ")).toBe("K AH0 M P L AY1");
-    expect(ipaToCmuPhonemes("'kəmplaɪ")).toBe("K AH1 M P L AY0");
-    expect(pronunciationSsml("comply", "kəmˈplaɪ")).toBe('<speak><phoneme alphabet="cmu" ph="K AH0 M P L AY1">comply</phoneme></speak>');
-  });
-
-  it("保留英式非卷舌发音，不从美式拼写补入 r", () => {
-    expect(ipaToCmuPhonemes("pəˈfɔːmə")).toBe("P AH0 F AO1 M AH0");
-    expect(pronunciationSsml("performer", "pəˈfɔːmə")).toBe('<speak><phoneme alphabet="cmu" ph="P AH0 F AO1 M AH0">performer</phoneme></speak>');
-  });
-
-  it("无 IPA 时直接以 SSML 朗读并转义单词", () => {
-    expect(pronunciationSsml("rock & roll")).toBe("<speak>rock &amp; roll</speak>");
-  });
-
-  it("拼接豆包分块 Base64 音频并传递上游失败", () => {
-    const first = Buffer.from("first").toString("base64");
-    const second = Buffer.from("second").toString("base64");
-    expect(parseDoubaoAudioChunks(`{"code":0,"data":"${first}"}\n{"code":0,"data":"${second}"}\n{"code":20000000,"message":"OK"}`)).toEqual(Buffer.from("firstsecond"));
-    expect(() => parseDoubaoAudioChunks('{"code":3001,"message":"invalid request"}')).toThrow("invalid request");
-  });
+describe("单词发音构建", () => {
+  it("规范化 IPA 与单词格式", () => { expect(normalizeIpa(" [pə'fɔ:mə(r)] ")).toBe("pəˈfɔːmə(r)"); expect(normalizeWord(" Performer ")).toBe("performer"); });
+  it("优先使用精确 IPA 覆盖表", () => { expect(buildWordPronunciation("performer", "/pə'fɔ:mə(r)/")).toMatchObject({ cmu: "P ER0 F AO1 R M ER0", source: "override" }); });
+  it("使用 CMUdict 的唯一候选和 IPA 匹配多读音", () => { expect(buildWordPronunciation("tighten", "/'taɪtn/").cmu).toBe("T AY1 T AH0 N"); expect(buildWordPronunciation("record", "/rɪ'kɔːd/").cmu).toBe("R IH0 K AO1 R D"); });
+  it("对词典外或非法输入降级为纯文本 SSML", () => { expect(buildWordPronunciation("madeupword", "/x/")).toMatchObject({ source: "plain-text-fallback", cmu: null }); expect(buildWordPronunciation("rock & roll").ssml).toBe("<speak>rock &amp; roll</speak>"); });
+  it("验证 CMU 格式并拼接豆包音频分块", () => { expect(isValidCmu("T AY1 T AH0 N")).toBe(true); expect(isValidCmu("bad cmu")).toBe(false); const data = Buffer.from("audio").toString("base64"); expect(parseDoubaoAudioChunks(`{\"code\":0,\"data\":\"${data}\"}\n{\"code\":20000000,\"message\":\"OK\"}`)).toEqual(Buffer.from("audio")); });
 });

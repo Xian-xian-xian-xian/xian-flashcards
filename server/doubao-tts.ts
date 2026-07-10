@@ -1,71 +1,64 @@
+import fs from "node:fs";
+import path from "node:path";
+import { dictionary as cmuDictionary } from "cmu-pronouncing-dictionary";
+
 export const doubaoTtsEndpoint = "https://openspeech.bytedance.com/api/v3/tts/unidirectional";
 export const doubaoTtsResourceId = "seed-tts-2.0";
 export const doubaoTtsVoice = "zh_female_yingyujiaoxue_uranus_bigtts";
 export const doubaoTtsPrompt = "你是一个英式英语朗读专家，你正在给在线词典的单词配音，请保证每个发音准确无误，并且严格按照英式英语发音，发音沉稳稳重";
 
-type CmuToken = { phoneme: string; vowel?: boolean; schwa?: boolean };
+export type PronunciationSource = "override" | "cmudict-unique" | "cmudict-ipa-match" | "cmudict-default" | "plain-text-fallback";
+export type PronunciationResult = { word: string; originalIpa: string | null; normalizedIpa: string | null; cmu: string | null; ssml: string; source: PronunciationSource; confidence: number };
 
-const ipaToCmuMap = new Map<string, CmuToken>([
-  ["tʃ", { phoneme: "CH" }], ["dʒ", { phoneme: "JH" }], ["eɪ", { phoneme: "EY", vowel: true }], ["aɪ", { phoneme: "AY", vowel: true }],
-  ["ɔɪ", { phoneme: "OY", vowel: true }], ["əʊ", { phoneme: "OW", vowel: true }], ["oʊ", { phoneme: "OW", vowel: true }], ["aʊ", { phoneme: "AW", vowel: true }],
-  ["ɪə", { phoneme: "IH R", vowel: true }], ["eə", { phoneme: "EH R", vowel: true }], ["ɛə", { phoneme: "EH R", vowel: true }], ["ʊə", { phoneme: "UH R", vowel: true }],
-  ["ɑː", { phoneme: "AA", vowel: true }], ["ɔː", { phoneme: "AO", vowel: true }], ["ɜː", { phoneme: "ER", vowel: true }], ["iː", { phoneme: "IY", vowel: true }],
-  ["uː", { phoneme: "UW", vowel: true }], ["æ", { phoneme: "AE", vowel: true }], ["ɑ", { phoneme: "AA", vowel: true }], ["ɒ", { phoneme: "AA", vowel: true }],
-  ["ɔ", { phoneme: "AO", vowel: true }], ["ʌ", { phoneme: "AH", vowel: true }], ["ə", { phoneme: "AH", vowel: true, schwa: true }], ["ɚ", { phoneme: "ER", vowel: true }],
-  ["ɝ", { phoneme: "ER", vowel: true }], ["ɜ", { phoneme: "ER", vowel: true }], ["ɪ", { phoneme: "IH", vowel: true }], ["i", { phoneme: "IY", vowel: true }],
-  ["ʊ", { phoneme: "UH", vowel: true }], ["u", { phoneme: "UW", vowel: true }], ["ɛ", { phoneme: "EH", vowel: true }], ["e", { phoneme: "EH", vowel: true }],
-  ["p", { phoneme: "P" }], ["b", { phoneme: "B" }], ["t", { phoneme: "T" }], ["d", { phoneme: "D" }], ["k", { phoneme: "K" }], ["g", { phoneme: "G" }],
-  ["f", { phoneme: "F" }], ["v", { phoneme: "V" }], ["θ", { phoneme: "TH" }], ["ð", { phoneme: "DH" }], ["s", { phoneme: "S" }], ["z", { phoneme: "Z" }],
-  ["ʃ", { phoneme: "SH" }], ["ʒ", { phoneme: "ZH" }], ["h", { phoneme: "HH" }], ["m", { phoneme: "M" }], ["n", { phoneme: "N" }], ["ŋ", { phoneme: "NG" }],
-  ["l", { phoneme: "L" }], ["r", { phoneme: "R" }], ["j", { phoneme: "Y" }], ["w", { phoneme: "W" }]
-]);
+const overrides = JSON.parse(fs.readFileSync(path.resolve(process.cwd(), "server/pronunciation-overrides.json"), "utf8")) as Record<string, string>;
+const validCmuToken = /^(AA|AE|AH|AO|AW|AY|B|CH|D|DH|EH|ER|EY|F|G|HH|IH|IY|JH|K|L|M|N|NG|OW|OY|P|R|S|SH|T|TH|UH|UW|V|W|Y|Z|ZH)([012])?$/;
+const cmuToIpa: Record<string, string> = { AA: "ɑː", AE: "æ", AH: "ə", AO: "ɔː", AW: "aʊ", AY: "aɪ", B: "b", CH: "tʃ", D: "d", DH: "ð", EH: "e", ER: "ə", EY: "eɪ", F: "f", G: "g", HH: "h", IH: "ɪ", IY: "iː", JH: "dʒ", K: "k", L: "l", M: "m", N: "n", NG: "ŋ", OW: "əʊ", OY: "ɔɪ", P: "p", R: "r", S: "s", SH: "ʃ", T: "t", TH: "θ", UH: "ʊ", UW: "uː", V: "v", W: "w", Y: "j", Z: "z", ZH: "ʒ" };
 
-function xmlEscape(value: string) {
-  return value.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;").replace(/'/g, "&apos;");
+export function normalizeWord(input: string) { return input.trim().toLowerCase().replace(/[’‘]/g, "'"); }
+export function normalizeIpa(input: string) {
+  return input.trim().replace(/^[\[/]+/, "").replace(/[\]/]+$/, "").replace(/[’']/g, "ˈ").replace(/,/g, "ˌ").replace(/:/g, "ː").replace(/ɡ/g, "g").replace(/[.\s]/g, "");
 }
+export function escapeXml(value: string) { return value.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;").replace(/'/g, "&apos;"); }
+export function buildCmuSsml(word: string, cmu: string) { return `<speak>\n  <phoneme alphabet="cmu" ph="${escapeXml(cmu)}">${escapeXml(word)}</phoneme>\n</speak>`; }
+function plainSsml(word: string) { return `<speak>${escapeXml(word)}</speak>`; }
+export function isValidCmu(cmu: string) { return cmu.trim().split(/\s+/).every((token) => validCmuToken.test(token)); }
 
-export function ipaToCmuPhonemes(ipa: string) {
-  const normalized = ipa.normalize("NFC").replace(/[()]/g, "").replace(/[ˑ˞]/g, "").replace(/[ɡ]/g, "g");
-  const tokens: string[] = [];
-  let pendingStress: "1" | "2" | null = null;
-  let hasVowel = false;
-  for (let index = 0; index < normalized.length;) {
-    const mark = normalized[index];
-    if (mark === "ˈ" || mark === "'") { pendingStress = "1"; index += 1; continue; }
-    if (mark === "ˌ" || mark === ",") { pendingStress = "2"; index += 1; continue; }
-    if (mark === "." || mark === " " || mark === "ː" || mark === ":") { index += 1; continue; }
-    const token = ipaToCmuMap.get(normalized.slice(index, index + 3)) ?? ipaToCmuMap.get(normalized.slice(index, index + 2)) ?? ipaToCmuMap.get(mark);
-    if (!token) throw new Error(`暂不支持的音标符号：${mark}`);
-    const length = ipaToCmuMap.has(normalized.slice(index, index + 3)) ? 3 : ipaToCmuMap.has(normalized.slice(index, index + 2)) ? 2 : 1;
-    if (token.vowel) {
-      const stress = pendingStress ?? (token.schwa ? "0" : hasVowel ? "0" : "1");
-      tokens.push(...token.phoneme.split(" ").map((part) => `${part}${stress}`));
-      hasVowel = true;
-      pendingStress = null;
-    } else tokens.push(token.phoneme);
-    index += length;
+function cmuCandidates(word: string) {
+  const normalized = normalizeWord(word);
+  return Object.entries(cmuDictionary).filter(([key]) => key === normalized || new RegExp(`^${normalized.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}\\(\\d+\\)$`).test(key)).map(([, value]) => value.replace(/\s+#.*$/, "")).filter(isValidCmu);
+}
+function cmuApproxIpa(cmu: string) {
+  const tokens = cmu.split(/\s+/); let output = "";
+  for (let index = 0; index < tokens.length; index += 1) {
+    const token = tokens[index]; const base = token.replace(/[012]$/, ""); const stress = token.match(/[12]$/)?.[0];
+    if (stress) output += stress === "1" ? "ˈ" : "ˌ";
+    if (base === "R" && index > 0 && /[AEIOU]/.test(tokens[index - 1]) && index + 1 < tokens.length && !/^[AEIOU]/.test(tokens[index + 1])) continue;
+    output += cmuToIpa[base] ?? "";
   }
-  if (!tokens.length) throw new Error("音标不能为空");
-  return tokens.join(" ");
+  return output;
 }
-
-export function pronunciationSsml(word: string, ipa?: string) {
-  const safeWord = xmlEscape(word);
-  const cmuPhonemes = ipa ? ipaToCmuPhonemes(ipa) : null;
-  if (!cmuPhonemes) return `<speak>${safeWord}</speak>`;
-  return `<speak><phoneme alphabet="cmu" ph="${xmlEscape(cmuPhonemes)}">${safeWord}</phoneme></speak>`;
+function weightedDistance(left: string, right: string) {
+  const a = left.replace(/[()]/g, ""); const b = right.replace(/[()]/g, ""); const row = Array.from({ length: b.length + 1 }, (_, index) => index);
+  for (let i = 1; i <= a.length; i += 1) { let previous = row[0]; row[0] = i; for (let j = 1; j <= b.length; j += 1) { const old = row[j]; const cost = a[i - 1] === b[j - 1] ? 0 : ("ˈˌ".includes(a[i - 1]) || "ˈˌ".includes(b[j - 1]) ? 2 : "aeiouəɪʊɔɑæɜ".includes(a[i - 1]) || "aeiouəɪʊɔɑæɜ".includes(b[j - 1]) ? 1.5 : 1); row[j] = Math.min(row[j] + 1, row[j - 1] + 1, previous + cost); previous = old; } }
+  return row[b.length];
 }
-
-export function parseDoubaoAudioChunks(body: string) {
-  const chunks: Buffer[] = [];
-  for (const line of body.split(/\r?\n/)) {
-    if (!line.trim()) continue;
-    let message: { code?: number; message?: string; data?: string };
-    try { message = JSON.parse(line); } catch { continue; }
-    // 豆包单向流式接口会以非零 code、message 为 OK 的帧标记正常结束。
-    if (message.code && message.code !== 0 && message.message !== "OK") throw new Error(message.message || `豆包语音合成失败：${message.code}`);
-    if (message.data) chunks.push(Buffer.from(message.data, "base64"));
-  }
-  if (!chunks.length) throw new Error("豆包语音合成未返回音频");
-  return Buffer.concat(chunks);
+function chooseCandidate(candidates: string[], ipa: string) {
+  const scored = candidates.map((cmu) => ({ cmu, score: weightedDistance(cmuApproxIpa(cmu), ipa) })).sort((a, b) => a.score - b.score);
+  const best = scored[0]; const next = scored[1]; const confidence = Math.max(0.5, Math.min(1, 1 - best.score / Math.max(ipa.length, 1) + (next ? Math.min(0.15, (next.score - best.score) / 10) : 0)));
+  return { cmu: best.cmu, confidence };
 }
+export function buildWordPronunciation(wordInput: string, ipaInput?: string | null): PronunciationResult {
+  const word = normalizeWord(wordInput); const originalIpa = ipaInput?.trim() || null; const normalizedIpa = originalIpa ? normalizeIpa(originalIpa) : null;
+  try {
+    if (!word || !/^[a-z]+(?:['-][a-z]+)*$/.test(word)) throw new Error("invalid word");
+    const override = normalizedIpa ? overrides[`${word}|${normalizedIpa}`] : undefined;
+    if (override && isValidCmu(override)) return { word, originalIpa, normalizedIpa, cmu: override, ssml: buildCmuSsml(word, override), source: "override", confidence: 1 };
+    const candidates = cmuCandidates(word);
+    if (candidates.length === 1) return { word, originalIpa, normalizedIpa, cmu: candidates[0], ssml: buildCmuSsml(word, candidates[0]), source: "cmudict-unique", confidence: 1 };
+    if (candidates.length > 1 && normalizedIpa) { const chosen = chooseCandidate(candidates, normalizedIpa); return { word, originalIpa, normalizedIpa, cmu: chosen.cmu, ssml: buildCmuSsml(word, chosen.cmu), source: "cmudict-ipa-match", confidence: chosen.confidence }; }
+    if (candidates.length > 1) return { word, originalIpa, normalizedIpa, cmu: candidates[0], ssml: buildCmuSsml(word, candidates[0]), source: "cmudict-default", confidence: 0.55 };
+  } catch { /* fall through */ }
+  return { word, originalIpa, normalizedIpa, cmu: null, ssml: plainSsml(wordInput), source: "plain-text-fallback", confidence: 0 };
+}
+export function pronunciationSsml(word: string, ipa?: string) { return buildWordPronunciation(word, ipa).ssml; }
+export function parseDoubaoAudioChunks(body: string) { const chunks: Buffer[] = []; for (const line of body.split(/\r?\n/)) { if (!line.trim()) continue; let message: { code?: number; message?: string; data?: string }; try { message = JSON.parse(line); } catch { continue; } if (message.code && message.code !== 0 && message.message !== "OK") throw new Error(message.message || `豆包语音合成失败：${message.code}`); if (message.data) chunks.push(Buffer.from(message.data, "base64")); } if (!chunks.length) throw new Error("豆包语音合成未返回音频"); return Buffer.concat(chunks); }
