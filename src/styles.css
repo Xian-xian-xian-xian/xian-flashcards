@@ -1341,10 +1341,10 @@ textarea:focus {
 
 .pomodoro-progress-value {
   stroke: var(--primary);
-  stroke-dasharray: 100;
-  stroke-dashoffset: var(--pomodoro-offset, 100);
+  stroke-dasharray: var(--pomodoro-progress, 0) 100;
+  stroke-dashoffset: 0;
   stroke-linecap: round;
-  transition: stroke-dashoffset 900ms linear;
+  transition: stroke-dasharray 900ms linear;
 }
 
 .pomodoro-meta .type-pill:nth-child(3) {
