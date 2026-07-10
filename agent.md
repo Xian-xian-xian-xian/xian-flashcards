@@ -23,8 +23,8 @@ Do not use the retired server IP as a public entry. Current production entry poi
 Run ECS deployment in visible steps so failures are easy to locate:
 
 ```bash
-ssh -i ~/.ssh/codex_aliyun_flashcards -o IdentitiesOnly=yes ecs-user@114.55.96.20 'cd /srv/beyour/flashcards; pnpm install'
-ssh -i ~/.ssh/codex_aliyun_flashcards -o IdentitiesOnly=yes ecs-user@114.55.96.20 'cd /srv/beyour/flashcards; pnpm build'
-ssh -i ~/.ssh/codex_aliyun_flashcards -o IdentitiesOnly=yes ecs-user@114.55.96.20 'pm2 restart flashcards --update-env; pm2 save'
+ssh -i ~/.ssh/codex_flashcards -o IdentitiesOnly=yes ecs-user@114.55.96.20 'cd /srv/beyour/flashcards; pnpm install'
+ssh -i ~/.ssh/codex_flashcards -o IdentitiesOnly=yes ecs-user@114.55.96.20 'cd /srv/beyour/flashcards; pnpm build'
+ssh -i ~/.ssh/codex_flashcards -o IdentitiesOnly=yes ecs-user@114.55.96.20 'pm2 restart flashcards --update-env; pm2 save'
 curl https://card.beyour.top/api/health
 ```
