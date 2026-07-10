@@ -69,6 +69,7 @@ const xiaomiTtsModel = process.env.XIAOMI_MIMO_TTS_MODEL ?? "mimo-v2.5-tts";
 const xiaomiTtsVoice = process.env.XIAOMI_MIMO_TTS_VOICE ?? "Dean";
 const xiaomiTtsPrompt = process.env.XIAOMI_MIMO_TTS_PROMPT
   ?? "你是一个英式英语朗读专家，正在给在线词典的单词配音。请保证发音准确无误，严格采用自然、清晰、标准的英式英语发音。";
+const aliyunDashscopeApiKey = process.env.DASHSCOPE_API_KEY ?? "";
 const normalizedUsers = new Set<number>();
 const recentLogWindowMs = 10 * 60 * 1000;
 const maxRecentLogEntries = 2000;
@@ -6053,6 +6054,66 @@ app.post("/api/tts", async (req, res) => {
   } catch (error) {
     console.warn("Pronunciation synthesis failed", error);
     res.status(502).json({ error: (error as Error).message || "小米 MiMo 语音合成暂不可用" });
+  }
+});
+
+app.post("/api/aliyun-tts", async (req, res) => {
+  const text = String(req.body?.text ?? "").trim();
+  const model = String(req.body?.model ?? "cosyvoice-v3-flash").trim();
+  const voice = String(req.body?.voice ?? "longanyang").trim();
+  const numberInRange = (value: unknown, fallback: number, min: number, max: number) => {
+    const parsed = Number(value);
+    return Number.isFinite(parsed) ? Math.min(max, Math.max(min, parsed)) : fallback;
+  };
+
+  if (!aliyunDashscopeApiKey) {
+    res.status(503).json({ error: "服务端尚未配置 DASHSCOPE_API_KEY" });
+    return;
+  }
+  if (!text) {
+    res.status(400).json({ error: "请输入需要试听的文本" });
+    return;
+  }
+  if (text.length > 2000) {
+    res.status(400).json({ error: "单次试听最多 2000 个字符" });
+    return;
+  }
+
+  try {
+    const response = await fetch("https://dashscope.aliyuncs.com/api/v1/services/audio/tts/SpeechSynthesizer", {
+      method: "POST",
+      headers: { Authorization: `Bearer ${aliyunDashscopeApiKey}`, "Content-Type": "application/json" },
+      body: JSON.stringify({
+        model,
+        input: {
+          text,
+          voice,
+          format: "mp3",
+          sample_rate: 24000,
+          rate: numberInRange(req.body?.rate, 1, 0.5, 2),
+          pitch: numberInRange(req.body?.pitch, 1, 0.5, 2),
+          volume: numberInRange(req.body?.volume, 50, 0, 100)
+        }
+      })
+    });
+    const result = await response.json().catch(() => ({})) as { message?: string; code?: string; output?: { audio?: { url?: string } } };
+    if (!response.ok) {
+      res.status(502).json({ error: result.message || result.code || "阿里云语音合成请求失败" });
+      return;
+    }
+    const audioUrl = result.output?.audio?.url;
+    if (!audioUrl || !/^https?:\/\//.test(audioUrl)) {
+      res.status(502).json({ error: "阿里云未返回可播放的音频" });
+      return;
+    }
+    const audioResponse = await fetch(audioUrl);
+    if (!audioResponse.ok) throw new Error("无法获取阿里云生成的音频");
+    const audio = Buffer.from(await audioResponse.arrayBuffer());
+    res.setHeader("Content-Type", audioResponse.headers.get("content-type") || "audio/mpeg");
+    res.setHeader("Cache-Control", "no-store");
+    res.send(audio);
+  } catch (error) {
+    res.status(502).json({ error: (error as Error).message || "阿里云语音合成暂不可用" });
   }
 });
 

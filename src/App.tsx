@@ -49,7 +49,7 @@ import { CSSProperties, FormEvent, PointerEvent as ReactPointerEvent, ReactNode,
 import { api, type CardPayload, type ConflictError } from "./api";
 import type { Card, CardType, DailyTask, Deck, ImportBatch, ReviewRating, ReviewRemaining, ReviewSnapshot, Settings, Stats, SyncStatus, ThemeMode, User } from "./types";
 
-type View = "home" | "deck" | "study" | "import" | "settings" | "about";
+type View = "home" | "deck" | "study" | "import" | "tts" | "settings" | "about";
 type SyncState = "idle" | "syncing" | "success" | "error" | "conflict";
 type StudyMode = "review" | "new" | "grind";
 type ReviewResult = { stage: number; dueAt: string; previous: ReviewSnapshot };
@@ -1062,6 +1062,7 @@ export default function App() {
         <NavButton icon={<BookOpen />} label="卡组" active={view === "deck"} onClick={() => setView("deck")} />
         <NavButton icon={<Brain />} label="学习" active={view === "study"} onClick={() => setView("study")} />
         <NavButton icon={<FileSpreadsheet />} label="导入" active={view === "import"} onClick={() => setView("import")} />
+        <NavButton icon={<Volume2 />} label="语音试听" active={view === "tts"} onClick={() => setView("tts")} />
         <NavButton icon={<SettingsIcon />} label="设置" active={view === "settings"} onClick={() => setView("settings")} />
         <NavButton icon={<Info />} label="关于" active={view === "about"} onClick={() => setView("about")} />
       </aside>
@@ -1269,6 +1270,8 @@ export default function App() {
           />
         )}
 
+        {view === "tts" && <AliyunTtsView />}
+
         {view === "settings" && (
           <SettingsView
             settings={settings}
@@ -1399,9 +1402,102 @@ function viewTitle(view: View) {
     deck: "卡组管理",
     study: "按卡组学习",
     import: "批量导入",
+    tts: "阿里云语音试听",
     settings: "设置",
     about: "关于"
   }[view];
+}
+
+function AliyunTtsView() {
+  const [text, setText] = useState("你好，欢迎使用阿里云百炼语音试听。现在，让文字拥有自然的声音。");
+  const [model, setModel] = useState("cosyvoice-v3-flash");
+  const [voice, setVoice] = useState("longanyang");
+  const [rate, setRate] = useState(1);
+  const [pitch, setPitch] = useState(1);
+  const [volume, setVolume] = useState(50);
+  const [status, setStatus] = useState("");
+  const [error, setError] = useState("");
+  const [playing, setPlaying] = useState(false);
+  const audioRef = useRef<HTMLAudioElement | null>(null);
+
+  useEffect(() => () => audioRef.current?.pause(), []);
+
+  async function synthesize(event: FormEvent) {
+    event.preventDefault();
+    if (!text.trim()) {
+      setError("请输入需要试听的文本");
+      return;
+    }
+    setError("");
+    setStatus("正在生成语音…");
+    setPlaying(true);
+    audioRef.current?.pause();
+    try {
+      const blob = await api.synthesizeAliyunSpeech({ text, model, voice, rate, pitch, volume });
+      const url = URL.createObjectURL(blob);
+      const audio = new Audio(url);
+      audioRef.current = audio;
+      audio.addEventListener("ended", () => {
+        setPlaying(false);
+        setStatus("试听完成");
+        URL.revokeObjectURL(url);
+      }, { once: true });
+      audio.addEventListener("error", () => {
+        setPlaying(false);
+        setError("音频播放失败，请重试");
+        URL.revokeObjectURL(url);
+      }, { once: true });
+      await audio.play();
+      setStatus("正在播放");
+    } catch (requestError) {
+      setPlaying(false);
+      setStatus("");
+      setError((requestError as Error).message);
+    }
+  }
+
+  return (
+    <section className="tts-page">
+      <div className="tts-intro">
+        <p className="eyebrow">DASHSCOPE · COSYVOICE</p>
+        <h2>让文字开口说话</h2>
+        <p>使用服务端已配置的阿里云百炼 API Key。仅登录后的闪记账号可以使用，密钥不会发送到浏览器。</p>
+      </div>
+      <form className="tts-layout" onSubmit={synthesize}>
+        <section className="tts-editor-card">
+          <label className="tts-text-label">试听文本 <span>{text.length} / 2000</span></label>
+          <textarea className="tts-textarea" value={text} maxLength={2000} onChange={(event) => setText(event.target.value)} placeholder="输入想要朗读的文字…" />
+          <div className="tts-editor-footer">
+            <span>支持中文、英文等多语种文本</span>
+            <button className="primary-button tts-generate" disabled={playing}><Volume2 />{playing ? "生成中…" : "生成并播放"}</button>
+          </div>
+          {(status || error) && <p className={`tts-status ${error ? "error" : ""}`}>{error || status}</p>}
+        </section>
+
+        <aside className="tts-settings-card">
+          <h3>声音设置</h3>
+          <label>模型
+            <select value={model} onChange={(event) => setModel(event.target.value)}>
+              <option value="cosyvoice-v3-flash">CosyVoice V3 Flash</option>
+              <option value="cosyvoice-v3-plus">CosyVoice V3 Plus</option>
+              <option value="cosyvoice-v2">CosyVoice V2</option>
+            </select>
+          </label>
+          <label>音色 ID
+            <input value={voice} onChange={(event) => setVoice(event.target.value)} placeholder="例如 longanyang" />
+          </label>
+          <RangeControl label="语速" value={rate} min={0.5} max={2} step={0.1} onChange={setRate} />
+          <RangeControl label="音调" value={pitch} min={0.5} max={2} step={0.1} onChange={setPitch} />
+          <RangeControl label="音量" value={volume} min={0} max={100} step={5} onChange={setVolume} suffix="%" />
+          <p className="tts-tip">音色需与所选模型匹配。默认 <code>longanyang</code> 可用于 V3 Flash。</p>
+        </aside>
+      </form>
+    </section>
+  );
+}
+
+function RangeControl(props: { label: string; value: number; min: number; max: number; step: number; suffix?: string; onChange: (value: number) => void }) {
+  return <label className="tts-range"><span>{props.label}<output>{props.value}{props.suffix}</output></span><input type="range" min={props.min} max={props.max} step={props.step} value={props.value} onChange={(event) => props.onChange(Number(event.target.value))} /></label>;
 }
 
 function syncLabel(state: SyncState) {

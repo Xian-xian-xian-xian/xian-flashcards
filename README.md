@@ -51,6 +51,14 @@ XIAOMI_MIMO_TTS_VOICE=Dean
 PRONUNCIATION_CACHE_DIR=runtime/pronunciations
 ```
 
+阿里云百炼语音试听使用与闪记相同的登录会话，仅已登录用户可调用。将现有百炼 API Key 配置在服务器环境变量中（不要写入前端或提交到仓库）：
+
+```bash
+DASHSCOPE_API_KEY=你的阿里云百炼北京地域API-Key
+```
+
+重启服务后，侧边栏的“语音试听”即可使用 CosyVoice 生成并播放音频。
+
 ## 发布到云端
 
 本地提交并推到 GitHub：
