@@ -15,7 +15,7 @@ describe("豆包单词发音", () => {
   it("拼接豆包分块 Base64 音频并传递上游失败", () => {
     const first = Buffer.from("first").toString("base64");
     const second = Buffer.from("second").toString("base64");
-    expect(parseDoubaoAudioChunks(`{"code":0,"data":"${first}"}\n{"code":0,"data":"${second}"}`)).toEqual(Buffer.from("firstsecond"));
+    expect(parseDoubaoAudioChunks(`{"code":0,"data":"${first}"}\n{"code":0,"data":"${second}"}\n{"code":20000000,"message":"OK"}`)).toEqual(Buffer.from("firstsecond"));
     expect(() => parseDoubaoAudioChunks('{"code":3001,"message":"invalid request"}')).toThrow("invalid request");
   });
 });

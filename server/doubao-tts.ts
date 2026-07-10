@@ -61,7 +61,8 @@ export function parseDoubaoAudioChunks(body: string) {
     if (!line.trim()) continue;
     let message: { code?: number; message?: string; data?: string };
     try { message = JSON.parse(line); } catch { continue; }
-    if (message.code && message.code !== 0) throw new Error(message.message || `豆包语音合成失败：${message.code}`);
+    // 豆包单向流式接口会以非零 code、message 为 OK 的帧标记正常结束。
+    if (message.code && message.code !== 0 && message.message !== "OK") throw new Error(message.message || `豆包语音合成失败：${message.code}`);
     if (message.data) chunks.push(Buffer.from(message.data, "base64"));
   }
   if (!chunks.length) throw new Error("豆包语音合成未返回音频");
