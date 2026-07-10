@@ -9,6 +9,8 @@ import { fileURLToPath } from "node:url";
 import WebSocket from "ws";
 import { parse } from "csv-parse/sync";
 import * as XLSX from "xlsx";
+import { PollyClient, SynthesizeSpeechCommand } from "@aws-sdk/client-polly";
+import type { Engine, LanguageCode, VoiceId } from "@aws-sdk/client-polly";
 import type { SqlValue } from "sql.js";
 import { all, get, getUserSetting, initDb, lastTableId, nowIso, run, setUserSetting } from "./db.js";
 import { nextReviewState, type ReviewRating } from "./ebbinghaus.js";
@@ -64,6 +66,11 @@ const sessionDays = 30;
 const appVersion = "0.4.9";
 const timeZone = "Asia/Shanghai";
 const pronunciationCacheDir = process.env.PRONUNCIATION_CACHE_DIR ?? path.resolve(process.cwd(), "runtime/pronunciations");
+const ttsProvider = (process.env.TTS_PROVIDER ?? "amazon").trim().toLowerCase();
+const amazonPollyRegion = process.env.AWS_REGION ?? process.env.AWS_DEFAULT_REGION ?? "eu-west-2";
+const amazonPollyVoice = process.env.AMAZON_POLLY_VOICE ?? "Amy";
+const amazonPollyEngine = process.env.AMAZON_POLLY_ENGINE ?? "neural";
+const amazonPollySampleRate = process.env.AMAZON_POLLY_SAMPLE_RATE ?? "24000";
 const aliyunTtsModel = process.env.ALIYUN_TTS_MODEL ?? "cosyvoice-v2";
 const aliyunTtsVoice = process.env.ALIYUN_TTS_VOICE ?? "loongeric_v2";
 const aliyunTtsRegion = process.env.ALIYUN_TTS_REGION ?? "cn-beijing";
@@ -315,25 +322,45 @@ function isEnglishVoiceLanguage(language: unknown) {
   return normalizeVoiceLanguage(language).toLowerCase().startsWith("en");
 }
 
-function normalizePronunciationWord(value: unknown) {
+function normalizePronunciationText(value: unknown) {
   const text = String(value ?? "")
     .trim()
     .replace(/[’‘]/g, "'")
-    .toLowerCase();
-  const match = text.match(/^[a-z][a-z'-]{0,79}$/);
-  return match ? text : null;
+    .replace(/^[/\[]+|[/\]]+$/g, "")
+    .replace(/\s+/g, "");
+  if (!text || text.length > 160 || /[\u0000-\u001f<>&"]/.test(text)) return null;
+  return text;
 }
 
-function ttsCacheName(word: string) {
-  const safeModel = aliyunTtsModel.replace(/[^a-z0-9_-]/gi, "_");
-  const safeVoice = aliyunTtsVoice.replace(/[^a-z0-9_-]/gi, "_");
-  const safeWord = word.replace(/[^a-z0-9'-]/g, "_");
-  return `${safeModel}-${safeVoice}-${safeWord}.mp3`;
+function xmlEscape(value: string) {
+  return value
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;")
+    .replace(/'/g, "&apos;");
 }
 
-async function cachedTtsPath(word: string) {
+function pronunciationSsml(phoneme: string) {
+  return `<speak><phoneme alphabet="ipa" ph="${xmlEscape(phoneme)}">pronunciation</phoneme></speak>`;
+}
+
+function cacheKey(value: string) {
+  return crypto.createHash("sha256").update(value).digest("hex").slice(0, 24);
+}
+
+function ttsCacheName(phoneme: string) {
+  const provider = ttsProvider === "aliyun" ? "aliyun" : "amazon";
+  const model = provider === "aliyun" ? aliyunTtsModel : amazonPollyEngine;
+  const voice = provider === "aliyun" ? aliyunTtsVoice : amazonPollyVoice;
+  const safeModel = model.replace(/[^a-z0-9_-]/gi, "_");
+  const safeVoice = voice.replace(/[^a-z0-9_-]/gi, "_");
+  return `${provider}-${safeModel}-${safeVoice}-${cacheKey(phoneme)}.mp3`;
+}
+
+async function cachedTtsPath(phoneme: string) {
   await fs.promises.mkdir(pronunciationCacheDir, { recursive: true });
-  const filePath = path.join(pronunciationCacheDir, ttsCacheName(word));
+  const filePath = path.join(pronunciationCacheDir, ttsCacheName(phoneme));
   return fs.existsSync(filePath) ? filePath : null;
 }
 
@@ -451,6 +478,47 @@ async function synthesizeWithAliyun(word: string) {
   const filePath = path.join(pronunciationCacheDir, ttsCacheName(word));
   await fs.promises.writeFile(filePath, audio);
   return filePath;
+}
+
+async function streamToBuffer(stream: unknown) {
+  if (!stream) throw new Error("Amazon Polly 未返回音频");
+  if (stream instanceof Uint8Array) return Buffer.from(stream);
+  if (typeof (stream as { transformToByteArray?: unknown }).transformToByteArray === "function") {
+    const bytes = await (stream as { transformToByteArray: () => Promise<Uint8Array> }).transformToByteArray();
+    return Buffer.from(bytes);
+  }
+
+  const chunks: Buffer[] = [];
+  for await (const chunk of stream as AsyncIterable<Uint8Array | string>) {
+    chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk));
+  }
+  return Buffer.concat(chunks);
+}
+
+async function synthesizeWithAmazonPolly(phoneme: string) {
+  const client = new PollyClient({ region: amazonPollyRegion });
+  const response = await client.send(new SynthesizeSpeechCommand({
+    Engine: amazonPollyEngine as Engine,
+    LanguageCode: "en-GB" as LanguageCode,
+    OutputFormat: "mp3",
+    SampleRate: amazonPollySampleRate,
+    TextType: "ssml",
+    Text: pronunciationSsml(phoneme),
+    VoiceId: amazonPollyVoice as VoiceId
+  }));
+  const audio = await streamToBuffer(response.AudioStream);
+  if (!audio.length) throw new Error("Amazon Polly 未返回音频");
+
+  await fs.promises.mkdir(pronunciationCacheDir, { recursive: true });
+  const filePath = path.join(pronunciationCacheDir, ttsCacheName(phoneme));
+  await fs.promises.writeFile(filePath, audio);
+  return filePath;
+}
+
+async function synthesizePronunciation(phoneme: string) {
+  if (ttsProvider === "aliyun") return synthesizeWithAliyun(phoneme);
+  if (ttsProvider !== "amazon") throw new Error(`未知 TTS_PROVIDER：${ttsProvider}`);
+  return synthesizeWithAmazonPolly(phoneme);
 }
 
 function parseCookies(header: string | undefined) {
@@ -6065,30 +6133,30 @@ app.get("/api/templates/:name", (req, res) => {
 });
 
 app.post("/api/tts", async (req, res) => {
-  const word = normalizePronunciationWord(req.body.text);
-  if (!word) {
-    res.status(400).json({ error: "朗读文本不能为空" });
+  const phoneme = normalizePronunciationText(req.body.text);
+  if (!phoneme) {
+    res.status(400).json({ error: "音标不能为空" });
     return;
   }
   if (!isEnglishVoiceLanguage(req.body.language)) {
-    res.status(422).json({ error: "阿里云英式发音当前仅支持英语单词" });
+    res.status(422).json({ error: "英式音标发音当前仅支持英语" });
     return;
   }
 
   try {
-    const cachedPath = await cachedTtsPath(word);
-    const audioPath = cachedPath ?? await synthesizeWithAliyun(word);
+    const cachedPath = await cachedTtsPath(phoneme);
+    const audioPath = cachedPath ?? await synthesizePronunciation(phoneme);
 
     res.setHeader("Content-Type", "audio/mpeg");
     res.setHeader("Cache-Control", "no-store");
-    res.setHeader("X-Pronunciation-Source", cachedPath ? "cache" : "aliyun-cosyvoice");
-    res.setHeader("X-Pronunciation-Model", aliyunTtsModel);
-    res.setHeader("X-Pronunciation-Voice", aliyunTtsVoice);
-    res.setHeader("X-Pronunciation-Word", encodeURIComponent(word));
+    res.setHeader("X-Pronunciation-Source", cachedPath ? "cache" : ttsProvider);
+    res.setHeader("X-Pronunciation-Model", ttsProvider === "amazon" ? amazonPollyEngine : aliyunTtsModel);
+    res.setHeader("X-Pronunciation-Voice", ttsProvider === "amazon" ? amazonPollyVoice : aliyunTtsVoice);
+    res.setHeader("X-Pronunciation-Phoneme", encodeURIComponent(phoneme));
     res.send(await fs.promises.readFile(audioPath));
   } catch (error) {
-    console.warn("Aliyun CosyVoice pronunciation failed", error);
-    res.status(502).json({ error: "阿里云英式发音暂不可用，已回退到浏览器发音" });
+    console.warn("Pronunciation synthesis failed", error);
+    res.status(502).json({ error: "英式音标发音暂不可用，请检查 TTS 配置" });
   }
 });
 

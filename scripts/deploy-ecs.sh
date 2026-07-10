@@ -1,9 +1,9 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-ECS_HOST="${ECS_HOST:-root@121.43.195.214}"
+ECS_HOST="${ECS_HOST:-ecs-user@114.55.96.20}"
 ECS_KEY="${ECS_KEY:-$HOME/.ssh/codex_aliyun_flashcards}"
-REMOTE_DIR="${REMOTE_DIR:-/root/flashcards}"
+REMOTE_DIR="${REMOTE_DIR:-/srv/beyour/flashcards}"
 CONTROL_PATH="${CONTROL_PATH:-/tmp/xfcecs-%C}"
 
 ssh_base=(
@@ -92,7 +92,7 @@ verify_health() {
 trap close_master EXIT
 
 step "open ssh control connection" open_master
-step "backup sqlite database" remote "set -e; ts=\$(date +%Y%m%d%H%M%S); if [ -f '$REMOTE_DIR/data/flashcards.sqlite' ]; then cp '$REMOTE_DIR/data/flashcards.sqlite' /root/flashcards.sqlite.pre-release.\$ts; fi; echo backup_ts=\$ts"
+step "backup sqlite database" remote "set -e; ts=\$(date +%Y%m%d%H%M%S); if [ -f '$REMOTE_DIR/data/flashcards.sqlite' ]; then cp '$REMOTE_DIR/data/flashcards.sqlite' '$REMOTE_DIR/../flashcards.sqlite.pre-release.'\$ts; fi; echo backup_ts=\$ts"
 step "upload committed files" upload_committed_files
 step "install dependencies" remote "cd '$REMOTE_DIR'; pnpm install"
 step "build production assets" remote "cd '$REMOTE_DIR'; pnpm build"

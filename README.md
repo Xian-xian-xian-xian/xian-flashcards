@@ -2,6 +2,14 @@
 
 一个本地优先的网页闪记卡应用，支持卡组管理、表格导入、自动发音、艾宾浩斯复习、浏览器通知、橙色主题和暗黑模式。
 
+## 最新线上入口
+
+- 闪记卡：<https://card.beyour.top/>
+- 番茄基地：<https://tomato.beyour.top/>
+- 番茄基地模拟经营：<https://tomatogame.beyour.top/>
+
+旧服务器 IP 入口已作废；请只使用以上域名访问。
+
 ## 运行
 
 ```bash
@@ -28,7 +36,7 @@ pnpm dev:remote
 pnpm remote
 ```
 
-默认监听 `0.0.0.0:4174`，可用服务器 IP 访问；如果要改端口：
+默认监听 `0.0.0.0:4174`。线上访问统一通过 <https://card.beyour.top/>；如果要改端口：
 
 ```bash
 PORT=8080 pnpm start:remote
@@ -72,7 +80,7 @@ pnpm deploy:ecs
 
 ```bash
 curl http://127.0.0.1:4174/api/health
-curl http://121.43.195.214/api/health
+curl https://card.beyour.top/api/health
 ```
 
 如果页面仍显示旧版本，优先确认 `dist/assets` 的更新时间和 `pm2 list` 里的 `flashcards` 是否刚重启；浏览器端可用 `Cmd+Shift+R` 或 `Ctrl+F5` 强制刷新缓存。

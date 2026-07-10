@@ -100,6 +100,10 @@ function normalizeSpeechLanguage(value?: string) {
   return language || "en-GB";
 }
 
+function canBrowserSpeakText(value: string) {
+  return /^[a-zA-Z\s'-]+$/.test(value.trim());
+}
+
 function optionKey(value: string) {
   const normalized = normalizeAnswer(value);
   const match = normalized.match(/^([a-h])(?:[\s.)、:：-]+|$)/i);
@@ -1016,8 +1020,12 @@ export default function App() {
       audio.addEventListener("error", () => URL.revokeObjectURL(url), { once: true });
       await audio.play();
     } catch (error) {
-      console.warn("阿里云英式发音不可用，回退到浏览器发音", error);
-      speakWithBrowser(text, speechLanguage);
+      console.warn("英式音标发音不可用", error);
+      if (canBrowserSpeakText(text)) {
+        speakWithBrowser(text, speechLanguage);
+        return;
+      }
+      showToast((error as Error).message, "error");
     }
   }
 
@@ -1700,7 +1708,7 @@ function DeckView(props: {
                   <span className="word-card-title">{card.front}</span>
                   <span className="type-pill">{cardTypeLabels[card.card_type]}</span>
                   {isWordCard(card) && card.phonetic && <span className="phonetic">{card.phonetic}</span>}
-                  <button className="mini-button" title="发音" onClick={() => props.onSpeak(card.front)}><Volume2 /></button>
+                  <button className="mini-button" title="发音" onClick={() => props.onSpeak(isWordCard(card) && card.phonetic ? card.phonetic : card.front)}><Volume2 /></button>
                   <button className={`mini-button ${card.favorite ? "starred" : ""}`} title="收藏" disabled={busy === `favorite-${card.id}`} onClick={() => toggleFavorite(card)}><Star /></button>
                   <button className="mini-button" title="详情" onClick={() => setDetailCard(card)}><Eye /></button>
                   <button className="mini-button" title="编辑" onClick={() => { setEditingCard(card); scrollToPageTop(); }}><Edit3 /></button>
@@ -1798,7 +1806,7 @@ function CardEditor(props: { card?: Card; onSubmit: (payload: CardPayload) => Pr
       )}
       {cardType === "word" && (
         <EditorField label="音标">
-          <SmartTextField value={phonetic} onChange={setPhonetic} placeholder="音标（可选）" />
+          <SmartTextField value={phonetic} onChange={setPhonetic} placeholder="英式音标，如 /ˈwɔːtə/" />
         </EditorField>
       )}
       <EditorField label={cardType === "choice" ? "正确答案" : cardType === "blank" ? "填空答案" : cardType === "word" ? "释义 / 背面" : "背面 / 答案"}>
@@ -2318,6 +2326,7 @@ function StudyView(props: {
     "--study-back-min": `${Math.round(20 * scale)}px`,
     "--study-back-max": `${Math.round(30 * scale)}px`,
     "--study-small-size": `${Math.round(16 * scale)}px`,
+    "--study-detail-size": `${Math.round(16 * scale)}px`,
     "--study-question-size": `${Math.round(24 * scale)}px`,
     "--study-choice-size": `${Math.round(16 * scale)}px`,
     "--study-result-size": `${Math.round(16 * scale)}px`,
@@ -2400,7 +2409,22 @@ function StudyView(props: {
   }
 
   async function restFromGrind() {
-    if (document.fullscreenElement) await document.exitFullscreen().catch(() => undefined);
+    if (document.fullscreenElement) {
+      await new Promise<void>((resolve) => {
+        let settled = false;
+        const finish = () => {
+          if (settled) return;
+          settled = true;
+          window.clearTimeout(timeout);
+          document.removeEventListener("fullscreenchange", finish);
+          resolve();
+        };
+        const timeout = window.setTimeout(finish, 800);
+        document.addEventListener("fullscreenchange", finish);
+        document.exitFullscreen().catch(finish);
+      });
+      setImmersive(Boolean(document.fullscreenElement));
+    }
     resetSession();
     setGrindMessage("已休息，准备好后再开始死学。");
   }
@@ -2649,7 +2673,7 @@ function StudyView(props: {
               <button className="mini-button" title={immersive ? "退出沉浸学习" : "沉浸学习"} onClick={toggleImmersive}>{immersive ? <Minimize2 /> : <Maximize2 />}</button>
               <button className="mini-button" title="撤销上一张" disabled={history.length === 0 || Boolean(busy)} onClick={undo}><ArrowLeft /></button>
               <button className="mini-button" title="编辑当前卡片" onClick={editCurrentStudyCard}><Edit3 /></button>
-              <button className="mini-button" title="发音" onClick={() => props.onSpeak(card.front, card.language ?? props.selectedDeck?.language)}><Volume2 /></button>
+              <button className="mini-button" title="发音" onClick={() => props.onSpeak(isWordCard(card) && card.phonetic ? card.phonetic : card.front, card.language ?? props.selectedDeck?.language)}><Volume2 /></button>
             </div>
           </div>
           <div className="study-scroll" ref={studyScrollRef}>
@@ -3074,6 +3098,7 @@ function AboutView(props: { syncStatus: SyncStatus | null }) {
       <div className="schedule-box"><h3>同步状态</h3><p>最近同步：{props.syncStatus ? fullDateTime(props.syncStatus.lastSyncAt) : "暂无"} · 数据更新：{props.syncStatus?.dataUpdatedAt ? fullDateTime(props.syncStatus.dataUpdatedAt) : "暂无"}</p></div>
       <div className="schedule-box changelog-box">
         <h3>更新日志</h3>
+        <div className="changelog-row"><strong>0.4.10</strong><span>2026-07-10</span><p>学习字号现覆盖助记、备注、反馈和题目参考；死学休息可靠退出全屏，并彻底隐藏卡片翻页滚动条。</p></div>
         <div className="changelog-row"><strong>0.4.9</strong><span>2026-07-08</span><p>学习页新增快捷键、居中评级特效、隐藏翻页滚动条和全屏休息退出；编辑字段样式统一，并为导入增加最近导入撤销。</p></div>
         <div className="changelog-row"><strong>0.4.8</strong><span>2026-07-08</span><p>修复学习页编辑字段提示、布局和显示范围；卡片详情改为全屏学习预览；沉浸学习隐藏备案号，并收敛网页加粗使用。</p></div>
         <div className="changelog-row"><strong>0.4.7</strong><span>2026-07-05</span><p>阿里云 CosyVoice 英式朗读支持英文短语类单词卡，不再因空格直接回退到浏览器朗读。</p></div>

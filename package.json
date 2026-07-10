@@ -1,6 +1,6 @@
 {
   "name": "xian-flashcards",
-  "version": "0.4.9",
+  "version": "0.4.10",
   "private": true,
   "type": "module",
   "scripts": {
@@ -18,6 +18,7 @@
   },
   "dependencies": {
     "@vitejs/plugin-react": "^4.3.4",
+    "@aws-sdk/client-polly": "^3.848.0",
     "concurrently": "^9.1.2",
     "cors": "^2.8.5",
     "csv-parse": "^5.6.0",
