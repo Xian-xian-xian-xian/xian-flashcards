@@ -109,6 +109,8 @@ export type SyncStatus = {
 export type ActivePomodoro = {
   no?: number;
   taskGoal?: string;
+  durationSeconds?: number;
+  breakDurationSeconds?: number;
   remainingSeconds?: number;
   status?: "running" | "paused" | "awaitingSubmission";
   phase?: "focus" | "break" | "complete";

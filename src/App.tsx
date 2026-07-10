@@ -63,7 +63,7 @@ declare global {
   }
 }
 
-const version = "0.5.2";
+const version = "0.5.3";
 const logExportPressCount = 6;
 const logExportKey = "a";
 const logExportResetMs = 1800;
@@ -104,6 +104,17 @@ function formatPomodoroCountdown(state: TomatoState | null, now: number) {
     : Math.max(0, Math.ceil(Number(active.remainingSeconds) || 0));
   const minutes = Math.floor(seconds / 60);
   return `${String(minutes).padStart(2, "0")}:${String(seconds % 60).padStart(2, "0")}`;
+}
+
+function pomodoroRemainingRatio(state: TomatoState | null, now: number) {
+  const active = state?.activePomodoro;
+  if (!active) return 0;
+  const endAt = active.status === "running" && active.endAt ? new Date(active.endAt).getTime() : NaN;
+  const remaining = Number.isFinite(endAt)
+    ? Math.max(0, Math.ceil((endAt - now) / 1000))
+    : Math.max(0, Math.ceil(Number(active.remainingSeconds) || 0));
+  const duration = active.phase === "break" ? active.breakDurationSeconds : active.durationSeconds;
+  return Math.min(1, remaining / Math.max(1, Number(duration) || 25 * 60));
 }
 
 function normalizeSpeechLanguage(value?: string) {
@@ -2630,9 +2641,12 @@ function StudyView(props: {
             </div>
             <div className="study-actions">
               <div className="study-meta-left" aria-label="当前番茄钟">
-                <span className="type-pill">番茄钟 {formatPomodoroCountdown(tomatoState, pomodoroNow)}</span>
-                <span className="type-pill">番茄数量 {activePomodoro?.no ?? "—"}</span>
-                <span className="type-pill" title={activePomodoro?.taskGoal || "当前未设置任务"}>任务 {activePomodoro?.taskGoal || "未设置"}</span>
+                <div className="pomodoro-meta" style={{ "--pomodoro-remaining": String(pomodoroRemainingRatio(tomatoState, pomodoroNow)) } as CSSProperties}>
+                  <span className="type-pill">番茄钟 {formatPomodoroCountdown(tomatoState, pomodoroNow)}</span>
+                  <span className="type-pill">番茄数量 {activePomodoro?.no ?? "—"}</span>
+                  <span className="type-pill" title={activePomodoro?.taskGoal || "当前未设置任务"}>任务 {activePomodoro?.taskGoal || "未设置"}</span>
+                  <i className="pomodoro-progress-line" aria-hidden="true" />
+                </div>
                 <span className="type-pill">{cardTypeLabels[card.card_type]}</span>
                 <span className="type-pill study-schedule-pill" title={`下次复习：${fullDateTime(card.due_at)}（${dueText(card.due_at)}）`}>{studyScheduleText(card)}</span>
                 <span className="type-pill">新学剩余 {remaining.newRemaining}</span>
