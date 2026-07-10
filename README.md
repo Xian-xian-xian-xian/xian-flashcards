@@ -42,19 +42,20 @@ pnpm remote
 PORT=8080 pnpm start:remote
 ```
 
-英语单词发音默认使用阿里云百炼 CosyVoice v2 英式男声 `loongeric_v2`，生成结果会缓存到 `runtime/pronunciations`。生产环境可在服务器项目目录的 `.env` 中至少配置：
+英语音标发音默认使用服务器本地 `espeak-ng` 英式英语，生成结果会缓存到 `runtime/pronunciations`。服务器需要安装系统包：
 
 ```bash
-DASHSCOPE_API_KEY=你的百炼APIKey
+sudo apt install -y espeak-ng
 ```
 
 可选配置：
 
 ```bash
-ALIYUN_TTS_MODEL=cosyvoice-v2
-ALIYUN_TTS_VOICE=loongeric_v2
-ALIYUN_TTS_WORKSPACE_ID=你的百炼业务空间ID
-ALIYUN_TTS_REGION=cn-beijing
+TTS_PROVIDER=espeak
+ESPEAK_VOICE=en-gb
+ESPEAK_SPEED=150
+ESPEAK_AMPLITUDE=120
+ESPEAK_PITCH=50
 PRONUNCIATION_CACHE_DIR=runtime/pronunciations
 ```
 
