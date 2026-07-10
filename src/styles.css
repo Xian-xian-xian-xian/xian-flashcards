@@ -1001,6 +1001,10 @@ textarea:focus {
   padding: 0 2px 6px;
 }
 
+.study-fixed-top .progress-line {
+  margin-bottom: 0;
+}
+
 .study-scroll {
   display: grid;
   min-height: 0;
