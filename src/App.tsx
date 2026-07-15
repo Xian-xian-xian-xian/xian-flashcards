@@ -64,7 +64,7 @@ declare global {
   }
 }
 
-const version = "0.6.1";
+const version = "0.6.2";
 const logExportPressCount = 6;
 const logExportKey = "a";
 const logExportResetMs = 1800;
@@ -1866,7 +1866,7 @@ function CardEditor(props: { card?: Card; onSubmit: (payload: CardPayload) => Pr
         <SmartTextField value={back} onChange={setBack} placeholder="输入背面或答案内容" required allowImageInsert />
       </EditorField>
       <EditorField label={cardType === "choice" || cardType === "blank" ? "解析 / 说明" : cardType === "word" ? "例句 / 说明" : "说明 / 例子"}>
-        <SmartTextField value={example} onChange={setExample} placeholder="可选" />
+        <SmartTextField value={example} onChange={setExample} placeholder="可选" allowImageInsert />
       </EditorField>
       {cardType === "word" && (
         <EditorField label="助记">
@@ -3266,6 +3266,7 @@ function AboutView(props: { syncStatus: SyncStatus | null }) {
       <div className="schedule-box"><h3>同步状态</h3><p>最近同步：{props.syncStatus ? fullDateTime(props.syncStatus.lastSyncAt) : "暂无"} · 数据更新：{props.syncStatus?.dataUpdatedAt ? fullDateTime(props.syncStatus.dataUpdatedAt) : "暂无"}</p></div>
       <div className="schedule-box changelog-box">
         <h3>更新日志</h3>
+        <div className="changelog-row"><strong>0.6.2</strong><span>2026-07-15</span><p>解析、说明和例句字段新增图片插入入口，支持在正文光标位置插入多张图片。</p></div>
         <div className="changelog-row"><strong>0.6.1</strong><span>2026-07-15</span><p>为手机端重新设计六入口底部导航，修复侧栏占满整屏导致无法操作的问题，并逐页优化顶部操作、卡组、学习、导入、设置与关于页的窄屏布局。</p></div>
         <div className="changelog-row"><strong>0.5.9</strong><span>2026-07-15</span><p>仅为 Xian 增加超级用户权限；可在学习页逐词编辑豆包 XML，保留原有模型提示词，并在提交后重新合成、替换语音缓存。</p></div>
         <div className="changelog-row"><strong>0.5.8</strong><span>2026-07-10</span><p>按番茄信息区域的真实尺寸计算进度环周长，修正不同宽度下进度与边框不一致的问题。</p></div>
