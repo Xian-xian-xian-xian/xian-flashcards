@@ -64,7 +64,7 @@ declare global {
   }
 }
 
-const version = "0.5.9";
+const version = "0.6.1";
 const logExportPressCount = 6;
 const logExportKey = "a";
 const logExportResetMs = 1800;
@@ -1472,7 +1472,15 @@ function syncLabel(state: SyncState) {
 
 function NavButton(props: { icon: JSX.Element; label: string; active: boolean; onClick: () => void }) {
   return (
-    <button className={`nav-button ${props.active ? "active" : ""}`} onClick={props.onClick}>
+    <button
+      className={`nav-button ${props.active ? "active" : ""}`}
+      aria-label={props.label}
+      aria-current={props.active ? "page" : undefined}
+      onClick={() => {
+        props.onClick();
+        window.scrollTo({ top: 0, left: 0, behavior: "auto" });
+      }}
+    >
       {props.icon}
       <span>{props.label}</span>
     </button>
@@ -3258,6 +3266,7 @@ function AboutView(props: { syncStatus: SyncStatus | null }) {
       <div className="schedule-box"><h3>同步状态</h3><p>最近同步：{props.syncStatus ? fullDateTime(props.syncStatus.lastSyncAt) : "暂无"} · 数据更新：{props.syncStatus?.dataUpdatedAt ? fullDateTime(props.syncStatus.dataUpdatedAt) : "暂无"}</p></div>
       <div className="schedule-box changelog-box">
         <h3>更新日志</h3>
+        <div className="changelog-row"><strong>0.6.1</strong><span>2026-07-15</span><p>为手机端重新设计六入口底部导航，修复侧栏占满整屏导致无法操作的问题，并逐页优化顶部操作、卡组、学习、导入、设置与关于页的窄屏布局。</p></div>
         <div className="changelog-row"><strong>0.5.9</strong><span>2026-07-15</span><p>仅为 Xian 增加超级用户权限；可在学习页逐词编辑豆包 XML，保留原有模型提示词，并在提交后重新合成、替换语音缓存。</p></div>
         <div className="changelog-row"><strong>0.5.8</strong><span>2026-07-10</span><p>按番茄信息区域的真实尺寸计算进度环周长，修正不同宽度下进度与边框不一致的问题。</p></div>
         <div className="changelog-row"><strong>0.5.7</strong><span>2026-07-10</span><p>将番茄进度环改为连续绘制的单段轨迹，避免圆角边框被拆成多段线条。</p></div>
