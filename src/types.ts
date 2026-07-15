@@ -77,6 +77,7 @@ export type Settings = {
 export type User = {
   id: number;
   username: string;
+  isSuperuser: boolean;
 };
 
 export type DailyTask = {

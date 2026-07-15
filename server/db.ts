@@ -117,6 +117,16 @@ export async function initDb() {
       FOREIGN KEY(user_id) REFERENCES users(id) ON DELETE CASCADE
     );
 
+    CREATE TABLE IF NOT EXISTS pronunciation_ssml_overrides (
+      cache_key TEXT PRIMARY KEY,
+      word TEXT NOT NULL,
+      phoneme TEXT NOT NULL,
+      ssml TEXT NOT NULL,
+      updated_by INTEGER NOT NULL,
+      updated_at TEXT NOT NULL,
+      FOREIGN KEY(updated_by) REFERENCES users(id) ON DELETE CASCADE
+    );
+
     CREATE TABLE IF NOT EXISTS import_batches (
       id TEXT PRIMARY KEY,
       user_id INTEGER NOT NULL,

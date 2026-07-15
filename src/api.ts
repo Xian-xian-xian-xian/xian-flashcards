@@ -43,9 +43,9 @@ async function download(url: string) {
   return { blob: await response.blob(), filename };
 }
 
-async function audioRequest(url: string, payload: unknown) {
+async function audioRequest(url: string, payload: unknown, method = "POST") {
   const response = await fetch(url, {
-    method: "POST",
+    method,
     headers: { "Content-Type": "application/json" },
     credentials: "include",
     body: JSON.stringify(payload)
@@ -111,5 +111,10 @@ export const api = {
   undoImport: (batchId: string) =>
     request<{ ok: true; deleted: number }>(`/api/import/${encodeURIComponent(batchId)}/undo`, { method: "POST" }),
   synthesizeSpeech: (payload: { text: string; language?: string; fallback?: string }) => audioRequest("/api/tts", payload),
+  pronunciationXml: (payload: { text: string; fallback: string }) => {
+    const query = new URLSearchParams(payload);
+    return request<{ ssml: string; customized: boolean }>(`/api/tts/xml?${query.toString()}`);
+  },
+  savePronunciationXml: (payload: { text: string; fallback: string; language?: string; ssml: string }) => audioRequest("/api/tts/xml", payload, "PUT"),
   exportRecentLogs: () => download("/api/logs/recent?minutes=10")
 };

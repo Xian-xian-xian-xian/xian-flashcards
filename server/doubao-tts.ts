@@ -6,6 +6,7 @@ export const doubaoTtsEndpoint = "https://openspeech.bytedance.com/api/v3/tts/un
 export const doubaoTtsResourceId = "seed-tts-2.0";
 export const doubaoTtsVoice = "zh_female_yingyujiaoxue_uranus_bigtts";
 export const doubaoTtsPrompt = "请使用标准、自然、非卷舌的英式英语词典发音，只朗读给定的单词一次。单独朗读词条时，不要读出词尾可选的连接音或侵入音 /r/，语气中性，发音清晰，不要解释。";
+export const maxDoubaoSsmlLength = 150;
 
 export type PronunciationSource = "override" | "cmudict-unique" | "cmudict-ipa-match" | "cmudict-default" | "british-non-rhotic-fallback" | "plain-text-fallback";
 export type PronunciationResult = { word: string; originalIpa: string | null; normalizedIpa: string | null; cmu: string | null; selectedCmu: string | null; ssml: string; source: PronunciationSource; confidence: number; rhoticConflict: boolean; finalSsmlMode: "cmu" | "plain-text" };
@@ -22,6 +23,30 @@ export function escapeXml(value: string) { return value.replace(/&/g, "&amp;").r
 export function buildCmuSsml(word: string, cmu: string) { return `<speak>\n  <phoneme alphabet="cmu" ph="${escapeXml(cmu)}">${escapeXml(word)}</phoneme>\n</speak>`; }
 export function buildPlainTextSsml(word: string) { return `<speak>\n  ${escapeXml(word)}\n</speak>`; }
 export function isValidCmu(cmu: string) { return cmu.trim().split(/\s+/).every((token) => validCmuToken.test(token)); }
+export function normalizeCustomSsml(value: unknown) {
+  const ssml = String(value ?? "").trim();
+  if (!ssml) throw new Error("豆包 XML 不能为空");
+  if (ssml.length > maxDoubaoSsmlLength) throw new Error(`豆包 XML 不能超过 ${maxDoubaoSsmlLength} 个字符`);
+  if (/[\u0000-\u0008\u000b\u000c\u000e-\u001f]/.test(ssml) || /<!DOCTYPE|<!ENTITY|<\?/i.test(ssml)) throw new Error("豆包 XML 包含不支持的内容");
+  if (!/^<speak(?:\s[^<>]*)?>[\s\S]*<\/speak>$/.test(ssml)) throw new Error("豆包 XML 必须以 <speak> 为根节点");
+  return ssml;
+}
+
+export function buildDoubaoRequestBody(fallback: string, ssml: string) {
+  return {
+    user: { uid: "flashcards" },
+    req_params: {
+      text: fallback,
+      ssml,
+      speaker: doubaoTtsVoice,
+      audio_params: { format: "mp3", sample_rate: 24000 },
+      additions: JSON.stringify({
+        explicit_language: "en",
+        context_texts: [doubaoTtsPrompt]
+      })
+    }
+  };
+}
 
 function cmuCandidates(word: string) {
   const normalized = normalizeWord(word);

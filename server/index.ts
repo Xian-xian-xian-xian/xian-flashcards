@@ -10,8 +10,9 @@ import { parse } from "csv-parse/sync";
 import * as XLSX from "xlsx";
 import type { SqlValue } from "sql.js";
 import { all, get, getUserSetting, initDb, lastTableId, nowIso, run, setUserSetting } from "./db.js";
+import { isSuperuserUsername, publicAuthUser, type AuthUser } from "./auth.js";
 import { nextReviewState, type ReviewRating } from "./ebbinghaus.js";
-import { buildWordPronunciation, doubaoTtsEndpoint, doubaoTtsPrompt, doubaoTtsResourceId, doubaoTtsVoice, parseDoubaoAudioChunks } from "./doubao-tts.js";
+import { buildDoubaoRequestBody, buildWordPronunciation, doubaoTtsEndpoint, doubaoTtsPrompt, doubaoTtsResourceId, doubaoTtsVoice, maxDoubaoSsmlLength, normalizeCustomSsml, parseDoubaoAudioChunks } from "./doubao-tts.js";
 
 const app = express();
 const upload = multer({ storage: multer.memoryStorage() });
@@ -61,7 +62,7 @@ type CardType = "basic" | "word" | "choice" | "blank";
 const maxDeckDepth = 5;
 const sessionCookieName = "flashcards_session";
 const sessionDays = 30;
-const appVersion = "0.5.8";
+const appVersion = "0.5.9";
 const timeZone = "Asia/Shanghai";
 const pronunciationCacheDir = process.env.PRONUNCIATION_CACHE_DIR ?? path.resolve(process.cwd(), "runtime/pronunciations");
 const doubaoTtsApiKey = process.env.DOUBAO_TTS_API_KEY ?? "";
@@ -329,6 +330,45 @@ function cacheKey(value: string) {
   return crypto.createHash("sha256").update(value).digest("hex").slice(0, 24);
 }
 
+type PronunciationXmlOverride = {
+  cache_key: string;
+  word: string;
+  phoneme: string;
+  ssml: string;
+  updated_by: number;
+  updated_at: string;
+};
+
+function pronunciationOverrideKey(phoneme: string, fallback: string) {
+  return cacheKey(`${phoneme}\n${fallback}`);
+}
+
+function pronunciationXmlOverride(phoneme: string, fallback: string) {
+  return get<PronunciationXmlOverride>("SELECT * FROM pronunciation_ssml_overrides WHERE cache_key = ?", [pronunciationOverrideKey(phoneme, fallback)]);
+}
+
+function setPronunciationXmlOverride(userId: number, phoneme: string, fallback: string, ssml: string) {
+  run(
+    `INSERT INTO pronunciation_ssml_overrides (cache_key, word, phoneme, ssml, updated_by, updated_at)
+     VALUES (?, ?, ?, ?, ?, ?)
+     ON CONFLICT(cache_key) DO UPDATE SET word = excluded.word, phoneme = excluded.phoneme, ssml = excluded.ssml, updated_by = excluded.updated_by, updated_at = excluded.updated_at`,
+    [pronunciationOverrideKey(phoneme, fallback), fallback, phoneme, ssml, userId, nowIso()]
+  );
+}
+
+function restorePronunciationXmlOverride(previous: PronunciationXmlOverride | undefined, phoneme: string, fallback: string) {
+  if (!previous) {
+    run("DELETE FROM pronunciation_ssml_overrides WHERE cache_key = ?", [pronunciationOverrideKey(phoneme, fallback)]);
+    return;
+  }
+  run(
+    `INSERT INTO pronunciation_ssml_overrides (cache_key, word, phoneme, ssml, updated_by, updated_at)
+     VALUES (?, ?, ?, ?, ?, ?)
+     ON CONFLICT(cache_key) DO UPDATE SET word = excluded.word, phoneme = excluded.phoneme, ssml = excluded.ssml, updated_by = excluded.updated_by, updated_at = excluded.updated_at`,
+    [previous.cache_key, previous.word, previous.phoneme, previous.ssml, previous.updated_by, previous.updated_at]
+  );
+}
+
 function doubaoTtsCacheName(phoneme: string, fallback: string) {
   return `doubao-${doubaoTtsResourceId}-${doubaoTtsVoice}-${cacheKey(`${phoneme}\n${fallback}\n${doubaoTtsPrompt}\ncmudict-ipa-match-v5-non-rhotic`)}.mp3`;
 }
@@ -348,10 +388,10 @@ async function writeDoubaoTtsCache(phoneme: string, fallback: string, audio: Buf
   return filePath;
 }
 
-async function synthesizeWithDoubao(phoneme: string, fallback: string) {
+async function synthesizeWithDoubao(phoneme: string, fallback: string, ssmlOverride?: string) {
   if (!doubaoTtsApiKey) throw new Error("缺少 DOUBAO_TTS_API_KEY");
   const pronunciation = buildWordPronunciation(fallback, phoneme || undefined);
-  const ssml = pronunciation.ssml;
+  const ssml = ssmlOverride ?? pronunciation.ssml;
   console.info("Pronunciation selected", {
     word: pronunciation.word,
     ipa: pronunciation.normalizedIpa,
@@ -360,9 +400,9 @@ async function synthesizeWithDoubao(phoneme: string, fallback: string) {
     rhoticConflict: pronunciation.rhoticConflict,
     finalSource: pronunciation.source,
     confidence: pronunciation.confidence,
-    finalSsmlMode: pronunciation.finalSsmlMode
+    finalSsmlMode: ssmlOverride ? "custom" : pronunciation.finalSsmlMode
   });
-  if (ssml.length > 150) throw new Error("单词及音标生成的 SSML 超过 150 个字符");
+  if (ssml.length > maxDoubaoSsmlLength) throw new Error(`单词及音标生成的 SSML 超过 ${maxDoubaoSsmlLength} 个字符`);
   const response = await fetch(doubaoTtsEndpoint, {
     method: "POST",
     headers: {
@@ -372,19 +412,7 @@ async function synthesizeWithDoubao(phoneme: string, fallback: string) {
       "X-Api-Request-Id": crypto.randomUUID(),
       "X-Control-Require-Usage-Tokens-Return": "*"
     },
-    body: JSON.stringify({
-      user: { uid: "flashcards" },
-      req_params: {
-        text: fallback,
-        ssml,
-        speaker: doubaoTtsVoice,
-        audio_params: { format: "mp3", sample_rate: 24000 },
-        additions: JSON.stringify({
-          explicit_language: "en",
-          context_texts: [doubaoTtsPrompt]
-        })
-      }
-    })
+    body: JSON.stringify(buildDoubaoRequestBody(fallback, ssml))
   });
   if (!response.ok) {
     const body = await response.text().catch(() => "");
@@ -441,7 +469,7 @@ function clearSession(res: express.Response) {
 function userFromRequest(req: express.Request) {
   const sessionId = parseCookies(req.headers.cookie)[sessionCookieName];
   if (!sessionId) return undefined;
-  return get<{ id: number; username: string }>(
+  return get<AuthUser>(
     `SELECT u.id, u.username
      FROM sessions s
      JOIN users u ON u.id = s.user_id
@@ -458,6 +486,15 @@ function requireUser(req: express.Request, res: express.Response, next: express.
   }
   res.locals.user = user;
   normalizeExistingCards(Number(user.id));
+  next();
+}
+
+function requireSuperuser(_req: express.Request, res: express.Response, next: express.NextFunction) {
+  const user = res.locals.user as AuthUser;
+  if (!isSuperuserUsername(user?.username)) {
+    res.status(403).json({ error: "仅超级用户可以修改豆包 XML" });
+    return;
+  }
   next();
 }
 
@@ -4582,7 +4619,7 @@ app.get("/api/auth/status", (req, res) => {
   const hasUsers = Boolean(get<{ count: number }>("SELECT COUNT(*) AS count FROM users")?.count);
   res.json({
     authenticated: Boolean(user),
-    user: user ?? null,
+    user: user ? publicAuthUser(user) : null,
     canRegister: !hasUsers || process.env.ALLOW_REGISTRATION === "true"
   });
 });
@@ -4616,7 +4653,7 @@ app.post("/api/auth/register", (req, res) => {
     const userId = lastTableId("users");
     if (userCount === 0) claimExistingData(userId);
     createSession(res, userId);
-    res.status(201).json({ user: { id: userId, username } });
+    res.status(201).json({ user: publicAuthUser({ id: userId, username }) });
   } catch (error) {
     res.status(400).json({ error: (error as Error).message });
   }
@@ -4631,7 +4668,7 @@ app.post("/api/auth/login", (req, res) => {
     return;
   }
   createSession(res, Number(user.id));
-  res.json({ user: { id: Number(user.id), username: user.username } });
+  res.json({ user: publicAuthUser({ id: Number(user.id), username: user.username }) });
 });
 
 app.post("/api/auth/logout", (req, res) => {
@@ -6006,6 +6043,56 @@ app.get("/api/templates/:name", (req, res) => {
   res.download(path.join(templateDir, name), name);
 });
 
+app.get("/api/tts/xml", requireSuperuser, (req, res) => {
+  const phoneme = normalizePronunciationText(req.query.text) ?? "";
+  const fallback = normalizePronunciationFallback(req.query.fallback);
+  const override = pronunciationXmlOverride(phoneme, fallback);
+  res.json({
+    ssml: override?.ssml ?? buildWordPronunciation(fallback, phoneme || undefined).ssml,
+    customized: Boolean(override)
+  });
+});
+
+app.put("/api/tts/xml", requireSuperuser, async (req, res) => {
+  const phoneme = normalizePronunciationText(req.body.text) ?? "";
+  const fallback = normalizePronunciationFallback(req.body.fallback);
+  if (!isEnglishVoiceLanguage(req.body.language)) {
+    res.status(422).json({ error: "英式音标发音当前仅支持英语" });
+    return;
+  }
+
+  let ssml: string;
+  try {
+    ssml = normalizeCustomSsml(req.body.ssml);
+  } catch (error) {
+    res.status(400).json({ error: (error as Error).message });
+    return;
+  }
+
+  try {
+    const audio = await synthesizeWithDoubao(phoneme, fallback, ssml);
+    const previous = pronunciationXmlOverride(phoneme, fallback);
+    setPronunciationXmlOverride(currentUserId(res), phoneme, fallback, ssml);
+    try {
+      await writeDoubaoTtsCache(phoneme, fallback, audio);
+    } catch (error) {
+      restorePronunciationXmlOverride(previous, phoneme, fallback);
+      throw error;
+    }
+
+    res.setHeader("Content-Type", "audio/mpeg");
+    res.setHeader("Cache-Control", "no-store");
+    res.setHeader("X-Pronunciation-Source", "doubao-xml-override");
+    res.setHeader("X-Pronunciation-Model", doubaoTtsResourceId);
+    res.setHeader("X-Pronunciation-Voice", doubaoTtsVoice);
+    res.setHeader("X-Pronunciation-Phoneme", encodeURIComponent(phoneme));
+    res.send(audio);
+  } catch (error) {
+    console.warn("Pronunciation XML synthesis failed", error);
+    res.status(502).json({ error: (error as Error).message || "豆包语音合成暂不可用" });
+  }
+});
+
 app.post("/api/tts", async (req, res) => {
   const phoneme = normalizePronunciationText(req.body.text);
   const fallback = normalizePronunciationFallback(req.body.fallback);
@@ -6019,7 +6106,8 @@ app.post("/api/tts", async (req, res) => {
     const cachedPath = await cachedDoubaoTtsPath(cachePhoneme, fallback);
     const audio = cachedPath
       ? await fs.promises.readFile(cachedPath)
-      : await synthesizeWithDoubao(cachePhoneme, fallback).then((result) => writeDoubaoTtsCache(cachePhoneme, fallback, result).then(() => result));
+      : await synthesizeWithDoubao(cachePhoneme, fallback, pronunciationXmlOverride(cachePhoneme, fallback)?.ssml)
+          .then((result) => writeDoubaoTtsCache(cachePhoneme, fallback, result).then(() => result));
 
     res.setHeader("Content-Type", "audio/mpeg");
     res.setHeader("Cache-Control", "no-store");
