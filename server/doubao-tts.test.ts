@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { buildDoubaoRequestBody, buildPlainTextSsml, buildWordPronunciation, detectBritishRhoticConflict, doubaoTtsPrompt, isValidCmu, normalizeCustomSsml, normalizeIpa, normalizeWord, parseDoubaoAudioChunks } from "./doubao-tts.js";
+import { buildDoubaoRequestBody, buildPlainTextSsml, buildWordPronunciation, detectBritishRhoticConflict, doubaoTtsPrompt, isValidCmu, normalizeCustomSsml, normalizeDoubaoPrompt, normalizeIpa, normalizeWord, parseDoubaoAudioChunks } from "./doubao-tts.js";
 
 describe("单词发音构建", () => {
   it("规范化 IPA 与单词格式", () => { expect(normalizeIpa(" [pə'fɔ:mə(r)] ")).toBe("pəˈfɔːmə(r)"); expect(normalizeWord(" Performer ")).toBe("performer"); });
@@ -24,6 +24,13 @@ describe("单词发音构建", () => {
   it("自定义 XML 请求继续携带原有模型提示词", () => {
     const body = buildDoubaoRequestBody("tighten", "<speak>tighten</speak>");
     expect(JSON.parse(body.req_params.additions)).toMatchObject({ explicit_language: "en", context_texts: [doubaoTtsPrompt] });
+  });
+  it("支持校验并发送超级用户自定义模型提示词", () => {
+    const prompt = normalizeDoubaoPrompt("  请放慢语速并保持英式发音。  ");
+    const body = buildDoubaoRequestBody("tighten", "<speak>tighten</speak>", prompt);
+    expect(prompt).toBe("请放慢语速并保持英式发音。");
+    expect(JSON.parse(body.req_params.additions)).toMatchObject({ context_texts: [prompt] });
+    expect(() => normalizeDoubaoPrompt(" ")).toThrow("不能为空");
   });
   it("验证 CMU 格式并拼接豆包音频分块", () => { expect(isValidCmu("T AY1 T AH0 N")).toBe(true); expect(isValidCmu("bad cmu")).toBe(false); const data = Buffer.from("audio").toString("base64"); expect(parseDoubaoAudioChunks(`{\"code\":0,\"data\":\"${data}\"}\n{\"code\":20000000,\"message\":\"OK\"}`)).toEqual(Buffer.from("audio")); });
 });

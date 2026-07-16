@@ -12,7 +12,7 @@ import type { SqlValue } from "sql.js";
 import { all, get, getUserSetting, initDb, lastTableId, nowIso, run, setUserSetting } from "./db.js";
 import { isSuperuserUsername, publicAuthUser, type AuthUser } from "./auth.js";
 import { nextReviewState, type ReviewRating } from "./ebbinghaus.js";
-import { buildDoubaoRequestBody, buildWordPronunciation, doubaoTtsEndpoint, doubaoTtsPrompt, doubaoTtsResourceId, doubaoTtsVoice, maxDoubaoSsmlLength, normalizeCustomSsml, parseDoubaoAudioChunks } from "./doubao-tts.js";
+import { buildDoubaoRequestBody, buildWordPronunciation, doubaoTtsEndpoint, doubaoTtsPrompt, doubaoTtsResourceId, doubaoTtsVoice, maxDoubaoPromptLength, maxDoubaoSsmlLength, normalizeCustomSsml, normalizeDoubaoPrompt, parseDoubaoAudioChunks } from "./doubao-tts.js";
 
 const app = express();
 const upload = multer({ storage: multer.memoryStorage() });
@@ -62,7 +62,7 @@ type CardType = "basic" | "word" | "choice" | "blank";
 const maxDeckDepth = 5;
 const sessionCookieName = "flashcards_session";
 const sessionDays = 30;
-const appVersion = "0.6.2";
+const appVersion = "0.6.3";
 const timeZone = "Asia/Shanghai";
 const pronunciationCacheDir = process.env.PRONUNCIATION_CACHE_DIR ?? path.resolve(process.cwd(), "runtime/pronunciations");
 const doubaoTtsApiKey = process.env.DOUBAO_TTS_API_KEY ?? "";
@@ -335,6 +335,7 @@ type PronunciationXmlOverride = {
   word: string;
   phoneme: string;
   ssml: string;
+  prompt?: string;
   updated_by: number;
   updated_at: string;
 };
@@ -347,12 +348,12 @@ function pronunciationXmlOverride(phoneme: string, fallback: string) {
   return get<PronunciationXmlOverride>("SELECT * FROM pronunciation_ssml_overrides WHERE cache_key = ?", [pronunciationOverrideKey(phoneme, fallback)]);
 }
 
-function setPronunciationXmlOverride(userId: number, phoneme: string, fallback: string, ssml: string) {
+function setPronunciationXmlOverride(userId: number, phoneme: string, fallback: string, ssml: string, prompt: string) {
   run(
-    `INSERT INTO pronunciation_ssml_overrides (cache_key, word, phoneme, ssml, updated_by, updated_at)
-     VALUES (?, ?, ?, ?, ?, ?)
-     ON CONFLICT(cache_key) DO UPDATE SET word = excluded.word, phoneme = excluded.phoneme, ssml = excluded.ssml, updated_by = excluded.updated_by, updated_at = excluded.updated_at`,
-    [pronunciationOverrideKey(phoneme, fallback), fallback, phoneme, ssml, userId, nowIso()]
+    `INSERT INTO pronunciation_ssml_overrides (cache_key, word, phoneme, ssml, prompt, updated_by, updated_at)
+     VALUES (?, ?, ?, ?, ?, ?, ?)
+     ON CONFLICT(cache_key) DO UPDATE SET word = excluded.word, phoneme = excluded.phoneme, ssml = excluded.ssml, prompt = excluded.prompt, updated_by = excluded.updated_by, updated_at = excluded.updated_at`,
+    [pronunciationOverrideKey(phoneme, fallback), fallback, phoneme, ssml, prompt, userId, nowIso()]
   );
 }
 
@@ -362,33 +363,33 @@ function restorePronunciationXmlOverride(previous: PronunciationXmlOverride | un
     return;
   }
   run(
-    `INSERT INTO pronunciation_ssml_overrides (cache_key, word, phoneme, ssml, updated_by, updated_at)
-     VALUES (?, ?, ?, ?, ?, ?)
-     ON CONFLICT(cache_key) DO UPDATE SET word = excluded.word, phoneme = excluded.phoneme, ssml = excluded.ssml, updated_by = excluded.updated_by, updated_at = excluded.updated_at`,
-    [previous.cache_key, previous.word, previous.phoneme, previous.ssml, previous.updated_by, previous.updated_at]
+    `INSERT INTO pronunciation_ssml_overrides (cache_key, word, phoneme, ssml, prompt, updated_by, updated_at)
+     VALUES (?, ?, ?, ?, ?, ?, ?)
+     ON CONFLICT(cache_key) DO UPDATE SET word = excluded.word, phoneme = excluded.phoneme, ssml = excluded.ssml, prompt = excluded.prompt, updated_by = excluded.updated_by, updated_at = excluded.updated_at`,
+    [previous.cache_key, previous.word, previous.phoneme, previous.ssml, previous.prompt ?? "", previous.updated_by, previous.updated_at]
   );
 }
 
-function doubaoTtsCacheName(phoneme: string, fallback: string) {
-  return `doubao-${doubaoTtsResourceId}-${doubaoTtsVoice}-${cacheKey(`${phoneme}\n${fallback}\n${doubaoTtsPrompt}\ncmudict-ipa-match-v5-non-rhotic`)}.mp3`;
+function doubaoTtsCacheName(phoneme: string, fallback: string, prompt = doubaoTtsPrompt) {
+  return `doubao-${doubaoTtsResourceId}-${doubaoTtsVoice}-${cacheKey(`${phoneme}\n${fallback}\n${prompt}\ncmudict-ipa-match-v5-non-rhotic`)}.mp3`;
 }
 
-async function cachedDoubaoTtsPath(phoneme: string, fallback: string) {
+async function cachedDoubaoTtsPath(phoneme: string, fallback: string, prompt = doubaoTtsPrompt) {
   await fs.promises.mkdir(pronunciationCacheDir, { recursive: true });
-  const filePath = path.join(pronunciationCacheDir, doubaoTtsCacheName(phoneme, fallback));
+  const filePath = path.join(pronunciationCacheDir, doubaoTtsCacheName(phoneme, fallback, prompt));
   return fs.existsSync(filePath) ? filePath : null;
 }
 
-async function writeDoubaoTtsCache(phoneme: string, fallback: string, audio: Buffer) {
+async function writeDoubaoTtsCache(phoneme: string, fallback: string, audio: Buffer, prompt = doubaoTtsPrompt) {
   await fs.promises.mkdir(pronunciationCacheDir, { recursive: true });
-  const filePath = path.join(pronunciationCacheDir, doubaoTtsCacheName(phoneme, fallback));
+  const filePath = path.join(pronunciationCacheDir, doubaoTtsCacheName(phoneme, fallback, prompt));
   const tempPath = `${filePath}.${crypto.randomUUID()}.tmp`;
   await fs.promises.writeFile(tempPath, audio);
   await fs.promises.rename(tempPath, filePath);
   return filePath;
 }
 
-async function synthesizeWithDoubao(phoneme: string, fallback: string, ssmlOverride?: string) {
+async function synthesizeWithDoubao(phoneme: string, fallback: string, ssmlOverride?: string, promptOverride?: string) {
   if (!doubaoTtsApiKey) throw new Error("缺少 DOUBAO_TTS_API_KEY");
   const pronunciation = buildWordPronunciation(fallback, phoneme || undefined);
   const ssml = ssmlOverride ?? pronunciation.ssml;
@@ -412,7 +413,7 @@ async function synthesizeWithDoubao(phoneme: string, fallback: string, ssmlOverr
       "X-Api-Request-Id": crypto.randomUUID(),
       "X-Control-Require-Usage-Tokens-Return": "*"
     },
-    body: JSON.stringify(buildDoubaoRequestBody(fallback, ssml))
+    body: JSON.stringify(buildDoubaoRequestBody(fallback, ssml, promptOverride ?? doubaoTtsPrompt))
   });
   if (!response.ok) {
     const body = await response.text().catch(() => "");
@@ -492,7 +493,7 @@ function requireUser(req: express.Request, res: express.Response, next: express.
 function requireSuperuser(_req: express.Request, res: express.Response, next: express.NextFunction) {
   const user = res.locals.user as AuthUser;
   if (!isSuperuserUsername(user?.username)) {
-    res.status(403).json({ error: "仅超级用户可以修改豆包 XML" });
+    res.status(403).json({ error: "仅超级用户可以修改豆包语音设置" });
     return;
   }
   next();
@@ -6049,7 +6050,11 @@ app.get("/api/tts/xml", requireSuperuser, (req, res) => {
   const override = pronunciationXmlOverride(phoneme, fallback);
   res.json({
     ssml: override?.ssml ?? buildWordPronunciation(fallback, phoneme || undefined).ssml,
-    customized: Boolean(override)
+    prompt: override?.prompt?.trim() || doubaoTtsPrompt,
+    customized: Boolean(override),
+    promptCustomized: Boolean(override?.prompt?.trim()),
+    maxSsmlLength: maxDoubaoSsmlLength,
+    maxPromptLength: maxDoubaoPromptLength
   });
 });
 
@@ -6062,19 +6067,21 @@ app.put("/api/tts/xml", requireSuperuser, async (req, res) => {
   }
 
   let ssml: string;
+  let prompt: string;
   try {
     ssml = normalizeCustomSsml(req.body.ssml);
+    prompt = normalizeDoubaoPrompt(req.body.prompt);
   } catch (error) {
     res.status(400).json({ error: (error as Error).message });
     return;
   }
 
   try {
-    const audio = await synthesizeWithDoubao(phoneme, fallback, ssml);
+    const audio = await synthesizeWithDoubao(phoneme, fallback, ssml, prompt);
     const previous = pronunciationXmlOverride(phoneme, fallback);
-    setPronunciationXmlOverride(currentUserId(res), phoneme, fallback, ssml);
+    setPronunciationXmlOverride(currentUserId(res), phoneme, fallback, ssml, prompt);
     try {
-      await writeDoubaoTtsCache(phoneme, fallback, audio);
+      await writeDoubaoTtsCache(phoneme, fallback, audio, prompt);
     } catch (error) {
       restorePronunciationXmlOverride(previous, phoneme, fallback);
       throw error;
@@ -6103,11 +6110,13 @@ app.post("/api/tts", async (req, res) => {
 
   try {
     const cachePhoneme = phoneme ?? "";
-    const cachedPath = await cachedDoubaoTtsPath(cachePhoneme, fallback);
+    const override = pronunciationXmlOverride(cachePhoneme, fallback);
+    const prompt = override?.prompt?.trim() || doubaoTtsPrompt;
+    const cachedPath = await cachedDoubaoTtsPath(cachePhoneme, fallback, prompt);
     const audio = cachedPath
       ? await fs.promises.readFile(cachedPath)
-      : await synthesizeWithDoubao(cachePhoneme, fallback, pronunciationXmlOverride(cachePhoneme, fallback)?.ssml)
-          .then((result) => writeDoubaoTtsCache(cachePhoneme, fallback, result).then(() => result));
+      : await synthesizeWithDoubao(cachePhoneme, fallback, override?.ssml, prompt)
+          .then((result) => writeDoubaoTtsCache(cachePhoneme, fallback, result, prompt).then(() => result));
 
     res.setHeader("Content-Type", "audio/mpeg");
     res.setHeader("Cache-Control", "no-store");

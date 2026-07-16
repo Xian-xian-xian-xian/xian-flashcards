@@ -46,8 +46,9 @@ import Type from "lucide-react/dist/esm/icons/type";
 import UserIcon from "lucide-react/dist/esm/icons/user";
 import Volume2 from "lucide-react/dist/esm/icons/volume-2";
 import XCircle from "lucide-react/dist/esm/icons/x-circle";
-import { CSSProperties, FormEvent, PointerEvent as ReactPointerEvent, ReactNode, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
+import { CSSProperties, FormEvent, PointerEvent as ReactPointerEvent, ReactNode, TouchEvent as ReactTouchEvent, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { api, type CardPayload, type ConflictError } from "./api";
+import { resolveStudySwipe } from "./study-gestures";
 import type { Card, CardType, DailyTask, Deck, ImportBatch, ReviewRating, ReviewRemaining, ReviewSnapshot, Settings, Stats, SyncStatus, ThemeMode, TomatoState, User } from "./types";
 
 type View = "home" | "deck" | "study" | "import" | "settings" | "about";
@@ -56,6 +57,7 @@ type StudyMode = "review" | "new" | "grind";
 type ReviewResult = { stage: number; dueAt: string; previous: ReviewSnapshot };
 type PracticeResult = { stage: number; dueAt: string; previous: Pick<ReviewSnapshot, "dailyTaskPrevious"> };
 type RatingFeedback = { key: number; rating: ReviewRating; title: string; stageText: string; dueText: string };
+type PronunciationSettings = { ssml: string; prompt: string; customized: boolean; promptCustomized: boolean; maxSsmlLength: number; maxPromptLength: number };
 type KatexRuntime = { renderToString: (value: string, options: { displayMode?: boolean; throwOnError: boolean; trust: boolean; strict: "ignore" }) => string };
 
 declare global {
@@ -64,7 +66,7 @@ declare global {
   }
 }
 
-const version = "0.6.2";
+const version = "0.6.3";
 const logExportPressCount = 6;
 const logExportKey = "a";
 const logExportResetMs = 1800;
@@ -1053,7 +1055,7 @@ export default function App() {
     }
   }
 
-  async function savePronunciationXml(payload: { text: string; fallback: string; language?: string; ssml: string }) {
+  async function savePronunciationXml(payload: { text: string; fallback: string; language?: string; ssml: string; prompt: string }) {
     const requestId = speechRequestRef.current + 1;
     speechRequestRef.current = requestId;
     speechAudioRef.current?.pause();
@@ -1061,7 +1063,7 @@ export default function App() {
     try {
       const blob = await api.savePronunciationXml({ ...payload, language: normalizeSpeechLanguage(payload.language) });
       await playSpeechBlob(blob, requestId);
-      showToast("豆包 XML 已保存，语音缓存已替换");
+      showToast("豆包语音设置已保存，语音缓存已替换");
     } catch (error) {
       if (speechRequestRef.current !== requestId) return;
       showToast((error as Error).message, "error");
@@ -1955,8 +1957,8 @@ function StudyView(props: {
   onUndoPractice: (card: Card, snapshot: Pick<ReviewSnapshot, "dailyTaskPrevious">) => Promise<void>;
   onUpdateCard: (id: number, payload: CardPayload) => Promise<Card | null | undefined>;
   onSpeak: (text: string, language?: string, fallback?: string) => void;
-  onLoadPronunciationXml: (payload: { text: string; fallback: string }) => Promise<{ ssml: string; customized: boolean }>;
-  onSavePronunciationXml: (payload: { text: string; fallback: string; language?: string; ssml: string }) => Promise<void>;
+  onLoadPronunciationXml: (payload: { text: string; fallback: string }) => Promise<PronunciationSettings>;
+  onSavePronunciationXml: (payload: { text: string; fallback: string; language?: string; ssml: string; prompt: string }) => Promise<void>;
 }) {
   const [studyMode, setStudyMode] = useState<StudyMode>("review");
   const [sessionLimit, setSessionLimit] = useState(20);
@@ -2010,8 +2012,13 @@ function StudyView(props: {
   const [pronunciationXmlOpen, setPronunciationXmlOpen] = useState(false);
   const [pronunciationXmlDraft, setPronunciationXmlDraft] = useState("");
   const [pronunciationXmlOriginal, setPronunciationXmlOriginal] = useState("");
+  const [pronunciationPromptDraft, setPronunciationPromptDraft] = useState("");
+  const [pronunciationPromptOriginal, setPronunciationPromptOriginal] = useState("");
   const [pronunciationXmlCustomized, setPronunciationXmlCustomized] = useState(false);
+  const [pronunciationPromptCustomized, setPronunciationPromptCustomized] = useState(false);
+  const [pronunciationLimits, setPronunciationLimits] = useState({ ssml: 150, prompt: 500 });
   const [pronunciationXmlBusy, setPronunciationXmlBusy] = useState<"load" | "save" | "">("");
+  const [swipePreview, setSwipePreview] = useState<{ rating: ReviewRating; x: number; y: number } | null>(null);
   const [tomatoState, setTomatoState] = useState<TomatoState | null>(null);
   const [pomodoroNow, setPomodoroNow] = useState(() => Date.now());
   const [pomodoroRingSize, setPomodoroRingSize] = useState({ width: 0, height: 0 });
@@ -2021,6 +2028,8 @@ function StudyView(props: {
   const answerLayoutRef = useRef<HTMLDivElement | null>(null);
   const studyScrollRef = useRef<HTMLDivElement | null>(null);
   const busyRef = useRef(false);
+  const swipeStartRef = useRef<{ x: number; y: number; scrollTop: number } | null>(null);
+  const suppressSwipeClickRef = useRef(false);
   const card = queue[0];
   const activePomodoro = tomatoState?.activePomodoro;
   const pomodoroProgress = activePomodoro ? 1 - pomodoroRemainingRatio(tomatoState, pomodoroNow) : 0;
@@ -2033,8 +2042,13 @@ function StudyView(props: {
     setPronunciationXmlOpen(false);
     setPronunciationXmlDraft("");
     setPronunciationXmlOriginal("");
+    setPronunciationPromptDraft("");
+    setPronunciationPromptOriginal("");
     setPronunciationXmlCustomized(false);
+    setPronunciationPromptCustomized(false);
     setPronunciationXmlBusy("");
+    setSwipePreview(null);
+    swipeStartRef.current = null;
   }, [card?.id]);
 
   async function togglePronunciationXml() {
@@ -2049,7 +2063,11 @@ function StudyView(props: {
       const result = await props.onLoadPronunciationXml({ text: card.phonetic || card.front, fallback: card.front });
       setPronunciationXmlDraft(result.ssml);
       setPronunciationXmlOriginal(result.ssml);
+      setPronunciationPromptDraft(result.prompt);
+      setPronunciationPromptOriginal(result.prompt);
       setPronunciationXmlCustomized(result.customized);
+      setPronunciationPromptCustomized(result.promptCustomized);
+      setPronunciationLimits({ ssml: result.maxSsmlLength, prompt: result.maxPromptLength });
     } catch {
       setPronunciationXmlOpen(false);
     } finally {
@@ -2059,19 +2077,24 @@ function StudyView(props: {
 
   async function submitPronunciationXml(event: FormEvent) {
     event.preventDefault();
-    if (!card || !isWordCard(card) || pronunciationXmlBusy || pronunciationXmlDraft.trim() === pronunciationXmlOriginal) return;
+    const nextSsml = pronunciationXmlDraft.trim();
+    const nextPrompt = pronunciationPromptDraft.trim();
+    if (!card || !isWordCard(card) || pronunciationXmlBusy || !nextSsml || !nextPrompt || (nextSsml === pronunciationXmlOriginal && nextPrompt === pronunciationPromptOriginal)) return;
     setPronunciationXmlBusy("save");
     try {
-      const ssml = pronunciationXmlDraft.trim();
       await props.onSavePronunciationXml({
         text: card.phonetic || card.front,
         fallback: card.front,
         language: card.language ?? props.selectedDeck?.language,
-        ssml
+        ssml: nextSsml,
+        prompt: nextPrompt
       });
-      setPronunciationXmlDraft(ssml);
-      setPronunciationXmlOriginal(ssml);
+      setPronunciationXmlDraft(nextSsml);
+      setPronunciationXmlOriginal(nextSsml);
+      setPronunciationPromptDraft(nextPrompt);
+      setPronunciationPromptOriginal(nextPrompt);
       setPronunciationXmlCustomized(true);
+      setPronunciationPromptCustomized(true);
     } catch {
       // The parent displays the API error and the editor keeps the draft for correction or retry.
     } finally {
@@ -2387,6 +2410,71 @@ function StudyView(props: {
     }
   }
 
+  function startCardSwipe(event: ReactTouchEvent<HTMLDivElement>) {
+    if (!showManualRatings || editingStudyCard || pronunciationXmlOpen || busyRef.current || event.touches.length !== 1) return;
+    const target = event.target instanceof Element ? event.target : null;
+    if (!target || !cardFrameRef.current?.contains(target)) return;
+    if (target.closest("input, textarea, select, a, .choice-grid button, .blank-submit-button, .question-dock-resizer")) return;
+    const touch = event.touches[0];
+    swipeStartRef.current = { x: touch.clientX, y: touch.clientY, scrollTop: studyScrollRef.current?.scrollTop ?? 0 };
+  }
+
+  function moveCardSwipe(event: ReactTouchEvent<HTMLDivElement>) {
+    const start = swipeStartRef.current;
+    if (!start || busyRef.current) return;
+    if (event.touches.length !== 1) {
+      cancelCardSwipe();
+      return;
+    }
+    const touch = event.touches[0];
+    const deltaX = touch.clientX - start.x;
+    const deltaY = touch.clientY - start.y;
+    const currentScrollTop = studyScrollRef.current?.scrollTop ?? 0;
+    const rating = resolveStudySwipe(deltaX, deltaY, start.scrollTop, currentScrollTop, 18);
+    if (!rating) {
+      setSwipePreview(null);
+      return;
+    }
+    event.preventDefault();
+    setSwipePreview({
+      rating,
+      x: rating === "fuzzy" ? 0 : Math.max(-120, Math.min(120, deltaX)),
+      y: rating === "fuzzy" ? Math.max(0, Math.min(96, deltaY)) : 0
+    });
+  }
+
+  function finishCardSwipe(event: ReactTouchEvent<HTMLDivElement>) {
+    const start = swipeStartRef.current;
+    swipeStartRef.current = null;
+    setSwipePreview(null);
+    if (!start || event.changedTouches.length !== 1 || busyRef.current) return;
+    const touch = event.changedTouches[0];
+    const rating = resolveStudySwipe(
+      touch.clientX - start.x,
+      touch.clientY - start.y,
+      start.scrollTop,
+      studyScrollRef.current?.scrollTop ?? 0
+    );
+    if (!rating) return;
+    event.preventDefault();
+    suppressSwipeClickRef.current = true;
+    window.setTimeout(() => { suppressSwipeClickRef.current = false; }, 500);
+    rate(rating).catch((error) => console.error(error));
+  }
+
+  function cancelCardSwipe() {
+    swipeStartRef.current = null;
+    setSwipePreview(null);
+  }
+
+  function flipStudyCard() {
+    if (suppressSwipeClickRef.current) {
+      suppressSwipeClickRef.current = false;
+      return;
+    }
+    setFlipped((value) => !value);
+  }
+
   async function undo() {
     const previous = history.at(-1);
     if (!previous || busyRef.current) return;
@@ -2490,6 +2578,11 @@ function StudyView(props: {
     "--study-font-family": studyFontStack(props.studyFontFamily),
     "--answer-dock-width": `${answerDockWidth}px`
   } as CSSProperties & Record<string, string>;
+  const swipeStyle = swipePreview ? {
+    "--swipe-x": `${swipePreview.x}px`,
+    "--swipe-y": `${swipePreview.y}px`,
+    "--swipe-rotation": `${swipePreview.x / 18}deg`
+  } as CSSProperties & Record<string, string> : undefined;
 
   async function saveScale(nextScale: number) {
     setScaleDraft(nextScale);
@@ -2785,7 +2878,7 @@ function StudyView(props: {
               <div className="study-quick-actions">
                 <button className="mini-button" title="发音" onClick={() => props.onSpeak(isWordCard(card) && card.phonetic ? card.phonetic : card.front, card.language ?? props.selectedDeck?.language, card.front)}><Volume2 /></button>
                 {props.isSuperuser && isWordCard(card) && (
-                  <button className={`mini-button ${pronunciationXmlOpen ? "active" : ""}`} title="设置豆包 XML" disabled={pronunciationXmlBusy === "load"} onClick={togglePronunciationXml}><CodeXml /></button>
+                  <button className={`mini-button ${pronunciationXmlOpen ? "active" : ""}`} title="设置豆包语音" disabled={pronunciationXmlBusy === "load"} onClick={togglePronunciationXml}><CodeXml /></button>
                 )}
                 <button className="mini-button" title={immersive ? "退出沉浸学习" : "沉浸学习"} onClick={toggleImmersive}>{immersive ? <Minimize2 /> : <Maximize2 />}</button>
                 <button className="mini-button" title="编辑当前卡片" onClick={editCurrentStudyCard}><Edit3 /></button>
@@ -2818,26 +2911,37 @@ function StudyView(props: {
             <form className="pronunciation-xml-editor" onSubmit={submitPronunciationXml}>
               <div className="pronunciation-xml-heading">
                 <div>
-                  <span>豆包 XML · {card.front}</span>
-                  <small>{pronunciationXmlCustomized ? "当前使用超级用户覆盖" : "当前使用自动生成格式"}</small>
+                  <span>豆包语音设置 · {card.front}</span>
+                  <small>{pronunciationXmlCustomized || pronunciationPromptCustomized ? "当前使用超级用户覆盖" : "当前使用自动生成格式与默认提示词"}</small>
                 </div>
-                <button className="mini-button" type="button" title="关闭豆包 XML 编辑器" onClick={() => setPronunciationXmlOpen(false)}><XCircle /></button>
+                <button className="mini-button" type="button" title="关闭豆包语音设置" onClick={() => setPronunciationXmlOpen(false)}><XCircle /></button>
               </div>
               {pronunciationXmlBusy === "load" ? (
-                <p className="hint">正在读取当前 XML…</p>
+                <p className="hint">正在读取当前 SSML 与提示词…</p>
               ) : (
                 <>
                   <textarea
                     value={pronunciationXmlDraft}
                     onChange={(event) => setPronunciationXmlDraft(event.target.value)}
-                    maxLength={150}
+                    maxLength={pronunciationLimits.ssml}
                     rows={5}
                     spellCheck={false}
                     aria-label="发送给豆包的 XML"
                   />
+                  <label className="pronunciation-prompt-field">
+                    <span>发送给豆包语音模型的提示词</span>
+                    <textarea
+                      value={pronunciationPromptDraft}
+                      onChange={(event) => setPronunciationPromptDraft(event.target.value)}
+                      maxLength={pronunciationLimits.prompt}
+                      rows={4}
+                      aria-label="发送给豆包语音模型的提示词"
+                    />
+                    <small>{pronunciationPromptDraft.length}/{pronunciationLimits.prompt}</small>
+                  </label>
                   <div className="pronunciation-xml-footer">
-                    <small>模型提示词保持不变；保存成功后会立即重制并播放当前单词。</small>
-                    <button className="primary-button" disabled={pronunciationXmlBusy === "save" || !pronunciationXmlDraft.trim() || pronunciationXmlDraft.trim() === pronunciationXmlOriginal}>
+                    <small>SSML 或提示词修改后，保存会立即重制并播放当前单词。</small>
+                    <button className="primary-button" disabled={pronunciationXmlBusy === "save" || !pronunciationXmlDraft.trim() || !pronunciationPromptDraft.trim() || (pronunciationXmlDraft.trim() === pronunciationXmlOriginal && pronunciationPromptDraft.trim() === pronunciationPromptOriginal)}>
                       <Save />{pronunciationXmlBusy === "save" ? "重制中" : "保存并替换语音"}
                     </button>
                   </div>
@@ -2845,13 +2949,27 @@ function StudyView(props: {
               )}
             </form>
           )}
-          <div className="study-scroll" ref={studyScrollRef}>
+          {swipePreview && (
+            <div className={`swipe-rating-cue ${swipePreview.rating}`} aria-live="polite">
+              <RatingIcon rating={swipePreview.rating} />
+              <strong>{swipePreview.rating === "unknown" ? "不会" : swipePreview.rating === "known" ? "掌握" : "模糊"}</strong>
+            </div>
+          )}
+          <div
+            className={`study-scroll ${swipePreview ? `swipe-active swipe-${swipePreview.rating}` : ""}`}
+            ref={studyScrollRef}
+            style={swipeStyle}
+            onTouchStart={startCardSwipe}
+            onTouchMove={moveCardSwipe}
+            onTouchEnd={finishCardSwipe}
+            onTouchCancel={cancelCardSwipe}
+          >
             {editingStudyCard ? (
               <CardEditor card={editingStudyCard} onCancel={() => setEditingStudyCard(null)} onSubmit={saveStudyCard} />
             ) : (
               <>
                 {card.card_type === "basic" && (
-                  <button ref={(node) => { cardFrameRef.current = node; }} className={`flip-card ${flipped ? "flipped" : ""}`} onClick={() => setFlipped((value) => !value)}>
+                  <button ref={(node) => { cardFrameRef.current = node; }} className={`flip-card ${flipped ? "flipped" : ""}`} onClick={flipStudyCard}>
                     <span className="flip-card-inner">
                       <span className="flip-card-face flip-card-front"><CardFront card={card} /></span>
                       <span className="flip-card-face flip-card-back"><CardBack card={card} layout={props.studyChoiceLayout} showFront={showBasicBackFront} /></span>
@@ -2859,7 +2977,7 @@ function StudyView(props: {
                   </button>
                 )}
                 {card.card_type === "word" && (
-                  <button ref={(node) => { cardFrameRef.current = node; }} className={`flip-card ${flipped ? "flipped" : ""}`} onClick={() => setFlipped((value) => !value)}>
+                  <button ref={(node) => { cardFrameRef.current = node; }} className={`flip-card ${flipped ? "flipped" : ""}`} onClick={flipStudyCard}>
                     <span className="flip-card-inner">
                       <span className="flip-card-face flip-card-front"><CardFront card={card} /></span>
                       <span className="flip-card-face flip-card-back"><CardBack card={card} layout={props.studyChoiceLayout} /></span>
@@ -2936,6 +3054,7 @@ function StudyView(props: {
               </>
             )}
           </div>
+          {!editingStudyCard && showManualRatings && <div className="mobile-swipe-guide">左滑不会 · 右滑掌握 · 下滑模糊</div>}
           {ratingNotice && <RatingNotice feedback={ratingNotice} onClose={() => setRatingNotice(null)} />}
           {!editingStudyCard && showManualRatings && (
             <div className="rating-row">
@@ -3266,6 +3385,7 @@ function AboutView(props: { syncStatus: SyncStatus | null }) {
       <div className="schedule-box"><h3>同步状态</h3><p>最近同步：{props.syncStatus ? fullDateTime(props.syncStatus.lastSyncAt) : "暂无"} · 数据更新：{props.syncStatus?.dataUpdatedAt ? fullDateTime(props.syncStatus.dataUpdatedAt) : "暂无"}</p></div>
       <div className="schedule-box changelog-box">
         <h3>更新日志</h3>
+        <div className="changelog-row"><strong>0.6.3</strong><span>2026-07-16</span><p>手机学习卡片支持左滑不会、右滑掌握、下滑模糊，并为超级用户增加逐词编辑豆包语音模型提示词的能力。</p></div>
         <div className="changelog-row"><strong>0.6.2</strong><span>2026-07-15</span><p>解析、说明和例句字段新增图片插入入口，支持在正文光标位置插入多张图片。</p></div>
         <div className="changelog-row"><strong>0.6.1</strong><span>2026-07-15</span><p>为手机端重新设计六入口底部导航，修复侧栏占满整屏导致无法操作的问题，并逐页优化顶部操作、卡组、学习、导入、设置与关于页的窄屏布局。</p></div>
         <div className="changelog-row"><strong>0.5.9</strong><span>2026-07-15</span><p>仅为 Xian 增加超级用户权限；可在学习页逐词编辑豆包 XML，保留原有模型提示词，并在提交后重新合成、替换语音缓存。</p></div>

@@ -113,8 +113,8 @@ export const api = {
   synthesizeSpeech: (payload: { text: string; language?: string; fallback?: string }) => audioRequest("/api/tts", payload),
   pronunciationXml: (payload: { text: string; fallback: string }) => {
     const query = new URLSearchParams(payload);
-    return request<{ ssml: string; customized: boolean }>(`/api/tts/xml?${query.toString()}`);
+    return request<{ ssml: string; prompt: string; customized: boolean; promptCustomized: boolean; maxSsmlLength: number; maxPromptLength: number }>(`/api/tts/xml?${query.toString()}`);
   },
-  savePronunciationXml: (payload: { text: string; fallback: string; language?: string; ssml: string }) => audioRequest("/api/tts/xml", payload, "PUT"),
+  savePronunciationXml: (payload: { text: string; fallback: string; language?: string; ssml: string; prompt: string }) => audioRequest("/api/tts/xml", payload, "PUT"),
   exportRecentLogs: () => download("/api/logs/recent?minutes=10")
 };

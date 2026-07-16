@@ -122,6 +122,7 @@ export async function initDb() {
       word TEXT NOT NULL,
       phoneme TEXT NOT NULL,
       ssml TEXT NOT NULL,
+      prompt TEXT DEFAULT '',
       updated_by INTEGER NOT NULL,
       updated_at TEXT NOT NULL,
       FOREIGN KEY(updated_by) REFERENCES users(id) ON DELETE CASCADE
@@ -178,6 +179,10 @@ export async function initDb() {
   }
   if (!dailyTaskColumns.includes("review_mastered_card_ids")) {
     exec("ALTER TABLE daily_tasks ADD COLUMN review_mastered_card_ids TEXT DEFAULT '[]'");
+  }
+  const pronunciationOverrideColumns = all<{ name: string }>("PRAGMA table_info(pronunciation_ssml_overrides)").map((column) => column.name);
+  if (!pronunciationOverrideColumns.includes("prompt")) {
+    exec("ALTER TABLE pronunciation_ssml_overrides ADD COLUMN prompt TEXT DEFAULT ''");
   }
   persist();
 }

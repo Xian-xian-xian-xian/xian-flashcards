@@ -7,6 +7,7 @@ export const doubaoTtsResourceId = "seed-tts-2.0";
 export const doubaoTtsVoice = "zh_female_yingyujiaoxue_uranus_bigtts";
 export const doubaoTtsPrompt = "请使用标准、自然、非卷舌的英式英语词典发音，只朗读给定的单词一次。单独朗读词条时，不要读出词尾可选的连接音或侵入音 /r/，语气中性，发音清晰，不要解释。";
 export const maxDoubaoSsmlLength = 150;
+export const maxDoubaoPromptLength = 500;
 
 export type PronunciationSource = "override" | "cmudict-unique" | "cmudict-ipa-match" | "cmudict-default" | "british-non-rhotic-fallback" | "plain-text-fallback";
 export type PronunciationResult = { word: string; originalIpa: string | null; normalizedIpa: string | null; cmu: string | null; selectedCmu: string | null; ssml: string; source: PronunciationSource; confidence: number; rhoticConflict: boolean; finalSsmlMode: "cmu" | "plain-text" };
@@ -32,7 +33,15 @@ export function normalizeCustomSsml(value: unknown) {
   return ssml;
 }
 
-export function buildDoubaoRequestBody(fallback: string, ssml: string) {
+export function normalizeDoubaoPrompt(value: unknown) {
+  const prompt = String(value ?? "").trim();
+  if (!prompt) throw new Error("豆包模型提示词不能为空");
+  if (prompt.length > maxDoubaoPromptLength) throw new Error(`豆包模型提示词不能超过 ${maxDoubaoPromptLength} 个字符`);
+  if (/[\u0000-\u0008\u000b\u000c\u000e-\u001f]/.test(prompt)) throw new Error("豆包模型提示词包含不支持的内容");
+  return prompt;
+}
+
+export function buildDoubaoRequestBody(fallback: string, ssml: string, prompt = doubaoTtsPrompt) {
   return {
     user: { uid: "flashcards" },
     req_params: {
@@ -42,7 +51,7 @@ export function buildDoubaoRequestBody(fallback: string, ssml: string) {
       audio_params: { format: "mp3", sample_rate: 24000 },
       additions: JSON.stringify({
         explicit_language: "en",
-        context_texts: [doubaoTtsPrompt]
+        context_texts: [prompt]
       })
     }
   };
