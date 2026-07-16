@@ -56,12 +56,12 @@ upload_committed_files() {
     local changed=()
     local deleted=()
     local path
-    while IFS= read -r path; do
+    while IFS= read -r -d '' path; do
       [[ -n "$path" ]] && changed+=("$path")
-    done < <(git diff --name-only --diff-filter=ACMRT "$remote_revision" HEAD)
-    while IFS= read -r path; do
+    done < <(git diff --name-only -z --diff-filter=ACMRT "$remote_revision" HEAD)
+    while IFS= read -r -d '' path; do
       [[ -n "$path" ]] && deleted+=("$path")
-    done < <(git diff --name-only --diff-filter=D "$remote_revision" HEAD)
+    done < <(git diff --name-only -z --diff-filter=D "$remote_revision" HEAD)
 
     echo "incremental_from=$remote_revision changed=${#changed[@]} deleted=${#deleted[@]}"
     if (( ${#changed[@]} > 0 )); then
