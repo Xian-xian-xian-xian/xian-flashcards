@@ -73,6 +73,11 @@ export const api = {
   cards: (deckId: number) => request<Card[]>(`/api/decks/${deckId}/cards`),
   createCard: (deckId: number, payload: CardPayload) =>
     request<{ id: number }>(`/api/decks/${deckId}/cards`, { method: "POST", body: JSON.stringify(payload) }),
+  uploadCardImage: (file: File) => {
+    const form = new FormData();
+    form.append("file", file);
+    return request<{ url: string }>("/api/card-images", { method: "POST", body: form });
+  },
   updateCard: (id: number, payload: CardPayload) =>
     request<{ ok: true; card: Card }>(`/api/cards/${id}`, { method: "PATCH", body: JSON.stringify(payload) }),
   deleteCard: (id: number) => request<{ ok: true }>(`/api/cards/${id}`, { method: "DELETE" }),

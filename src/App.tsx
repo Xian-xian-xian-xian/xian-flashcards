@@ -58,10 +58,11 @@ import {
   maxBlankAlternatives,
   normalizeBlankAnswerConfig
 } from "./blank-answers";
+import { insertImageMarkdown } from "./card-images";
 import { resolveStudySwipe } from "./study-gestures";
 import type { Card, CardType, DailyTask, Deck, ImportBatch, ReviewRating, ReviewRemaining, ReviewSnapshot, Settings, Stats, SyncStatus, ThemeMode, TomatoState, User } from "./types";
 
-type View = "home" | "deck" | "study" | "import" | "settings" | "about";
+type View = "home" | "deck" | "create-card" | "study" | "import" | "settings" | "about";
 type SyncState = "idle" | "syncing" | "success" | "error" | "conflict";
 type StudyMode = "review" | "new" | "grind";
 type ReviewResult = { stage: number; dueAt: string; previous: ReviewSnapshot };
@@ -76,7 +77,7 @@ declare global {
   }
 }
 
-const version = "0.6.4";
+const version = "0.6.5";
 const logExportPressCount = 6;
 const logExportKey = "a";
 const logExportResetMs = 1800;
@@ -853,6 +854,17 @@ export default function App() {
     return updatedCard;
   }
 
+  async function createCard(payload: CardPayload) {
+    if (!selectedDeckId) throw new Error("请先选择一个卡组");
+    try {
+      await api.createCard(selectedDeckId, payload);
+      await afterMutation("卡片已新建");
+    } catch (error) {
+      showToast((error as Error).message, "error");
+      throw error;
+    }
+  }
+
   function selectStudyDeck(id: number) {
     setStudyDeckId(id);
     writeStoredStudyDeckId(user?.id ?? null, id);
@@ -1060,7 +1072,7 @@ export default function App() {
           <span>{user.username}</span>
         </div>
         <NavButton icon={<Home />} label="首页" active={view === "home"} onClick={() => setView("home")} />
-        <NavButton icon={<BookOpen />} label="卡组" active={view === "deck"} onClick={() => setView("deck")} />
+        <NavButton icon={<BookOpen />} label="卡组" active={view === "deck" || view === "create-card"} onClick={() => setView("deck")} />
         <NavButton icon={<Brain />} label="学习" active={view === "study"} onClick={() => setView("study")} />
         <NavButton icon={<FileSpreadsheet />} label="导入" active={view === "import"} onClick={() => setView("import")} />
         <NavButton icon={<SettingsIcon />} label="设置" active={view === "settings"} onClick={() => setView("settings")} />
@@ -1161,15 +1173,10 @@ export default function App() {
                 throw error;
               }
             }}
-            onCreateCard={async (payload) => {
-              try {
-                if (!selectedDeckId) return;
-                await api.createCard(selectedDeckId, payload);
-                await afterMutation();
-              } catch (error) {
-                showToast((error as Error).message, "error");
-                throw error;
-              }
+            onOpenCreateCard={() => {
+              if (!selectedDeckId) return;
+              setView("create-card");
+              scrollToPageTop();
             }}
             onUpdateCard={updateCardWithConflict}
             onDeleteCard={async (id) => {
@@ -1199,6 +1206,18 @@ export default function App() {
               }
             }}
             onSpeak={speak}
+          />
+        )}
+
+        {view === "create-card" && (
+          <CreateCardView
+            deck={selectedDeck}
+            onCancel={() => setView("deck")}
+            onSubmit={async (payload) => {
+              await createCard(payload);
+              setView("deck");
+              scrollToPageTop();
+            }}
           />
         )}
 
@@ -1402,6 +1421,7 @@ function viewTitle(view: View) {
   return {
     home: "今日任务",
     deck: "卡组管理",
+    "create-card": "新建卡片",
     study: "按卡组学习",
     import: "批量导入",
     settings: "设置",
@@ -1527,6 +1547,29 @@ function TaskItem(props: { icon: JSX.Element; label: string; value: string; done
   );
 }
 
+function CreateCardView(props: { deck?: Deck; onSubmit: (payload: CardPayload) => Promise<void>; onCancel: () => void }) {
+  if (!props.deck) {
+    return (
+      <section className="panel create-card-page">
+        <button className="primary-button secondary-button create-card-back" onClick={props.onCancel}><ArrowLeft />返回卡组</button>
+        <EmptyState text="请先创建并选择一个卡组。" />
+      </section>
+    );
+  }
+  return (
+    <section className="panel create-card-page">
+      <div className="panel-heading create-card-heading">
+        <div>
+          <p className="eyebrow">目标卡组</p>
+          <h2>{props.deck.name}</h2>
+        </div>
+        <button className="primary-button secondary-button" onClick={props.onCancel}><ArrowLeft />返回卡组</button>
+      </div>
+      <CardEditor layout="single" onSubmit={props.onSubmit} onCancel={props.onCancel} />
+    </section>
+  );
+}
+
 function DeckView(props: {
   decks: Deck[];
   selectedDeckId: number | null;
@@ -1537,7 +1580,7 @@ function DeckView(props: {
   onCreateDeck: (name: string, parentId?: number | null) => Promise<void>;
   onUpdateDeck: (id: number, name: string) => Promise<void>;
   onDeleteDeck: (id: number) => Promise<void>;
-  onCreateCard: (payload: CardPayload) => Promise<void>;
+  onOpenCreateCard: () => void;
   onUpdateCard: (id: number, payload: CardPayload) => Promise<Card | null | undefined>;
   onDeleteCard: (id: number) => Promise<void>;
   onBatchCards: (cardIds: number[], action: "move" | "delete", deckId?: number) => Promise<void>;
@@ -1688,8 +1731,8 @@ function DeckView(props: {
             <button className="mini-button" title="显示卡组列表" onClick={() => setDeckPanelCollapsed(false)}><PanelLeftOpen /></button>
           )}
           <div className="search"><Search /><input value={props.search} onChange={(event) => props.onSearch(event.target.value)} placeholder="搜索题目、答案、选项、例句" /></div>
+          <button className="primary-button toolbar-create-card" disabled={!props.selectedDeckId} onClick={props.onOpenCreateCard}><Plus />新建卡片</button>
         </div>
-        <CardEditor onSubmit={props.onCreateCard} />
         {editingCard && <CardEditor card={editingCard} onCancel={() => setEditingCard(null)} onSubmit={async (payload) => { await props.onUpdateCard(editingCard.id, { ...payload, baseUpdatedAt: editingCard.updated_at }); setEditingCard(null); }} />}
         <div className="batch-toolbar">
           <button className="mini-button" title="全选" onClick={toggleAllCards}>{allVisibleSelected ? <SquareCheck /> : <Square />}</button>
@@ -1704,21 +1747,23 @@ function DeckView(props: {
         <div className="card-list">
           {props.cards.map((card) => (
             <article className="word-card" key={card.id}>
-              <div>
+              <div className="card-summary">
                 <div className="word-title">
                   <button className="mini-button" title="选择卡片" onClick={() => toggleCard(card.id)}>{selectedCardIds.includes(card.id) ? <SquareCheck /> : <Square />}</button>
-                  <span className="word-card-title">{card.front}</span>
+                  <MarkdownText value={card.front} className="word-card-title card-summary-markdown" />
                   <span className="type-pill">{cardTypeLabels[card.card_type]}</span>
+                </div>
+                <div className="word-card-actions">
                   {isWordCard(card) && card.phonetic && <span className="phonetic">{card.phonetic}</span>}
                   <button className="mini-button" title="发音" onClick={() => props.onSpeak(isWordCard(card) && card.phonetic ? card.phonetic : card.front, undefined, card.front)}><Volume2 /></button>
                   <button className={`mini-button ${card.favorite ? "starred" : ""}`} title="收藏" disabled={busy === `favorite-${card.id}`} onClick={() => toggleFavorite(card)}><Star /></button>
                   <button className="mini-button" title="详情" onClick={() => setDetailCard(card)}><Eye /></button>
                   <button className="mini-button" title="编辑" onClick={() => { setEditingCard(card); scrollToPageTop(); }}><Edit3 /></button>
                 </div>
-                <p>{card.card_type === "blank" ? correctAnswer(card) : card.back}</p>
-                {card.example && <small>{card.example}</small>}
-                {parseChoices(card.choices).length > 0 && <small>选项：{parseChoices(card.choices).join(" / ")}</small>}
-                {isWordCard(card) && card.mnemonic && <small>助记：{card.mnemonic}</small>}
+                <MarkdownText value={card.card_type === "blank" ? correctAnswer(card) : card.back} className="card-summary-markdown card-summary-answer" />
+                {card.example && <span className="card-summary-field"><span>说明：</span><MarkdownText value={card.example} className="card-summary-markdown" /></span>}
+                {parseChoices(card.choices).length > 0 && <span className="card-summary-field"><span>选项：</span><MarkdownText value={parseChoices(card.choices).join(" / ")} className="card-summary-markdown" /></span>}
+                {isWordCard(card) && card.mnemonic && <span className="card-summary-field"><span>助记：</span><MarkdownText value={card.mnemonic} className="card-summary-markdown" /></span>}
               </div>
               <div className="card-meta">
                 <span>阶段 {card.stage}/10</span>
@@ -1735,7 +1780,7 @@ function DeckView(props: {
   );
 }
 
-function CardEditor(props: { card?: Card; onSubmit: (payload: CardPayload) => Promise<void>; onCancel?: () => void }) {
+function CardEditor(props: { card?: Card; layout?: "default" | "single"; onSubmit: (payload: CardPayload) => Promise<void>; onCancel?: () => void }) {
   const initialBlankConfig = () => {
     if (props.card?.card_type !== "blank") return { version: 1 as const, orderless: false, answers: [[""]] };
     return normalizeBlankAnswerConfig(props.card.choices) ?? legacyBlankAnswerConfig(props.card.front, props.card.back);
@@ -1836,7 +1881,7 @@ function CardEditor(props: { card?: Card; onSubmit: (payload: CardPayload) => Pr
   }
 
   return (
-    <form className={`card-form ${props.card ? "edit-card-form" : ""}`} onSubmit={submit}>
+    <form className={`card-form ${props.card || props.layout === "single" ? "edit-card-form" : ""}`} onSubmit={submit}>
       <EditorField label="卡片类型">
         <select value={cardType} onChange={(event) => {
           const nextType = event.target.value as CardType;
@@ -1942,6 +1987,8 @@ function EditorField(props: { label: string; children: ReactNode }) {
 function SmartTextField(props: { value: string; onChange: (value: string) => void; placeholder: string; required?: boolean; multilineThreshold?: number; allowImageInsert?: boolean }) {
   const expanded = props.value.length > (props.multilineThreshold ?? 42) || props.value.includes("\n");
   const ref = useRef<HTMLTextAreaElement | null>(null);
+  const fileInputRef = useRef<HTMLInputElement | null>(null);
+  const [imageStatus, setImageStatus] = useState<{ kind: "uploading" | "error"; message: string } | null>(null);
   const textarea = (
     <textarea
       ref={ref}
@@ -1954,27 +2001,44 @@ function SmartTextField(props: { value: string; onChange: (value: string) => voi
     />
   );
   if (!props.allowImageInsert) return textarea;
-  function insertImage() {
-    const url = window.prompt("图片地址（支持 https://、data:image/... 或可访问的图片链接）");
-    if (!url?.trim()) return;
-    const imageMarkdown = `![图片](${url.trim()})`;
+  async function uploadImage(file: File) {
     const element = ref.current;
     const start = element?.selectionStart ?? props.value.length;
     const end = element?.selectionEnd ?? props.value.length;
-    const prefix = start > 0 && !/\s$/.test(props.value.slice(0, start)) ? "\n" : "";
-    const suffix = end < props.value.length && !/^\s/.test(props.value.slice(end)) ? "\n" : "";
-    const nextValue = `${props.value.slice(0, start)}${prefix}${imageMarkdown}${suffix}${props.value.slice(end)}`;
-    props.onChange(nextValue);
-    window.requestAnimationFrame(() => {
-      element?.focus();
-      const cursor = start + prefix.length + imageMarkdown.length;
-      element?.setSelectionRange(cursor, cursor);
-    });
+    setImageStatus({ kind: "uploading", message: "图片上传中" });
+    try {
+      const result = await api.uploadCardImage(file);
+      const inserted = insertImageMarkdown(props.value, start, end, result.url);
+      props.onChange(inserted.value);
+      setImageStatus(null);
+      window.requestAnimationFrame(() => {
+        element?.focus();
+        element?.setSelectionRange(inserted.cursor, inserted.cursor);
+      });
+    } catch (error) {
+      setImageStatus({ kind: "error", message: (error as Error).message });
+    }
   }
   return (
-    <span className="smart-field with-image-insert">
-      {textarea}
-      <button className="mini-button smart-image-button" type="button" title="插入图片" onClick={insertImage}><ImageIcon /></button>
+    <span className={`smart-field with-image-insert ${imageStatus?.kind === "error" ? "has-error" : ""}`}>
+      <span className="smart-image-input-row">
+        {textarea}
+        <input
+          ref={fileInputRef}
+          type="file"
+          accept="image/png,image/jpeg,image/webp,image/gif"
+          hidden
+          onChange={(event) => {
+            const file = event.target.files?.[0];
+            event.currentTarget.value = "";
+            if (file) uploadImage(file);
+          }}
+        />
+        <button className="mini-button smart-image-button" type="button" title="从本地上传图片" disabled={imageStatus?.kind === "uploading"} onClick={() => fileInputRef.current?.click()}>
+          {imageStatus?.kind === "uploading" ? <RefreshCw /> : <ImageIcon />}
+        </button>
+      </span>
+      {imageStatus && <small className={`smart-image-status ${imageStatus.kind}`}>{imageStatus.message}</small>}
     </span>
   );
 }
@@ -3433,6 +3497,7 @@ function AboutView(props: { syncStatus: SyncStatus | null }) {
       <div className="schedule-box"><h3>同步状态</h3><p>最近同步：{props.syncStatus ? fullDateTime(props.syncStatus.lastSyncAt) : "暂无"} · 数据更新：{props.syncStatus?.dataUpdatedAt ? fullDateTime(props.syncStatus.dataUpdatedAt) : "暂无"}</p></div>
       <div className="schedule-box changelog-box">
         <h3>更新日志</h3>
+        <div className="changelog-row"><strong>0.6.5</strong><span>2026-07-16</span><p>卡组管理改用独立的新建卡片页面，缩略卡片支持 LaTeX 渲染；图片可从本地安全上传到云端，公式间距同步学习行距。</p></div>
         <div className="changelog-row"><strong>0.6.4</strong><span>2026-07-16</span><p>填空题编辑器支持每空独立配置多个正确答案，新增严格一一配对的乱序填空，并同步升级批量导入格式与模板。</p></div>
         <div className="changelog-row"><strong>0.6.3</strong><span>2026-07-16</span><p>手机学习卡片支持左滑不会、右滑掌握、下滑模糊，并为超级用户增加逐词编辑豆包语音模型提示词的能力。</p></div>
         <div className="changelog-row"><strong>0.6.2</strong><span>2026-07-15</span><p>解析、说明和例句字段新增图片插入入口，支持在正文光标位置插入多张图片。</p></div>

@@ -814,6 +814,33 @@ textarea:focus {
   padding-left: 42px;
 }
 
+.toolbar {
+  width: 100%;
+}
+
+.toolbar .search {
+  flex: 1 1 auto;
+}
+
+.toolbar-create-card {
+  flex: 0 0 auto;
+  white-space: nowrap;
+}
+
+.create-card-page {
+  width: min(920px, 100%);
+  margin: 0 auto;
+}
+
+.create-card-heading {
+  margin-bottom: 14px;
+}
+
+.create-card-back {
+  justify-self: start;
+  margin-bottom: 14px;
+}
+
 .card-form {
   display: grid;
   grid-template-columns: repeat(3, minmax(150px, 1fr)) auto;
@@ -988,6 +1015,13 @@ textarea:focus {
 
 .smart-field {
   position: relative;
+  display: grid;
+  gap: 5px;
+  min-width: 0;
+}
+
+.smart-image-input-row {
+  position: relative;
   display: block;
   min-width: 0;
 }
@@ -1010,13 +1044,44 @@ textarea:focus {
   height: 18px;
 }
 
+.smart-image-button:disabled svg {
+  animation: spin 900ms linear infinite;
+}
+
+.smart-image-status {
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 1.4;
+}
+
+.smart-image-status.error {
+  color: var(--red);
+}
+
 .word-card {
   align-items: flex-start;
 }
 
+.card-summary {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
 .word-card-title {
+  flex: 1 1 260px;
+  min-width: 0;
+  max-height: 128px;
+  overflow: auto;
   font-size: 22px;
   font-weight: 650;
+}
+
+.word-card-actions {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 6px;
+  margin: 6px 0;
 }
 
 .phonetic {
@@ -1037,8 +1102,45 @@ textarea:focus {
   white-space: nowrap;
 }
 
-.word-card p {
+.card-summary-markdown {
+  gap: 0.35em;
+  line-height: 1.5;
+}
+
+.card-summary-answer {
+  max-height: 168px;
   margin: 8px 0 4px;
+  overflow: auto;
+}
+
+.card-summary-field {
+  display: flex;
+  gap: 6px;
+  align-items: flex-start;
+  margin-top: 4px;
+  color: var(--muted);
+  font-size: 13px;
+}
+
+.card-summary-field > span:first-child {
+  flex: 0 0 auto;
+}
+
+.card-summary-field .card-summary-markdown {
+  flex: 1 1 auto;
+  min-width: 0;
+  max-height: 132px;
+  overflow: auto;
+  color: inherit;
+}
+
+.card-summary-markdown img {
+  max-height: 120px;
+}
+
+.card-summary-markdown .math-block {
+  padding: 8px 10px;
+  font-size: 1em;
 }
 
 .card-meta {
@@ -1835,7 +1937,7 @@ textarea:focus {
 
 .markdown-text {
   display: grid;
-  gap: 0.78em;
+  gap: calc(var(--study-line-height, 1.5) * 0.6em);
   line-height: inherit;
   white-space: normal;
   overflow-wrap: anywhere;
@@ -1925,6 +2027,7 @@ textarea:focus {
   border-radius: 8px;
   background: color-mix(in srgb, var(--yellow), transparent 88%);
   font-size: 1.08em;
+  line-height: var(--study-line-height, 1.5);
   text-align: center;
 }
 
@@ -1934,6 +2037,11 @@ textarea:focus {
   overflow-y: hidden;
   scrollbar-width: none;
   white-space: nowrap;
+  line-height: inherit;
+}
+
+.math-block .katex {
+  line-height: inherit;
 }
 
 .math-inline .katex {
@@ -2001,7 +2109,7 @@ textarea:focus {
 
 .markdown-fragment {
   display: grid;
-  gap: 0.78em;
+  gap: calc(var(--study-line-height, 1.5) * 0.6em);
 }
 
 .markdown-table-wrap {
@@ -3497,6 +3605,15 @@ textarea {
 }
 
 @media (max-width: 520px) {
+  .create-card-heading {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .create-card-heading .primary-button {
+    width: 100%;
+  }
+
   .pronunciation-xml-heading,
   .pronunciation-xml-footer {
     align-items: stretch;
@@ -3547,7 +3664,8 @@ textarea {
   }
 
   .toolbar .search {
-    flex-basis: 100%;
+    flex: 1 1 180px;
+    min-width: 0;
   }
 
   .hero-panel,

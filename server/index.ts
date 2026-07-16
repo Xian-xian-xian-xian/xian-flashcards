@@ -11,17 +11,20 @@ import * as XLSX from "xlsx";
 import type { SqlValue } from "sql.js";
 import { all, get, getUserSetting, initDb, lastTableId, nowIso, run, setUserSetting } from "./db.js";
 import { isSuperuserUsername, publicAuthUser, type AuthUser } from "./auth.js";
+import { cardImagePath, cardImageTypeFromFilename, maxCardImageBytes, storeCardImage } from "./card-images.js";
 import { nextReviewState, type ReviewRating } from "./ebbinghaus.js";
 import { normalizeImportRows } from "./import-utils.js";
 import { buildDoubaoRequestBody, buildWordPronunciation, doubaoTtsEndpoint, doubaoTtsPrompt, doubaoTtsResourceId, doubaoTtsVoice, maxDoubaoPromptLength, maxDoubaoSsmlLength, normalizeCustomSsml, normalizeDoubaoPrompt, parseDoubaoAudioChunks } from "./doubao-tts.js";
 
 const app = express();
 const upload = multer({ storage: multer.memoryStorage() });
+const cardImageUpload = multer({ storage: multer.memoryStorage(), limits: { fileSize: maxCardImageBytes, files: 1 } });
 const port = Number(process.env.PORT ?? 4174);
 const host = process.env.HOST ?? "0.0.0.0";
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const publicDir = path.resolve(__dirname, "../../dist");
 const templateDir = path.resolve(process.cwd(), "模版");
+const cardImagesDir = process.env.CARD_IMAGES_DIR ?? path.resolve(process.cwd(), "data/card-images");
 
 app.use(cors({ origin: true, credentials: true }));
 app.use(express.json({ limit: "10mb" }));
@@ -64,7 +67,7 @@ type BlankAnswerConfig = { version: 1; orderless: boolean; answers: string[][] }
 const maxDeckDepth = 5;
 const sessionCookieName = "flashcards_session";
 const sessionDays = 30;
-const appVersion = "0.6.4";
+const appVersion = "0.6.5";
 const timeZone = "Asia/Shanghai";
 const pronunciationCacheDir = process.env.PRONUNCIATION_CACHE_DIR ?? path.resolve(process.cwd(), "runtime/pronunciations");
 const doubaoTtsApiKey = process.env.DOUBAO_TTS_API_KEY ?? "";
@@ -4766,6 +4769,47 @@ app.post("/api/auth/logout", (req, res) => {
 });
 
 app.use("/api", requireUser);
+
+app.post("/api/card-images", (req, res) => {
+  cardImageUpload.single("file")(req, res, async (uploadError) => {
+    if (uploadError) {
+      const message = uploadError instanceof multer.MulterError && uploadError.code === "LIMIT_FILE_SIZE"
+        ? "图片不能超过 10 MB"
+        : uploadError instanceof Error
+          ? uploadError.message
+          : "图片上传失败";
+      res.status(400).json({ error: message });
+      return;
+    }
+    if (!req.file) {
+      res.status(400).json({ error: "请选择要上传的图片" });
+      return;
+    }
+    try {
+      const userId = currentUserId(res);
+      const stored = await storeCardImage(cardImagesDir, userId, req.file.buffer);
+      res.status(201).json({ url: `/api/card-images/${userId}/${stored.filename}` });
+    } catch (error) {
+      res.status(400).json({ error: (error as Error).message });
+    }
+  });
+});
+
+app.get("/api/card-images/:ownerId/:filename", (req, res) => {
+  const userId = currentUserId(res);
+  const ownerId = Number(req.params.ownerId);
+  const type = cardImageTypeFromFilename(req.params.filename);
+  const imagePath = ownerId === userId && type ? cardImagePath(cardImagesDir, userId, req.params.filename) : null;
+  if (!imagePath || !fs.existsSync(imagePath)) {
+    res.status(404).json({ error: "图片不存在" });
+    return;
+  }
+  res.setHeader("Cache-Control", "private, max-age=31536000, immutable");
+  res.type(type!.mimeType);
+  res.sendFile(imagePath, (error) => {
+    if (error && !res.headersSent) res.status(404).json({ error: "图片不存在" });
+  });
+});
 
 app.get("/api/game/state", (_req, res) => {
   try {
