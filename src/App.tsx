@@ -59,6 +59,7 @@ import {
   normalizeBlankAnswerConfig
 } from "./blank-answers";
 import { insertImageMarkdown } from "./card-images";
+import { shouldUsePractice } from "./study-session";
 import { resolveStudySwipe } from "./study-gestures";
 import type { Card, CardType, DailyTask, Deck, ImportBatch, ReviewRating, ReviewRemaining, ReviewSnapshot, Settings, Stats, SyncStatus, ThemeMode, TomatoState, User } from "./types";
 
@@ -77,7 +78,7 @@ declare global {
   }
 }
 
-const version = "0.6.5";
+const version = "0.6.6";
 const logExportPressCount = 6;
 const logExportKey = "a";
 const logExportResetMs = 1800;
@@ -2449,7 +2450,12 @@ function StudyView(props: {
     const beforeMasteredIds = masteredIds;
     const beforeLongTermSubmittedIds = longTermSubmittedIds;
     try {
-      const practice = beforeLongTermSubmittedIds.includes(card.id);
+      const practice = shouldUsePractice({
+        alreadySubmitted: beforeLongTermSubmittedIds.includes(card.id),
+        alreadyMastered: beforeMasteredIds.includes(card.id),
+        startedAsNew: beforeSessionCards.some((item) => item.id === card.id && item.stage <= 0),
+        rating
+      });
       const result = practice ? await props.onPractice(card, rating) : await props.onAnswer(card, rating);
       const feedback = ratingFeedback(rating, card.stage, result);
       playAnswerSound(rating === "known" ? "right" : "wrong");
@@ -3497,6 +3503,7 @@ function AboutView(props: { syncStatus: SyncStatus | null }) {
       <div className="schedule-box"><h3>同步状态</h3><p>最近同步：{props.syncStatus ? fullDateTime(props.syncStatus.lastSyncAt) : "暂无"} · 数据更新：{props.syncStatus?.dataUpdatedAt ? fullDateTime(props.syncStatus.dataUpdatedAt) : "暂无"}</p></div>
       <div className="schedule-box changelog-box">
         <h3>更新日志</h3>
+        <div className="changelog-row"><strong>0.6.6</strong><span>2026-07-16</span><p>修复新卡先选择“模糊”、同轮再选择“掌握”后仍保留约 30 分钟排程的问题；首次掌握会正确回到第 1 阶段短间隔。</p></div>
         <div className="changelog-row"><strong>0.6.5</strong><span>2026-07-16</span><p>卡组管理改用独立的新建卡片页面，缩略卡片支持 LaTeX 渲染；图片可从本地安全上传到云端，公式间距同步学习行距。</p></div>
         <div className="changelog-row"><strong>0.6.4</strong><span>2026-07-16</span><p>填空题编辑器支持每空独立配置多个正确答案，新增严格一一配对的乱序填空，并同步升级批量导入格式与模板。</p></div>
         <div className="changelog-row"><strong>0.6.3</strong><span>2026-07-16</span><p>手机学习卡片支持左滑不会、右滑掌握、下滑模糊，并为超级用户增加逐词编辑豆包语音模型提示词的能力。</p></div>
