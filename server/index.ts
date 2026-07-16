@@ -12,6 +12,7 @@ import type { SqlValue } from "sql.js";
 import { all, get, getUserSetting, initDb, lastTableId, nowIso, run, setUserSetting } from "./db.js";
 import { isSuperuserUsername, publicAuthUser, type AuthUser } from "./auth.js";
 import { nextReviewState, type ReviewRating } from "./ebbinghaus.js";
+import { normalizeImportRows } from "./import-utils.js";
 import { buildDoubaoRequestBody, buildWordPronunciation, doubaoTtsEndpoint, doubaoTtsPrompt, doubaoTtsResourceId, doubaoTtsVoice, maxDoubaoPromptLength, maxDoubaoSsmlLength, normalizeCustomSsml, normalizeDoubaoPrompt, parseDoubaoAudioChunks } from "./doubao-tts.js";
 
 const app = express();
@@ -52,17 +53,18 @@ type CardInput = {
   example?: string;
   mnemonic?: string;
   note?: string;
-  choices?: string[] | string;
+  choices?: string[] | string | BlankAnswerConfig;
   baseUpdatedAt?: string;
   force?: boolean;
 };
 
 type CardType = "basic" | "word" | "choice" | "blank";
+type BlankAnswerConfig = { version: 1; orderless: boolean; answers: string[][] };
 
 const maxDeckDepth = 5;
 const sessionCookieName = "flashcards_session";
 const sessionDays = 30;
-const appVersion = "0.6.3";
+const appVersion = "0.6.4";
 const timeZone = "Asia/Shanghai";
 const pronunciationCacheDir = process.env.PRONUNCIATION_CACHE_DIR ?? path.resolve(process.cwd(), "runtime/pronunciations");
 const doubaoTtsApiKey = process.env.DOUBAO_TTS_API_KEY ?? "";
@@ -275,6 +277,90 @@ function inferCardType(row: Record<string, unknown>, front: string, choices: str
 
 function normalizedChoicePayload(cardType: CardType, choices: string[] | string, answer: string) {
   return cardType === "choice" ? addAnswerChoice(dedupeChoiceOptions(normalizeChoices(choices)), answer).slice(0, 8) : [];
+}
+
+const blankMarkerPattern = /(\[\s*\]|_{2,}|（\s*）|\(\s*\))/g;
+
+function effectiveBlankCount(front: string) {
+  return Math.max(1, Array.from(front.matchAll(blankMarkerPattern)).length);
+}
+
+function normalizeBlankAnswerGroup(value: unknown) {
+  if (!Array.isArray(value)) return [];
+  const seen = new Set<string>();
+  return value
+    .map((item) => String(item ?? "").trim())
+    .filter((item) => {
+      const normalized = normalizeAnswer(item);
+      if (!normalized || seen.has(normalized)) return false;
+      seen.add(normalized);
+      return true;
+    })
+    .slice(0, 8);
+}
+
+function normalizeBlankAnswerConfig(value: unknown): BlankAnswerConfig | null {
+  let source = value;
+  if (typeof source === "string") {
+    try {
+      source = JSON.parse(source);
+    } catch {
+      return null;
+    }
+  }
+  if (!source || typeof source !== "object" || Array.isArray(source)) return null;
+  const candidate = source as Partial<BlankAnswerConfig>;
+  if (candidate.version !== 1 || !Array.isArray(candidate.answers)) return null;
+  const answers = candidate.answers.map(normalizeBlankAnswerGroup);
+  if (answers.length === 0 || answers.some((group) => group.length === 0)) return null;
+  return { version: 1, orderless: Boolean(candidate.orderless) && answers.length > 1, answers };
+}
+
+function splitLegacyBlankAnswers(value: string) {
+  return value
+    .split(/[\n|/／、，,；;]+/)
+    .map((item) => item.trim())
+    .filter(Boolean);
+}
+
+function splitLegacyBlankAlternatives(value: string) {
+  return value
+    .split(/\s*(?:或者|或|\bor\b)\s*/i)
+    .map((item) => item.trim())
+    .filter(Boolean)
+    .slice(0, 8);
+}
+
+function legacyBlankConfig(front: string, back: string): BlankAnswerConfig | [] {
+  const count = effectiveBlankCount(front);
+  if (count === 1) {
+    const answers = splitLegacyBlankAlternatives(back);
+    return answers.length ? { version: 1, orderless: false, answers: [answers] } : [];
+  }
+  const parts = splitLegacyBlankAnswers(back);
+  if (parts.length !== count) return [];
+  const frontParts = front.split(blankMarkerPattern);
+  const separators = Array.from({ length: count - 1 }, (_, index) => frontParts[index * 2 + 2] ?? "");
+  const connectorMatches = separators.map((separator) => /[和与及、，,；;\/／]/.test(separator));
+  if (connectorMatches.some(Boolean) && !connectorMatches.every(Boolean)) return [];
+  return {
+    version: 1,
+    orderless: connectorMatches.length > 0 && connectorMatches.every(Boolean),
+    answers: parts.map((part) => {
+      const alternatives = splitLegacyBlankAlternatives(part);
+      return alternatives.length ? alternatives : [part];
+    })
+  };
+}
+
+function normalizedCardOptionsPayload(cardType: CardType, choices: unknown, back: string, front: string) {
+  if (cardType === "choice") return normalizedChoicePayload(cardType, choices as string[] | string, back);
+  if (cardType !== "blank") return [];
+  const config = normalizeBlankAnswerConfig(choices);
+  if (!config) return legacyBlankConfig(front, back);
+  const count = effectiveBlankCount(front);
+  if (config.answers.length !== count) throw new Error(`题干有 ${count} 个空，但提供了 ${config.answers.length} 组答案`);
+  return { ...config, orderless: config.orderless && count > 1 };
 }
 
 function clampStudyTextScale(value: unknown) {
@@ -4281,9 +4367,9 @@ function createCard(userId: number, deckId: number, input: CardInput) {
   if (!deck) throw new Error("卡组不存在");
   const createdAt = nowIso();
   const cardType = normalizeCardType(input.card_type);
-  const choices = normalizedChoicePayload(cardType, input.choices ?? [], input.back);
   const front = requireText(input.front, "题目");
   const back = requireText(input.back, "答案");
+  const choices = normalizedCardOptionsPayload(cardType, input.choices ?? [], back, front);
   run(
     `INSERT INTO cards (user_id, deck_id, card_type, front, back, phonetic, example, mnemonic, note, choices, created_at, updated_at)
      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
@@ -4297,7 +4383,7 @@ function createCard(userId: number, deckId: number, input: CardInput) {
       input.example?.trim() ?? "",
       input.mnemonic?.trim() ?? "",
       input.note?.trim() ?? "",
-      JSON.stringify(normalizeChoices(choices)),
+      JSON.stringify(choices),
       createdAt,
       createdAt
     ]
@@ -6253,10 +6339,16 @@ app.patch("/api/cards/:id", (req, res) => {
   }
   const cardType = req.body.card_type === undefined ? null : normalizeCardType(req.body.card_type);
   const effectiveType = cardType ?? normalizeCardType(current.card_type);
+  const effectiveFront = typeof req.body.front === "string" && req.body.front.trim() ? req.body.front.trim() : String(current.front ?? "");
   const effectiveBack = typeof req.body.back === "string" && req.body.back.trim() ? req.body.back.trim() : String(current.back ?? "");
-  const nextChoices = req.body.choices === undefined && req.body.card_type === undefined && req.body.back === undefined
+  const optionSource = req.body.choices !== undefined
+    ? req.body.choices
+    : effectiveType === "blank" && req.body.back !== undefined
+      ? []
+      : String(current.choices ?? "");
+  const nextChoices = req.body.choices === undefined && req.body.card_type === undefined && req.body.back === undefined && req.body.front === undefined
     ? null
-    : JSON.stringify(normalizedChoicePayload(effectiveType, req.body.choices ?? String(current.choices ?? ""), effectiveBack));
+    : JSON.stringify(normalizedCardOptionsPayload(effectiveType, optionSource, effectiveBack, effectiveFront));
   run(
     `UPDATE cards
      SET card_type = COALESCE(?, card_type),
@@ -6337,29 +6429,6 @@ app.post("/api/cards/batch", (req, res) => {
     res.status(400).json({ error: (error as Error).message });
   }
 });
-
-function normalizeImportRows(rows: Record<string, unknown>[]) {
-  return rows
-    .map((row) => {
-      const values = Object.values(row).map((value) => String(value ?? "").trim());
-      const choices = importChoiceValues(row);
-      const front = String(rowValue(row, ["front", "question", "word", "题目", "正面", "单词"]) ?? values[0] ?? "").trim();
-      const back = String(rowValue(row, ["back", "answer", "meaning", "答案", "背面", "释义"]) ?? values[1] ?? "").trim();
-      const cardType = inferCardType(row, front, choices);
-      const positionalExample = cardType === "choice" ? "" : values[2];
-      return {
-        card_type: cardType,
-        front,
-        back,
-        phonetic: String(rowValue(row, ["phonetic", "音标"]) ?? "").trim(),
-        example: String(rowValue(row, ["example", "解析", "例句", "说明"]) ?? positionalExample ?? "").trim(),
-        mnemonic: String(rowValue(row, ["mnemonic", "助记"]) ?? "").trim(),
-        note: String(rowValue(row, ["note", "备注", "注记"]) ?? "").trim(),
-        choices: normalizedChoicePayload(cardType, choices, back)
-      };
-    })
-    .filter((row) => row.front && row.back);
-}
 
 app.post("/api/import", upload.single("file"), (req, res) => {
   try {

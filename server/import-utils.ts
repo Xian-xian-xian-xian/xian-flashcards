@@ -1,4 +1,7 @@
 type CardType = "basic" | "word" | "choice" | "blank";
+type BlankAnswerConfig = { version: 1; orderless: boolean; answers: string[][] };
+
+const blankMarkerPattern = /(\[\s*\]|_{2,}|（\s*）|\(\s*\))/g;
 
 function normalizeCardType(value: unknown): CardType {
   const text = String(value ?? "").trim().toLowerCase();
@@ -103,6 +106,58 @@ function normalizedChoicePayload(cardType: CardType, choices: string[] | string,
   return cardType === "choice" ? addAnswerChoice(dedupeChoiceOptions(normalizeChoices(choices)), answer).slice(0, 8) : [];
 }
 
+function blankMarkerCount(value: string) {
+  return Math.max(1, Array.from(value.matchAll(blankMarkerPattern)).length);
+}
+
+function importBoolean(value: unknown) {
+  const normalized = String(value ?? "").trim().toLowerCase();
+  return ["1", "true", "yes", "y", "on", "是", "开启", "乱序"].includes(normalized);
+}
+
+function importBlankAnswerConfig(row: Record<string, unknown>, front: string): { config: BlankAnswerConfig; back: string } | null | undefined {
+  const groups = new Map<number, Map<number, string>>();
+  let found = false;
+  Object.entries(row).forEach(([key, value]) => {
+    const normalizedKey = key.trim();
+    const match = normalizedKey.match(/^(?:answer|答案)\s*(\d+)(?:[_\s-]*(?:alt|alternative|备选)\s*(\d+))?$/i);
+    if (!match) return;
+    found = true;
+    const groupIndex = Number(match[1]);
+    const answerIndex = match[2] ? Number(match[2]) : 0;
+    if (!Number.isInteger(groupIndex) || groupIndex < 1 || !Number.isInteger(answerIndex) || answerIndex < 0) return;
+    const answer = String(value ?? "").trim();
+    if (!answer) return;
+    if (!groups.has(groupIndex)) groups.set(groupIndex, new Map());
+    groups.get(groupIndex)!.set(answerIndex, answer);
+  });
+  if (!found) return undefined;
+
+  const count = blankMarkerCount(front);
+  if (groups.size !== count || Array.from({ length: count }, (_, index) => index + 1).some((index) => !groups.get(index)?.get(0))) return null;
+  const answers = Array.from({ length: count }, (_, index) => {
+    const group = groups.get(index + 1)!;
+    const seen = new Set<string>();
+    return [...group.entries()]
+      .sort(([left], [right]) => left - right)
+      .map(([, answer]) => answer)
+      .filter((answer) => {
+        const normalized = normalizeAnswer(answer);
+        if (!normalized || seen.has(normalized)) return false;
+        seen.add(normalized);
+        return true;
+      })
+      .slice(0, 8);
+  });
+  const orderlessValue = rowValue(row, ["blank_orderless", "orderless", "乱序填空", "乱序"]);
+  const config: BlankAnswerConfig = {
+    version: 1,
+    orderless: count > 1 && importBoolean(orderlessValue),
+    answers
+  };
+  return { config, back: answers.map((group) => group[0]).join("\n") };
+}
+
 function normalizeImportedExample(row: Record<string, unknown>, back: string, cardType: CardType) {
   const example = String(rowValue(row, ["example", "解析", "例句", "说明"]) ?? "").trim();
   return cardType === "basic" && normalizeAnswer(example) === normalizeAnswer(back) ? "" : example;
@@ -114,8 +169,10 @@ export function normalizeImportRows(rows: Record<string, unknown>[]) {
       const values = Object.values(row).map((value) => String(value ?? "").trim());
       const choices = importChoiceValues(row);
       const front = String(rowValue(row, ["front", "question", "word", "题目", "正面", "单词"]) ?? values[0] ?? "").trim();
-      const back = String(rowValue(row, ["back", "answer", "meaning", "答案", "背面", "释义"]) ?? values[1] ?? "").trim();
       const cardType = inferCardType(row, front, choices);
+      const blankConfig = cardType === "blank" ? importBlankAnswerConfig(row, front) : undefined;
+      if (blankConfig === null) return null;
+      const back = blankConfig?.back ?? String(rowValue(row, ["back", "answer", "meaning", "答案", "背面", "释义"]) ?? values[1] ?? "").trim();
       return {
         card_type: cardType,
         front,
@@ -124,8 +181,8 @@ export function normalizeImportRows(rows: Record<string, unknown>[]) {
         example: normalizeImportedExample(row, back, cardType),
         mnemonic: String(rowValue(row, ["mnemonic", "助记"]) ?? "").trim(),
         note: String(rowValue(row, ["note", "备注", "注记"]) ?? "").trim(),
-        choices: normalizedChoicePayload(cardType, choices, back)
+        choices: blankConfig?.config ?? normalizedChoicePayload(cardType, choices, back)
       };
     })
-    .filter((row) => row.front && row.back);
+    .filter((row): row is NonNullable<typeof row> => Boolean(row?.front && row.back));
 }

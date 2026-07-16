@@ -2,6 +2,12 @@ export type ReviewRating = "known" | "fuzzy" | "unknown";
 export type ThemeMode = "system" | "light" | "dark";
 export type CardType = "basic" | "word" | "choice" | "blank";
 
+export type BlankAnswerConfig = {
+  version: 1;
+  orderless: boolean;
+  answers: string[][];
+};
+
 export type Deck = {
   id: number;
   parent_id: number | null;

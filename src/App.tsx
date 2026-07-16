@@ -48,6 +48,16 @@ import Volume2 from "lucide-react/dist/esm/icons/volume-2";
 import XCircle from "lucide-react/dist/esm/icons/x-circle";
 import { CSSProperties, FormEvent, PointerEvent as ReactPointerEvent, ReactNode, TouchEvent as ReactTouchEvent, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { api, type CardPayload, type ConflictError } from "./api";
+import {
+  blankAnswerDisplay,
+  blankAnswerSearchText,
+  blankAnswerSeparator,
+  blankAnswerSummary,
+  blankAnswersMatch,
+  legacyBlankAnswerConfig,
+  maxBlankAlternatives,
+  normalizeBlankAnswerConfig
+} from "./blank-answers";
 import { resolveStudySwipe } from "./study-gestures";
 import type { Card, CardType, DailyTask, Deck, ImportBatch, ReviewRating, ReviewRemaining, ReviewSnapshot, Settings, Stats, SyncStatus, ThemeMode, TomatoState, User } from "./types";
 
@@ -66,11 +76,10 @@ declare global {
   }
 }
 
-const version = "0.6.3";
+const version = "0.6.4";
 const logExportPressCount = 6;
 const logExportKey = "a";
 const logExportResetMs = 1800;
-const blankAnswerSeparator = "\u001f";
 const studyDeckStoragePrefix = "xian-flashcards-study-root-deck";
 
 const cardTypeLabels: Record<CardType, string> = {
@@ -155,6 +164,7 @@ function parseChoices(value: string | string[] | undefined) {
   try {
     const parsed = JSON.parse(value);
     if (Array.isArray(parsed)) return parsed.map((item) => String(item).trim()).filter(Boolean);
+    if (parsed && typeof parsed === "object") return [];
   } catch {
     // Fall through to separator parsing.
   }
@@ -172,49 +182,6 @@ function splitChoiceText(value: string) {
     .split(/[|\n]+|[；;](?=\s*\S)/)
     .map((item) => item.trim())
     .filter(Boolean);
-}
-
-function splitBlankAnswerText(value: string) {
-  return value
-    .split(new RegExp(`[${blankAnswerSeparator}\\n|/／、，,；;]+`))
-    .map((item) => item.trim())
-    .filter(Boolean);
-}
-
-function splitAlternativeAnswers(value: string) {
-  return value
-    .split(/\s*(?:或者|或|\bor\b)\s*/i)
-    .map((item) => item.trim())
-    .filter(Boolean);
-}
-
-function matchesAnyAlternative(answer: string, correctAnswer: string) {
-  const alternatives = splitAlternativeAnswers(correctAnswer);
-  const candidates = alternatives.length > 0 ? alternatives : [correctAnswer];
-  return candidates.some((candidate) => normalizeAnswer(answer) === normalizeAnswer(candidate));
-}
-
-function blankAnswerPartMatches(answer: string, correctAnswer: string) {
-  return Boolean(answer.trim()) && matchesAnyAlternative(answer, correctAnswer);
-}
-
-function blankOrderlessGroups(front: string, count: number) {
-  const groups: number[][] = [];
-  let currentGroup = [0];
-  const parts = front.split(blankMarkerPattern);
-
-  for (let index = 0; index < count - 1; index += 1) {
-    const separator = parts[index * 2 + 2] ?? "";
-    if (/[和与及、，,；;\/／]/.test(separator)) {
-      currentGroup.push(index + 1);
-      continue;
-    }
-    if (currentGroup.length > 1) groups.push(currentGroup);
-    currentGroup = [index + 1];
-  }
-
-  if (currentGroup.length > 1) groups.push(currentGroup);
-  return groups;
 }
 
 function pushMarkdownTextBlocks(blocks: MarkdownBlock[], value: string) {
@@ -503,34 +470,14 @@ function isWordCard(card: Card) {
 }
 
 function correctAnswer(card: Card) {
+  const config = card.card_type === "blank" ? normalizeBlankAnswerConfig(card.choices) : null;
+  if (config) return blankAnswerDisplay(config);
   return card.back;
 }
 
 function isCorrectAnswer(card: Card, answer: string) {
   if (card.card_type === "blank") {
-    const count = blankMarkerCount(card.front);
-    const answers = splitBlankAnswers(answer, count).map((item) => item.trim());
-    const correctAnswers = splitBlankAnswerText(card.back);
-    if (count > 1 && correctAnswers.length === count) {
-      const matched = Array.from({ length: count }, () => false);
-      for (const group of blankOrderlessGroups(card.front, count)) {
-        const remaining = group.map((index) => answers[index]);
-        if (remaining.some((item) => !item.trim())) return false;
-        for (const index of group) {
-          const matchedAnswerIndex = remaining.findIndex((item) => matchesAnyAlternative(item, correctAnswers[index]));
-          if (matchedAnswerIndex === -1) return false;
-          remaining.splice(matchedAnswerIndex, 1);
-        }
-        group.forEach((index) => { matched[index] = true; });
-      }
-      return answers.every((item, index) => matched[index] || blankAnswerPartMatches(item, correctAnswers[index]));
-    }
-    if (count > 1) return normalizeAnswer(displayBlankAnswer(answer)) === normalizeAnswer(card.back);
-    const userAnswers = splitBlankAnswerText(answer);
-    if (userAnswers.length === 1 && correctAnswers.length === 1) return matchesAnyAlternative(userAnswers[0], correctAnswers[0]);
-    if (userAnswers.length > 1 && correctAnswers.length === userAnswers.length) {
-      return userAnswers.map(normalizeAnswer).sort().join("\n") === correctAnswers.map(normalizeAnswer).sort().join("\n");
-    }
+    return blankAnswersMatch(card.front, card.back, card.choices, answer);
   }
   const normalized = normalizeAnswer(answer);
   return normalized === normalizeAnswer(correctAnswer(card));
@@ -822,7 +769,7 @@ export default function App() {
     const query = normalizeAnswer(search);
     return cards.filter((card) => {
       if (!query) return true;
-      return normalizeAnswer(`${card.front} ${card.phonetic} ${card.back} ${card.example} ${card.mnemonic} ${card.note} ${parseChoices(card.choices).join(" ")}`).includes(query);
+      return normalizeAnswer(`${card.front} ${card.phonetic} ${card.back} ${card.example} ${card.mnemonic} ${card.note} ${parseChoices(card.choices).join(" ")} ${blankAnswerSearchText(card.choices)}`).includes(query);
     });
   }, [cards, search]);
 
@@ -1768,7 +1715,7 @@ function DeckView(props: {
                   <button className="mini-button" title="详情" onClick={() => setDetailCard(card)}><Eye /></button>
                   <button className="mini-button" title="编辑" onClick={() => { setEditingCard(card); scrollToPageTop(); }}><Edit3 /></button>
                 </div>
-                <p>{card.back}</p>
+                <p>{card.card_type === "blank" ? correctAnswer(card) : card.back}</p>
                 {card.example && <small>{card.example}</small>}
                 {parseChoices(card.choices).length > 0 && <small>选项：{parseChoices(card.choices).join(" / ")}</small>}
                 {isWordCard(card) && card.mnemonic && <small>助记：{card.mnemonic}</small>}
@@ -1789,6 +1736,10 @@ function DeckView(props: {
 }
 
 function CardEditor(props: { card?: Card; onSubmit: (payload: CardPayload) => Promise<void>; onCancel?: () => void }) {
+  const initialBlankConfig = () => {
+    if (props.card?.card_type !== "blank") return { version: 1 as const, orderless: false, answers: [[""]] };
+    return normalizeBlankAnswerConfig(props.card.choices) ?? legacyBlankAnswerConfig(props.card.front, props.card.back);
+  };
   const [cardType, setCardType] = useState<CardType>(props.card?.card_type ?? "basic");
   const [front, setFront] = useState(props.card?.front ?? "");
   const [phonetic, setPhonetic] = useState(props.card?.phonetic ?? "");
@@ -1797,9 +1748,16 @@ function CardEditor(props: { card?: Card; onSubmit: (payload: CardPayload) => Pr
   const [mnemonic, setMnemonic] = useState(props.card?.mnemonic ?? "");
   const [note, setNote] = useState(props.card?.note ?? "");
   const [choices, setChoices] = useState(parseChoices(props.card?.choices).join(" | "));
+  const [blankAnswers, setBlankAnswers] = useState<string[][]>(() => initialBlankConfig().answers);
+  const [blankOrderless, setBlankOrderless] = useState(() => initialBlankConfig().orderless);
   const [saving, setSaving] = useState(false);
+  const blankCount = Math.max(1, blankMarkerCount(front));
+  const visibleBlankAnswers = Array.from({ length: blankCount }, (_, index) => blankAnswers[index] ?? [""]);
 
   useEffect(() => {
+    const nextBlankConfig = props.card?.card_type === "blank"
+      ? normalizeBlankAnswerConfig(props.card.choices) ?? legacyBlankAnswerConfig(props.card.front, props.card.back)
+      : { version: 1 as const, orderless: false, answers: [[""]] };
     setCardType(props.card?.card_type ?? "basic");
     setFront(props.card?.front ?? "");
     setPhonetic(props.card?.phonetic ?? "");
@@ -1808,23 +1766,57 @@ function CardEditor(props: { card?: Card; onSubmit: (payload: CardPayload) => Pr
     setMnemonic(props.card?.mnemonic ?? "");
     setNote(props.card?.note ?? "");
     setChoices(parseChoices(props.card?.choices).join(" | "));
+    setBlankAnswers(nextBlankConfig.answers);
+    setBlankOrderless(nextBlankConfig.orderless);
   }, [props.card?.id, props.card?.updated_at]);
+
+  function updateBlankAnswer(groupIndex: number, answerIndex: number, value: string) {
+    setBlankAnswers((current) => {
+      const next = current.map((group) => [...group]);
+      while (next.length <= groupIndex) next.push([""]);
+      while (next[groupIndex].length <= answerIndex) next[groupIndex].push("");
+      next[groupIndex][answerIndex] = value;
+      return next;
+    });
+  }
+
+  function addBlankAlternative(groupIndex: number) {
+    setBlankAnswers((current) => {
+      const next = current.map((group) => [...group]);
+      while (next.length <= groupIndex) next.push([""]);
+      if (next[groupIndex].length < maxBlankAlternatives) next[groupIndex].push("");
+      return next;
+    });
+  }
+
+  function removeBlankAlternative(groupIndex: number, answerIndex: number) {
+    if (answerIndex === 0) return;
+    setBlankAnswers((current) => current.map((group, index) => index === groupIndex
+      ? group.filter((_, itemIndex) => itemIndex !== answerIndex)
+      : [...group]));
+  }
 
   async function submit(event: FormEvent) {
     event.preventDefault();
-    if (!front.trim() || !back.trim() || saving) return;
+    const blankConfig = cardType === "blank" ? normalizeBlankAnswerConfig({
+      version: 1,
+      orderless: blankOrderless && blankCount > 1,
+      answers: visibleBlankAnswers
+    }) : null;
+    const savedBack = blankConfig ? blankAnswerSummary(blankConfig) : back;
+    if (!front.trim() || !savedBack.trim() || cardType === "blank" && (!blankConfig || blankConfig.answers.length !== blankCount) || saving) return;
     setSaving(true);
     try {
       const parsedChoices = parseChoices(choices);
       await props.onSubmit({
         card_type: cardType,
         front,
-        back,
+        back: savedBack,
         phonetic,
         example,
         mnemonic,
         note,
-        choices: cardType === "choice" ? parsedChoices : []
+        choices: cardType === "choice" ? parsedChoices : cardType === "blank" ? blankConfig! : []
       });
       if (!props.card) {
         setFront("");
@@ -1834,6 +1826,8 @@ function CardEditor(props: { card?: Card; onSubmit: (payload: CardPayload) => Pr
         setMnemonic("");
         setNote("");
         setChoices("");
+        setBlankAnswers([[""]]);
+        setBlankOrderless(false);
         setCardType("basic");
       }
     } finally {
@@ -1844,7 +1838,11 @@ function CardEditor(props: { card?: Card; onSubmit: (payload: CardPayload) => Pr
   return (
     <form className={`card-form ${props.card ? "edit-card-form" : ""}`} onSubmit={submit}>
       <EditorField label="卡片类型">
-        <select value={cardType} onChange={(event) => setCardType(event.target.value as CardType)}>
+        <select value={cardType} onChange={(event) => {
+          const nextType = event.target.value as CardType;
+          if (nextType === "blank" && blankAnswers.length === 1 && !blankAnswers[0]?.[0] && back.trim()) setBlankAnswers([[back.trim()]]);
+          setCardType(nextType);
+        }}>
           <option value="basic">普通卡</option>
           <option value="word">单词卡</option>
           <option value="choice">选择题卡</option>
@@ -1854,6 +1852,20 @@ function CardEditor(props: { card?: Card; onSubmit: (payload: CardPayload) => Pr
       <EditorField label={cardType === "word" ? "单词 / 正面" : cardType === "choice" ? "题目" : cardType === "blank" ? "题干" : "正面 / 问题"}>
         <SmartTextField value={front} onChange={setFront} placeholder={cardType === "blank" ? "题干，使用 [] 表示空格" : "输入正面内容"} required allowImageInsert />
       </EditorField>
+      {cardType === "blank" && (
+        <label className={`blank-orderless-toggle ${blankCount <= 1 ? "disabled" : ""}`}>
+          <input
+            type="checkbox"
+            checked={blankOrderless && blankCount > 1}
+            disabled={blankCount <= 1}
+            onChange={(event) => setBlankOrderless(event.target.checked)}
+          />
+          <span>
+            <strong>乱序填空</strong>
+            <small>{blankCount > 1 ? "开启后，各空的答案可交换位置，但仍需一一对应。" : "题干中至少需要两个空位。"}</small>
+          </span>
+        </label>
+      )}
       {cardType === "choice" && (
         <EditorField label="选项">
           <SmartTextField value={choices} onChange={setChoices} placeholder="用 |、; 分隔，或一行一个选项" multilineThreshold={28} />
@@ -1864,9 +1876,43 @@ function CardEditor(props: { card?: Card; onSubmit: (payload: CardPayload) => Pr
           <SmartTextField value={phonetic} onChange={setPhonetic} placeholder="英式音标，如 /ˈwɔːtə/" />
         </EditorField>
       )}
-      <EditorField label={cardType === "choice" ? "正确答案" : cardType === "blank" ? "填空答案" : cardType === "word" ? "释义 / 背面" : "背面 / 答案"}>
-        <SmartTextField value={back} onChange={setBack} placeholder="输入背面或答案内容" required allowImageInsert />
-      </EditorField>
+      {cardType === "blank" ? (
+        <div className="editor-field blank-answer-editor">
+          <span>填空答案</span>
+          <small className="blank-answer-editor-hint">题干当前识别到 {blankCount} 个空；点击 /可为对应空添加可接受的备选答案。</small>
+          <div className="blank-answer-editor-list">
+            {visibleBlankAnswers.map((group, groupIndex) => (
+              <section className="blank-answer-editor-group" key={groupIndex}>
+                <span>空 {groupIndex + 1}</span>
+                {group.map((item, answerIndex) => (
+                  <div className="blank-answer-editor-row" key={answerIndex}>
+                    <SmartTextField
+                      value={item}
+                      onChange={(value) => updateBlankAnswer(groupIndex, answerIndex, value)}
+                      placeholder={answerIndex === 0 ? "必填主答案" : `备选答案 ${answerIndex}`}
+                      required={answerIndex === 0}
+                    />
+                    <button
+                      className="blank-answer-add-button"
+                      type="button"
+                      title="增加一个备选答案"
+                      disabled={group.length >= maxBlankAlternatives}
+                      onClick={() => addBlankAlternative(groupIndex)}
+                    >/</button>
+                    {answerIndex > 0 && (
+                      <button className="blank-answer-remove-button" type="button" title="删除这个备选答案" onClick={() => removeBlankAlternative(groupIndex, answerIndex)}><XCircle /></button>
+                    )}
+                  </div>
+                ))}
+              </section>
+            ))}
+          </div>
+        </div>
+      ) : (
+        <EditorField label={cardType === "choice" ? "正确答案" : cardType === "word" ? "释义 / 背面" : "背面 / 答案"}>
+          <SmartTextField value={back} onChange={setBack} placeholder="输入背面或答案内容" required allowImageInsert />
+        </EditorField>
+      )}
       <EditorField label={cardType === "choice" || cardType === "blank" ? "解析 / 说明" : cardType === "word" ? "例句 / 说明" : "说明 / 例子"}>
         <SmartTextField value={example} onChange={setExample} placeholder="可选" allowImageInsert />
       </EditorField>
@@ -2519,7 +2565,7 @@ function StudyView(props: {
 
   function submitBlankAnswer(event: FormEvent) {
     event.preventDefault();
-    if (!displayBlankAnswer(answer) || busy) return;
+    if (!card || !splitBlankAnswers(answer, Math.max(1, blankMarkerCount(card.front))).every((part) => part.trim()) || busy) return;
     checkWritten();
   }
 
@@ -2555,7 +2601,9 @@ function StudyView(props: {
   const showReferenceDock = showAnswerDock || showBasicBackFront;
   const canToggleReferenceDock = Boolean(isBasicCard ? flipped : checked && explanationIsLong);
   const showManualRatings = card ? card.card_type !== "choice" && card.card_type !== "blank" || checked !== null : false;
-  const currentBlankCount = card?.card_type === "blank" ? blankMarkerCount(card.front) : 1;
+  const currentBlankCount = card?.card_type === "blank" ? Math.max(1, blankMarkerCount(card.front)) : 1;
+  const currentBlankParts = splitBlankAnswers(answer, currentBlankCount);
+  const blankAnswerReady = currentBlankParts.every((part) => Boolean(part.trim()));
   const displayedBlankAnswer = displayBlankAnswer(answer);
 
   const scale = scaleDraft;
@@ -3036,7 +3084,7 @@ function StudyView(props: {
                             disabled={Boolean(busy)}
                           />
                         )}
-                        <button className="primary-button blank-submit-button" disabled={Boolean(busy) || !displayedBlankAnswer}>{busy ? "提交中" : "提交"}</button>
+                        <button className="primary-button blank-submit-button" disabled={Boolean(busy) || !blankAnswerReady}>{busy ? "提交中" : "提交"}</button>
                       </form>
                       {checked && <AnswerFeedback checked={checked} correct={correctAnswer(card)} explanation={explanation} other={otherNote} selected={displayedBlankAnswer} />}
                     </div>
@@ -3248,7 +3296,7 @@ function AnswerFeedback(props: { checked: "right" | "wrong"; correct: string; ex
 }
 
 function ImportView(props: { decks: Deck[]; selectedDeckId: number | null; onSelectDeck: (id: number) => void; onImported: (message: string) => Promise<void>; onError: (message: string) => void }) {
-  const [text, setText] = useState("card_type,front,back,option1,option2,option3,option4\nchoice,Which one means apple?,苹果,苹果,香蕉,橙子,葡萄\nblank,I eat [] every day.,apple,,,,");
+  const [text, setText] = useState("card_type,front,answer1,answer1_alt1,answer1_alt2,answer2,answer2_alt1,answer2_alt2,blank_orderless,example,note\nblank,I eat [] every day.,apple,an apple,apples,,,,false,填写空格中的单词,\nblank,[] and [] are colours.,red,red colour,,blue,blue colour,,true,两个颜色可交换位置,");
   const [file, setFile] = useState<File | null>(null);
   const [importing, setImporting] = useState(false);
   const [undoingBatchId, setUndoingBatchId] = useState("");
@@ -3306,7 +3354,7 @@ function ImportView(props: { decks: Deck[]; selectedDeckId: number | null; onSel
         </div>
         <label>上传 CSV/TSV/XLSX<input type="file" accept=".csv,.tsv,.xlsx,.xls" onChange={(event) => setFile(event.target.files?.[0] ?? null)} /></label>
         <label>或粘贴表格<textarea value={text} onChange={(event) => setText(event.target.value)} rows={10} /></label>
-        <p className="hint">可自动识别题型：有选项列会导入为选择题，题干含 [] 或连续下划线会导入为填空题；也支持显式 card_type/type/卡片类型。</p>
+        <p className="hint">可自动识别题型：填空题用 answer1、answer1_alt1、answer2 等列表示各空与备选答案，blank_orderless 控制是否乱序；旧 back 列仍可继续导入。</p>
         <button className="primary-button" disabled={importing || !props.selectedDeckId}><FileSpreadsheet />{importing ? "导入中" : "开始导入"}</button>
       </form>
       <section className="recent-imports" aria-label="最近导入">
@@ -3385,6 +3433,7 @@ function AboutView(props: { syncStatus: SyncStatus | null }) {
       <div className="schedule-box"><h3>同步状态</h3><p>最近同步：{props.syncStatus ? fullDateTime(props.syncStatus.lastSyncAt) : "暂无"} · 数据更新：{props.syncStatus?.dataUpdatedAt ? fullDateTime(props.syncStatus.dataUpdatedAt) : "暂无"}</p></div>
       <div className="schedule-box changelog-box">
         <h3>更新日志</h3>
+        <div className="changelog-row"><strong>0.6.4</strong><span>2026-07-16</span><p>填空题编辑器支持每空独立配置多个正确答案，新增严格一一配对的乱序填空，并同步升级批量导入格式与模板。</p></div>
         <div className="changelog-row"><strong>0.6.3</strong><span>2026-07-16</span><p>手机学习卡片支持左滑不会、右滑掌握、下滑模糊，并为超级用户增加逐词编辑豆包语音模型提示词的能力。</p></div>
         <div className="changelog-row"><strong>0.6.2</strong><span>2026-07-15</span><p>解析、说明和例句字段新增图片插入入口，支持在正文光标位置插入多张图片。</p></div>
         <div className="changelog-row"><strong>0.6.1</strong><span>2026-07-15</span><p>为手机端重新设计六入口底部导航，修复侧栏占满整屏导致无法操作的问题，并逐页优化顶部操作、卡组、学习、导入、设置与关于页的窄屏布局。</p></div>

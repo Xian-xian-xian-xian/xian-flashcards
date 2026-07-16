@@ -1,4 +1,4 @@
-import type { Card, DailyTask, Deck, ImportBatch, ReviewRating, ReviewRemaining, ReviewSnapshot, Settings, Stats, SyncStatus, TomatoState, User } from "./types";
+import type { BlankAnswerConfig, Card, DailyTask, Deck, ImportBatch, ReviewRating, ReviewRemaining, ReviewSnapshot, Settings, Stats, SyncStatus, TomatoState, User } from "./types";
 
 export type CardPayload = {
   card_type?: Card["card_type"];
@@ -8,7 +8,7 @@ export type CardPayload = {
   example?: string;
   mnemonic?: string;
   note?: string;
-  choices?: string | string[];
+  choices?: string | string[] | BlankAnswerConfig;
   favorite?: number;
   baseUpdatedAt?: string;
   force?: boolean;
