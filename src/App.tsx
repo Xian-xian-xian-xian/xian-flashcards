@@ -59,6 +59,7 @@ import {
   normalizeBlankAnswerConfig
 } from "./blank-answers";
 import { insertImageMarkdown } from "./card-images";
+import { latexRenderSource } from "./latex";
 import { shouldUsePractice } from "./study-session";
 import { resolveStudySwipe } from "./study-gestures";
 import type { Card, CardType, DailyTask, Deck, ImportBatch, ReviewRating, ReviewRemaining, ReviewSnapshot, Settings, Stats, SyncStatus, ThemeMode, TomatoState, User } from "./types";
@@ -241,14 +242,6 @@ const blankMarkerPattern = /(\[\s*\]|_{2,}|（\s*）|\(\s*\))/g;
 const inlineMarkdownPattern = /(!\[[^\]]*]\([^)]+\)|\\\((.*?)\\\)|\\begin\{(equation\*?|align\*?|gather\*?|multline\*?|split)\}(.+?)\\end\{(?:equation\*?|align\*?|gather\*?|multline\*?|split)\}|\$([^$\n]+)\$|\*\*[^*]+\*\*|__[^_]+__|~~[^~]+~~|`[^`]+`|\[[^\]]+\]\([^)]+\)|\*[^*]+\*|_[^_]+_)/g;
 const bareMathPattern = /((?:\\[a-zA-Z]+\s*)?[A-Za-z][A-Za-z0-9]*\s*\([^)\n]*\)\s*=\s*[A-Za-z0-9{}()[\]^_+\-\\\s]+|[A-Za-z0-9{}()[\]^_+\-\\]+\s*=\s*[A-Za-z0-9{}()[\]^_+\-\\\s]+)/g;
 
-function sanitizeLatex(value: string) {
-  return value
-    .replace(/\\notag\b/g, "")
-    .replace(/\\begin\{equation\*?\}/g, "")
-    .replace(/\\end\{equation\*?\}/g, "")
-    .trim();
-}
-
 function looksLikeBareMath(value: string) {
   const text = value.trim();
   if (!text || /[\u4e00-\u9fff]/.test(text)) return false;
@@ -259,7 +252,7 @@ function looksLikeBareMath(value: string) {
 }
 
 function MathText(props: { value: string; displayMode?: boolean }) {
-  const html = useMemo(() => window.katex?.renderToString(sanitizeLatex(props.value), {
+  const html = useMemo(() => window.katex?.renderToString(latexRenderSource(props.value, props.displayMode), {
     displayMode: props.displayMode,
     throwOnError: false,
     trust: false,
