@@ -39,6 +39,7 @@ export type Card = {
   updated_at: string;
   stage: number;
   due_at: string;
+  last_studied_at?: string;
   last_rating: string;
   known_count?: number;
   fuzzy_count?: number;

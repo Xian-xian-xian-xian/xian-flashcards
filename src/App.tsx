@@ -79,7 +79,7 @@ declare global {
   }
 }
 
-const version = "0.6.9";
+const version = "0.7.0";
 const logExportPressCount = 6;
 const logExportKey = "a";
 const logExportResetMs = 1800;
@@ -1209,7 +1209,6 @@ export default function App() {
             onCancel={() => setView("deck")}
             onSubmit={async (payload) => {
               await createCard(payload);
-              setView("deck");
               scrollToPageTop();
             }}
           />
@@ -1591,9 +1590,23 @@ function DeckView(props: {
   const [selectedCardIds, setSelectedCardIds] = useState<number[]>([]);
   const [batchTargetDeckId, setBatchTargetDeckId] = useState<number | null>(props.selectedDeckId);
   const [deckPanelCollapsed, setDeckPanelCollapsed] = useState(false);
+  const [sortField, setSortField] = useState<"created" | "due" | "studied">("created");
+  const [sortDirection, setSortDirection] = useState<"asc" | "desc">("desc");
   const [busy, setBusy] = useState("");
 
   const allVisibleSelected = props.cards.length > 0 && props.cards.every((card) => selectedCardIds.includes(card.id));
+  const sortedCards = useMemo(() => {
+    const valueFor = (card: Card) => sortField === "due"
+      ? card.due_at
+      : sortField === "studied"
+        ? card.last_studied_at ?? ""
+        : card.created_at;
+    const direction = sortDirection === "asc" ? 1 : -1;
+    return [...props.cards].sort((left, right) => {
+      const compared = valueFor(left).localeCompare(valueFor(right));
+      return compared === 0 ? direction * (left.id - right.id) : direction * compared;
+    });
+  }, [props.cards, sortDirection, sortField]);
 
   useEffect(() => {
     setSelectedCardIds((ids) => ids.filter((id) => props.cards.some((card) => card.id === id)));
@@ -1725,6 +1738,17 @@ function DeckView(props: {
             <button className="mini-button" title="显示卡组列表" onClick={() => setDeckPanelCollapsed(false)}><PanelLeftOpen /></button>
           )}
           <div className="search"><Search /><input value={props.search} onChange={(event) => props.onSearch(event.target.value)} placeholder="搜索题目、答案、选项、例句" /></div>
+          <div className="deck-sort-controls" aria-label="卡片排序">
+            <select aria-label="排列顺序" value={sortField} onChange={(event) => setSortField(event.target.value as "created" | "due" | "studied")}>
+              <option value="created">加入时间</option>
+              <option value="due">到期时间</option>
+              <option value="studied">最新学习</option>
+            </select>
+            <select aria-label="排序方法" value={sortDirection} onChange={(event) => setSortDirection(event.target.value as "asc" | "desc")}>
+              <option value="asc">正序</option>
+              <option value="desc">倒序</option>
+            </select>
+          </div>
           <button className="primary-button toolbar-create-card" disabled={!props.selectedDeckId} onClick={props.onOpenCreateCard}><Plus />新建卡片</button>
         </div>
         {editingCard && <CardEditor card={editingCard} onCancel={() => setEditingCard(null)} onSubmit={async (payload) => { await props.onUpdateCard(editingCard.id, { ...payload, baseUpdatedAt: editingCard.updated_at }); setEditingCard(null); }} />}
@@ -1739,7 +1763,7 @@ function DeckView(props: {
           <button className="primary-button danger-button" disabled={selectedCardIds.length === 0 || Boolean(busy)} onClick={batchDelete}><Trash2 />{busy === "batch-delete" ? "删除中" : "删除"}</button>
         </div>
         <div className="card-list">
-          {props.cards.map((card) => (
+          {sortedCards.map((card) => (
             <article className="word-card" key={card.id}>
               <div className="card-summary">
                 <div className="word-title">
@@ -2996,7 +3020,7 @@ function StudyView(props: {
                     <div className="text-tool-popover study-more-popover">
                       <strong>学习设置</strong>
                       <div className="study-more-options">
-                        {[0.85, 1, 1.15, 1.25, 1.35].map((value) => <button key={value} className={Math.abs(scaleDraft - value) < 0.01 ? "active" : ""} onClick={() => saveScale(value)}>字号 {Math.round(value * 100)}%</button>)}
+                        {[0.5, 0.625, 0.85, 1, 1.15, 1.25, 1.35].map((value) => <button key={value} className={Math.abs(scaleDraft - value) < 0.01 ? "active" : ""} onClick={() => saveScale(value)}>字号 {Math.round(value * 1000) / 10}%</button>)}
                         {[1.2, 1.4, 1.5, 1.6, 1.8, 2].map((value) => <button key={value} className={Math.abs(props.studyLineHeight - value) < 0.01 ? "active" : ""} onClick={() => saveLineHeight(value)}>行距 {value.toFixed(value === 2 ? 0 : 1)}</button>)}
                         <button className={props.studyTextAlign === "left" ? "active" : ""} onClick={() => saveTextAlign("left")}><AlignLeft />左对齐</button>
                         <button className={props.studyTextAlign === "center" ? "active" : ""} onClick={() => saveTextAlign("center")}><AlignCenter />居中</button>
@@ -3496,6 +3520,7 @@ function AboutView(props: { syncStatus: SyncStatus | null }) {
       <div className="schedule-box"><h3>同步状态</h3><p>最近同步：{props.syncStatus ? fullDateTime(props.syncStatus.lastSyncAt) : "暂无"} · 数据更新：{props.syncStatus?.dataUpdatedAt ? fullDateTime(props.syncStatus.dataUpdatedAt) : "暂无"}</p></div>
       <div className="schedule-box changelog-box">
         <h3>更新日志</h3>
+        <div className="changelog-row"><strong>0.7.0</strong><span>2026-07-17</span><p>学习页新增 50% 和 62.5% 字号；卡组卡片改为 14px，并支持按加入、到期、最新学习时间正倒序排列；桌面导航默认收起、靠近左侧弹出；连续新建卡片不再返回卡组。</p></div>
         <div className="changelog-row"><strong>0.6.9</strong><span>2026-07-17</span><p>块级 LaTeX 多行公式内部改为 1.5 倍行距，提升连续推导的可读性。</p></div>
         <div className="changelog-row"><strong>0.6.8</strong><span>2026-07-17</span><p>豆包默认 SSML 改为仅包含英文单词，音标改由英式发音提示词传入；现有语音缓存继续直接使用，不重制或覆盖。</p></div>
         <div className="changelog-row"><strong>0.6.7</strong><span>2026-07-17</span><p>学习模式支持数字键 1/不会、2/模糊、3/掌握；“切换到前一张”移至右上角，豆包语音设置收入“更多”。</p></div>

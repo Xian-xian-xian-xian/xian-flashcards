@@ -67,7 +67,7 @@ type BlankAnswerConfig = { version: 1; orderless: boolean; answers: string[][] }
 const maxDeckDepth = 5;
 const sessionCookieName = "flashcards_session";
 const sessionDays = 30;
-const appVersion = "0.6.9";
+const appVersion = "0.7.0";
 const timeZone = "Asia/Shanghai";
 const pronunciationCacheDir = process.env.PRONUNCIATION_CACHE_DIR ?? path.resolve(process.cwd(), "runtime/pronunciations");
 const doubaoTtsApiKey = process.env.DOUBAO_TTS_API_KEY ?? "";
@@ -4434,7 +4434,8 @@ function parseImportBatchCardIds(value: unknown) {
 
 function cardRows(userId: number, where = "", params: SqlValue[] = []) {
   return all(
-    `SELECT c.*, r.stage, r.due_at, r.last_rating, r.known_count, r.fuzzy_count, r.unknown_count
+    `SELECT c.*, r.stage, r.due_at, r.last_rating, r.known_count, r.fuzzy_count, r.unknown_count,
+            CASE WHEN r.last_rating <> '' THEN r.updated_at ELSE '' END AS last_studied_at
      FROM cards c
      JOIN reviews r ON r.card_id = c.id
      WHERE c.user_id = ? ${where}
