@@ -78,7 +78,7 @@ declare global {
   }
 }
 
-const version = "0.6.6";
+const version = "0.6.7";
 const logExportPressCount = 6;
 const logExportKey = "a";
 const logExportResetMs = 1800;
@@ -2839,7 +2839,7 @@ function StudyView(props: {
       const target = event.target as HTMLElement | null;
       const tagName = target?.tagName ?? "";
       const editable = Boolean(target?.isContentEditable || ["INPUT", "TEXTAREA", "SELECT"].includes(tagName));
-      if (editable || editingStudyCard || event.metaKey || event.ctrlKey || event.altKey || busyRef.current) return;
+      if (editable || editingStudyCard || pronunciationXmlOpen || event.metaKey || event.ctrlKey || event.altKey || busyRef.current) return;
 
       if ((event.key === "ArrowRight" || event.key === " ") && !card && total > 0) {
         event.preventDefault();
@@ -2865,17 +2865,17 @@ function StudyView(props: {
       }
 
       if (!showManualRatings) return;
-      if (event.key === "<") {
+      if (event.key === "1" || event.key === "<") {
         event.preventDefault();
         rate("unknown");
         return;
       }
-      if (event.key === ">") {
+      if (event.key === "2" || event.key === ">") {
         event.preventDefault();
         rate("fuzzy");
         return;
       }
-      if (event.key === "?") {
+      if (event.key === "3" || event.key === "?") {
         event.preventDefault();
         rate("known");
       }
@@ -2883,7 +2883,7 @@ function StudyView(props: {
 
     window.addEventListener("keydown", onKeyDown);
     return () => window.removeEventListener("keydown", onKeyDown);
-  }, [card?.id, card?.card_type, editingStudyCard, total, studyMode, grindMessage, showManualRatings, history.length, checked]);
+  }, [card?.id, card?.card_type, editingStudyCard, pronunciationXmlOpen, total, studyMode, grindMessage, showManualRatings, history.length, checked]);
 
   return (
     <section className={`stack study-view ${immersive ? "immersive" : ""}`}>
@@ -2995,9 +2995,7 @@ function StudyView(props: {
               </div>
               <div className="study-quick-actions">
                 <button className="mini-button" title="发音" onClick={() => props.onSpeak(isWordCard(card) && card.phonetic ? card.phonetic : card.front, card.language ?? props.selectedDeck?.language, card.front)}><Volume2 /></button>
-                {props.isSuperuser && isWordCard(card) && (
-                  <button className={`mini-button ${pronunciationXmlOpen ? "active" : ""}`} title="设置豆包语音" disabled={pronunciationXmlBusy === "load"} onClick={togglePronunciationXml}><CodeXml /></button>
-                )}
+                <button className="mini-button" title="切换到前一张" disabled={history.length === 0 || Boolean(busy)} onClick={undo}><ArrowLeft /></button>
                 <button className="mini-button" title={immersive ? "退出沉浸学习" : "沉浸学习"} onClick={toggleImmersive}>{immersive ? <Minimize2 /> : <Maximize2 />}</button>
                 <button className="mini-button" title="编辑当前卡片" onClick={editCurrentStudyCard}><Edit3 /></button>
                 <TextToolButton icon={<MoreHorizontal />} title="更多学习工具" active={moreToolsOpen} onClick={() => setMoreToolsOpen((open) => !open)}>
@@ -3016,7 +3014,9 @@ function StudyView(props: {
                         <button onClick={loadFonts}>{fontLoading ? "读取字体中" : "读取系统字体"}</button>
                         {installedFonts.map((font) => <button key={font} className={props.studyFontFamily === font ? "active" : ""} style={{ fontFamily: studyFontStack(font) }} onClick={() => saveFontFamily(font)}>{font}</button>)}
                         <button className={showReferenceDock ? "active" : ""} disabled={!canToggleReferenceDock} onClick={() => setAnswerDockOpen((open) => !open)}>{answerDockOpen ? <EyeOff /> : <Eye />}{answerDockOpen ? "隐藏题目参考" : "显示题目参考"}</button>
-                        <button disabled={history.length === 0 || Boolean(busy)} onClick={undo}><ArrowLeft />撤销上一张</button>
+                        {props.isSuperuser && isWordCard(card) && (
+                          <button className={pronunciationXmlOpen ? "active" : ""} disabled={pronunciationXmlBusy === "load"} onClick={() => { setMoreToolsOpen(false); togglePronunciationXml(); }}><CodeXml />豆包语音设置</button>
+                        )}
                       </div>
                       <small>{fontStatus}</small>
                     </div>
@@ -3503,6 +3503,7 @@ function AboutView(props: { syncStatus: SyncStatus | null }) {
       <div className="schedule-box"><h3>同步状态</h3><p>最近同步：{props.syncStatus ? fullDateTime(props.syncStatus.lastSyncAt) : "暂无"} · 数据更新：{props.syncStatus?.dataUpdatedAt ? fullDateTime(props.syncStatus.dataUpdatedAt) : "暂无"}</p></div>
       <div className="schedule-box changelog-box">
         <h3>更新日志</h3>
+        <div className="changelog-row"><strong>0.6.7</strong><span>2026-07-17</span><p>学习模式支持数字键 1/不会、2/模糊、3/掌握；“切换到前一张”移至右上角，豆包语音设置收入“更多”。</p></div>
         <div className="changelog-row"><strong>0.6.6</strong><span>2026-07-16</span><p>修复新卡先选择“模糊”、同轮再选择“掌握”后仍保留约 30 分钟排程的问题；首次掌握会正确回到第 1 阶段短间隔。</p></div>
         <div className="changelog-row"><strong>0.6.5</strong><span>2026-07-16</span><p>卡组管理改用独立的新建卡片页面，缩略卡片支持 LaTeX 渲染；图片可从本地安全上传到云端，公式间距同步学习行距。</p></div>
         <div className="changelog-row"><strong>0.6.4</strong><span>2026-07-16</span><p>填空题编辑器支持每空独立配置多个正确答案，新增严格一一配对的乱序填空，并同步升级批量导入格式与模板。</p></div>
