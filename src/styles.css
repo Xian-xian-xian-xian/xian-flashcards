@@ -1216,6 +1216,7 @@ textarea:focus {
   --study-small-size: 16px;
   --study-detail-size: 16px;
   --study-question-size: 24px;
+  --study-basic-front-size: 26px;
   --study-choice-size: 16px;
   --study-result-size: 16px;
   --study-text-align: center;
@@ -1876,7 +1877,7 @@ textarea:focus {
 .flip-card-face {
   grid-area: 1 / 1;
   display: grid;
-  align-content: center;
+  align-content: safe center;
   justify-items: center;
   width: 100%;
   min-height: 300px;
@@ -1891,6 +1892,14 @@ textarea:focus {
   line-height: var(--study-line-height);
   scrollbar-width: none;
   -ms-overflow-style: none;
+}
+
+.flip-card:not(.flipped) .flip-card-back,
+.flip-card.flipped .flip-card-front {
+  position: absolute;
+  inset: 0;
+  height: 100%;
+  overflow: hidden;
 }
 
 .flip-card-back {
@@ -1908,6 +1917,15 @@ textarea:focus {
 .flip-card-face .basic-face,
 .flip-card-face .basic-back {
   font-size: var(--study-question-size);
+}
+
+.flip-card-face > .basic-face,
+.flip-card-face .basic-face {
+  font-size: var(--study-basic-front-size);
+}
+
+.flip-card-face .basic-face .math-block {
+  font-size: 1em;
 }
 
 .flip-card-face > .basic-face,
@@ -2232,6 +2250,11 @@ textarea:focus {
   gap: var(--answer-dock-gap);
   align-items: start;
   width: 100%;
+  min-height: 0;
+}
+
+.answer-layout > .flip-card {
+  min-width: 0;
 }
 
 .answer-layout.with-dock {
