@@ -5,7 +5,7 @@ import { dictionary as cmuDictionary } from "cmu-pronouncing-dictionary";
 export const doubaoTtsEndpoint = "https://openspeech.bytedance.com/api/v3/tts/unidirectional";
 export const doubaoTtsResourceId = "seed-tts-2.0";
 export const doubaoTtsVoice = "zh_female_yingyujiaoxue_uranus_bigtts";
-export const doubaoTtsPrompt = "请使用标准、自然、非卷舌的英式英语词典发音，只朗读给定的单词一次。单独朗读词条时，不要读出词尾可选的连接音或侵入音 /r/，语气中性，发音清晰，不要解释。";
+export const legacyDoubaoTtsPrompt = "请使用标准、自然、非卷舌的英式英语词典发音，只朗读给定的单词一次。单独朗读词条时，不要读出词尾可选的连接音或侵入音 /r/，语气中性，发音清晰，不要解释。";
 export const maxDoubaoSsmlLength = 150;
 export const maxDoubaoPromptLength = 500;
 
@@ -23,6 +23,13 @@ export function normalizeIpa(input: string) {
 export function escapeXml(value: string) { return value.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;").replace(/'/g, "&apos;"); }
 export function buildCmuSsml(word: string, cmu: string) { return `<speak>\n  <phoneme alphabet="cmu" ph="${escapeXml(cmu)}">${escapeXml(word)}</phoneme>\n</speak>`; }
 export function buildPlainTextSsml(word: string) { return `<speak>\n  ${escapeXml(word)}\n</speak>`; }
+export function buildDoubaoTtsPrompt(phonetic: string) {
+  return `请使用标准、自然、非卷舌的英式英语词典发音，只朗读给定的单词一次。单独朗读词条时，不要读出词尾可选的连接音或侵入音 /r/，按照音标“${phonetic.trim()}”朗读，语气中性，发音清晰，不要解释。`;
+}
+export function doubaoTtsPromptCandidates(phonetic: string, promptOverride?: string | null) {
+  const override = promptOverride?.trim();
+  return override ? [override] : [buildDoubaoTtsPrompt(phonetic), legacyDoubaoTtsPrompt];
+}
 export function isValidCmu(cmu: string) { return cmu.trim().split(/\s+/).every((token) => validCmuToken.test(token)); }
 export function normalizeCustomSsml(value: unknown) {
   const ssml = String(value ?? "").trim();
@@ -41,7 +48,7 @@ export function normalizeDoubaoPrompt(value: unknown) {
   return prompt;
 }
 
-export function buildDoubaoRequestBody(fallback: string, ssml: string, prompt = doubaoTtsPrompt) {
+export function buildDoubaoRequestBody(fallback: string, ssml: string, prompt: string) {
   return {
     user: { uid: "flashcards" },
     req_params: {

@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { buildDoubaoRequestBody, buildPlainTextSsml, buildWordPronunciation, detectBritishRhoticConflict, doubaoTtsPrompt, isValidCmu, normalizeCustomSsml, normalizeDoubaoPrompt, normalizeIpa, normalizeWord, parseDoubaoAudioChunks } from "./doubao-tts.js";
+import { buildDoubaoRequestBody, buildDoubaoTtsPrompt, buildPlainTextSsml, buildWordPronunciation, detectBritishRhoticConflict, doubaoTtsPromptCandidates, isValidCmu, legacyDoubaoTtsPrompt, normalizeCustomSsml, normalizeDoubaoPrompt, normalizeIpa, normalizeWord, parseDoubaoAudioChunks } from "./doubao-tts.js";
 
 describe("单词发音构建", () => {
   it("规范化 IPA 与单词格式", () => { expect(normalizeIpa(" [pə'fɔ:mə(r)] ")).toBe("pəˈfɔːmə(r)"); expect(normalizeWord(" Performer ")).toBe("performer"); });
@@ -21,9 +21,17 @@ describe("单词发音构建", () => {
     expect(() => normalizeCustomSsml("<phoneme>tighten</phoneme>")).toThrow("<speak>");
     expect(() => normalizeCustomSsml("<!DOCTYPE speak><speak>tighten</speak>")).toThrow("不支持");
   });
-  it("自定义 XML 请求继续携带原有模型提示词", () => {
-    const body = buildDoubaoRequestBody("tighten", "<speak>tighten</speak>");
-    expect(JSON.parse(body.req_params.additions)).toMatchObject({ explicit_language: "en", context_texts: [doubaoTtsPrompt] });
+  it("默认 SSML 仅放单词，音标只放入提示词", () => {
+    const prompt = buildDoubaoTtsPrompt("/ˈtaɪtn/");
+    const ssml = buildPlainTextSsml("tighten");
+    const body = buildDoubaoRequestBody("tighten", ssml, prompt);
+    expect(ssml).toBe("<speak>\n  tighten\n</speak>");
+    expect(prompt).toBe("请使用标准、自然、非卷舌的英式英语词典发音，只朗读给定的单词一次。单独朗读词条时，不要读出词尾可选的连接音或侵入音 /r/，按照音标“/ˈtaɪtn/”朗读，语气中性，发音清晰，不要解释。");
+    expect(JSON.parse(body.req_params.additions)).toMatchObject({ explicit_language: "en", context_texts: [prompt] });
+  });
+  it("新默认提示词查找不到时继续查找旧缓存，自定义提示词不会串用旧缓存", () => {
+    expect(doubaoTtsPromptCandidates("/ˈtaɪtn/")).toEqual([buildDoubaoTtsPrompt("/ˈtaɪtn/"), legacyDoubaoTtsPrompt]);
+    expect(doubaoTtsPromptCandidates("/ˈtaɪtn/", "  自定义提示词  ")).toEqual(["自定义提示词"]);
   });
   it("支持校验并发送超级用户自定义模型提示词", () => {
     const prompt = normalizeDoubaoPrompt("  请放慢语速并保持英式发音。  ");

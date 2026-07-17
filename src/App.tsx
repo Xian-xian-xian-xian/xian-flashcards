@@ -78,7 +78,7 @@ declare global {
   }
 }
 
-const version = "0.6.7";
+const version = "0.6.8";
 const logExportPressCount = 6;
 const logExportKey = "a";
 const logExportResetMs = 1800;
@@ -3503,6 +3503,7 @@ function AboutView(props: { syncStatus: SyncStatus | null }) {
       <div className="schedule-box"><h3>同步状态</h3><p>最近同步：{props.syncStatus ? fullDateTime(props.syncStatus.lastSyncAt) : "暂无"} · 数据更新：{props.syncStatus?.dataUpdatedAt ? fullDateTime(props.syncStatus.dataUpdatedAt) : "暂无"}</p></div>
       <div className="schedule-box changelog-box">
         <h3>更新日志</h3>
+        <div className="changelog-row"><strong>0.6.8</strong><span>2026-07-17</span><p>豆包默认 SSML 改为仅包含英文单词，音标改由英式发音提示词传入；现有语音缓存继续直接使用，不重制或覆盖。</p></div>
         <div className="changelog-row"><strong>0.6.7</strong><span>2026-07-17</span><p>学习模式支持数字键 1/不会、2/模糊、3/掌握；“切换到前一张”移至右上角，豆包语音设置收入“更多”。</p></div>
         <div className="changelog-row"><strong>0.6.6</strong><span>2026-07-16</span><p>修复新卡先选择“模糊”、同轮再选择“掌握”后仍保留约 30 分钟排程的问题；首次掌握会正确回到第 1 阶段短间隔。</p></div>
         <div className="changelog-row"><strong>0.6.5</strong><span>2026-07-16</span><p>卡组管理改用独立的新建卡片页面，缩略卡片支持 LaTeX 渲染；图片可从本地安全上传到云端，公式间距同步学习行距。</p></div>

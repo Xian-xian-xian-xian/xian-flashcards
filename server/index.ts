@@ -14,7 +14,7 @@ import { isSuperuserUsername, publicAuthUser, type AuthUser } from "./auth.js";
 import { cardImagePath, cardImageTypeFromFilename, maxCardImageBytes, storeCardImage } from "./card-images.js";
 import { nextReviewState, type ReviewRating } from "./ebbinghaus.js";
 import { normalizeImportRows } from "./import-utils.js";
-import { buildDoubaoRequestBody, buildWordPronunciation, doubaoTtsEndpoint, doubaoTtsPrompt, doubaoTtsResourceId, doubaoTtsVoice, maxDoubaoPromptLength, maxDoubaoSsmlLength, normalizeCustomSsml, normalizeDoubaoPrompt, parseDoubaoAudioChunks } from "./doubao-tts.js";
+import { buildDoubaoRequestBody, buildDoubaoTtsPrompt, buildPlainTextSsml, doubaoTtsEndpoint, doubaoTtsPromptCandidates, doubaoTtsResourceId, doubaoTtsVoice, maxDoubaoPromptLength, maxDoubaoSsmlLength, normalizeCustomSsml, normalizeDoubaoPrompt, parseDoubaoAudioChunks } from "./doubao-tts.js";
 
 const app = express();
 const upload = multer({ storage: multer.memoryStorage() });
@@ -67,7 +67,7 @@ type BlankAnswerConfig = { version: 1; orderless: boolean; answers: string[][] }
 const maxDeckDepth = 5;
 const sessionCookieName = "flashcards_session";
 const sessionDays = 30;
-const appVersion = "0.6.7";
+const appVersion = "0.6.8";
 const timeZone = "Asia/Shanghai";
 const pronunciationCacheDir = process.env.PRONUNCIATION_CACHE_DIR ?? path.resolve(process.cwd(), "runtime/pronunciations");
 const doubaoTtsApiKey = process.env.DOUBAO_TTS_API_KEY ?? "";
@@ -459,17 +459,20 @@ function restorePronunciationXmlOverride(previous: PronunciationXmlOverride | un
   );
 }
 
-function doubaoTtsCacheName(phoneme: string, fallback: string, prompt = doubaoTtsPrompt) {
+function doubaoTtsCacheName(phoneme: string, fallback: string, prompt: string) {
   return `doubao-${doubaoTtsResourceId}-${doubaoTtsVoice}-${cacheKey(`${phoneme}\n${fallback}\n${prompt}\ncmudict-ipa-match-v5-non-rhotic`)}.mp3`;
 }
 
-async function cachedDoubaoTtsPath(phoneme: string, fallback: string, prompt = doubaoTtsPrompt) {
+async function cachedDoubaoTtsPath(phoneme: string, fallback: string, prompts: string[]) {
   await fs.promises.mkdir(pronunciationCacheDir, { recursive: true });
-  const filePath = path.join(pronunciationCacheDir, doubaoTtsCacheName(phoneme, fallback, prompt));
-  return fs.existsSync(filePath) ? filePath : null;
+  for (const prompt of prompts) {
+    const filePath = path.join(pronunciationCacheDir, doubaoTtsCacheName(phoneme, fallback, prompt));
+    if (fs.existsSync(filePath)) return filePath;
+  }
+  return null;
 }
 
-async function writeDoubaoTtsCache(phoneme: string, fallback: string, audio: Buffer, prompt = doubaoTtsPrompt) {
+async function writeDoubaoTtsCache(phoneme: string, fallback: string, audio: Buffer, prompt: string) {
   await fs.promises.mkdir(pronunciationCacheDir, { recursive: true });
   const filePath = path.join(pronunciationCacheDir, doubaoTtsCacheName(phoneme, fallback, prompt));
   const tempPath = `${filePath}.${crypto.randomUUID()}.tmp`;
@@ -480,19 +483,15 @@ async function writeDoubaoTtsCache(phoneme: string, fallback: string, audio: Buf
 
 async function synthesizeWithDoubao(phoneme: string, fallback: string, ssmlOverride?: string, promptOverride?: string) {
   if (!doubaoTtsApiKey) throw new Error("缺少 DOUBAO_TTS_API_KEY");
-  const pronunciation = buildWordPronunciation(fallback, phoneme || undefined);
-  const ssml = ssmlOverride ?? pronunciation.ssml;
+  const ssml = ssmlOverride ?? buildPlainTextSsml(fallback);
+  const prompt = promptOverride ?? buildDoubaoTtsPrompt(phoneme || fallback);
   console.info("Pronunciation selected", {
-    word: pronunciation.word,
-    ipa: pronunciation.normalizedIpa,
-    selectedCmu: pronunciation.selectedCmu,
-    finalCmu: pronunciation.cmu,
-    rhoticConflict: pronunciation.rhoticConflict,
-    finalSource: pronunciation.source,
-    confidence: pronunciation.confidence,
-    finalSsmlMode: ssmlOverride ? "custom" : pronunciation.finalSsmlMode
+    word: fallback,
+    ipa: phoneme || null,
+    finalSource: ssmlOverride ? "custom" : "plain-text",
+    finalSsmlMode: ssmlOverride ? "custom" : "plain-text"
   });
-  if (ssml.length > maxDoubaoSsmlLength) throw new Error(`单词及音标生成的 SSML 超过 ${maxDoubaoSsmlLength} 个字符`);
+  if (ssml.length > maxDoubaoSsmlLength) throw new Error(`单词生成的 SSML 超过 ${maxDoubaoSsmlLength} 个字符`);
   const response = await fetch(doubaoTtsEndpoint, {
     method: "POST",
     headers: {
@@ -502,7 +501,7 @@ async function synthesizeWithDoubao(phoneme: string, fallback: string, ssmlOverr
       "X-Api-Request-Id": crypto.randomUUID(),
       "X-Control-Require-Usage-Tokens-Return": "*"
     },
-    body: JSON.stringify(buildDoubaoRequestBody(fallback, ssml, promptOverride ?? doubaoTtsPrompt))
+    body: JSON.stringify(buildDoubaoRequestBody(fallback, ssml, prompt))
   });
   if (!response.ok) {
     const body = await response.text().catch(() => "");
@@ -6179,8 +6178,8 @@ app.get("/api/tts/xml", requireSuperuser, (req, res) => {
   const fallback = normalizePronunciationFallback(req.query.fallback);
   const override = pronunciationXmlOverride(phoneme, fallback);
   res.json({
-    ssml: override?.ssml ?? buildWordPronunciation(fallback, phoneme || undefined).ssml,
-    prompt: override?.prompt?.trim() || doubaoTtsPrompt,
+    ssml: override?.ssml ?? buildPlainTextSsml(fallback),
+    prompt: doubaoTtsPromptCandidates(phoneme || fallback, override?.prompt)[0],
     customized: Boolean(override),
     promptCustomized: Boolean(override?.prompt?.trim()),
     maxSsmlLength: maxDoubaoSsmlLength,
@@ -6241,8 +6240,9 @@ app.post("/api/tts", async (req, res) => {
   try {
     const cachePhoneme = phoneme ?? "";
     const override = pronunciationXmlOverride(cachePhoneme, fallback);
-    const prompt = override?.prompt?.trim() || doubaoTtsPrompt;
-    const cachedPath = await cachedDoubaoTtsPath(cachePhoneme, fallback, prompt);
+    const promptCandidates = doubaoTtsPromptCandidates(cachePhoneme || fallback, override?.prompt);
+    const prompt = promptCandidates[0];
+    const cachedPath = await cachedDoubaoTtsPath(cachePhoneme, fallback, promptCandidates);
     const audio = cachedPath
       ? await fs.promises.readFile(cachedPath)
       : await synthesizeWithDoubao(cachePhoneme, fallback, override?.ssml, prompt)
