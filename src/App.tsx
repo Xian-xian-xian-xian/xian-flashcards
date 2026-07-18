@@ -79,7 +79,7 @@ declare global {
   }
 }
 
-const version = "0.7.1";
+const version = "0.7.2";
 const logExportPressCount = 6;
 const logExportKey = "a";
 const logExportResetMs = 1800;
@@ -2709,6 +2709,8 @@ function StudyView(props: {
     "--study-basic-front-size": `${Math.round(26 * scale)}px`,
     "--study-choice-size": `${Math.round(16 * scale)}px`,
     "--study-result-size": `${Math.round(16 * scale)}px`,
+    "--study-word-content-max": `${Math.round(720 * Math.max(1, scale))}px`,
+    "--study-word-back-edge-space": `${Math.round(80 * Math.max(0, scale - 1))}px`,
     "--study-text-align": props.studyTextAlign,
     "--study-line-height": String(props.studyLineHeight),
     "--study-font-family": studyFontStack(props.studyFontFamily),
@@ -3021,8 +3023,18 @@ function StudyView(props: {
                     <div className="text-tool-popover study-more-popover">
                       <strong>学习设置</strong>
                       <div className="study-more-options">
-                        {[0.5, 0.625, 0.85, 1, 1.15, 1.25, 1.35].map((value) => <button key={value} className={Math.abs(scaleDraft - value) < 0.01 ? "active" : ""} onClick={() => saveScale(value)}>字号 {Math.round(value * 1000) / 10}%</button>)}
-                        {[1.2, 1.4, 1.5, 1.6, 1.8, 2].map((value) => <button key={value} className={Math.abs(props.studyLineHeight - value) < 0.01 ? "active" : ""} onClick={() => saveLineHeight(value)}>行距 {value.toFixed(value === 2 ? 0 : 1)}</button>)}
+                        <label className="study-more-select">
+                          <span>字体大小</span>
+                          <select aria-label="字体大小" value={scaleDraft} disabled={scaleSaving} onChange={(event) => saveScale(Number(event.target.value))}>
+                            {[0.5, 0.625, 0.85, 1, 1.15, 1.25, 1.35].map((value) => <option key={value} value={value}>{Math.round(value * 1000) / 10}%</option>)}
+                          </select>
+                        </label>
+                        <label className="study-more-select">
+                          <span>行间距</span>
+                          <select aria-label="行间距" value={props.studyLineHeight} onChange={(event) => saveLineHeight(Number(event.target.value))}>
+                            {[1.2, 1.4, 1.5, 1.6, 1.8, 2].map((value) => <option key={value} value={value}>{value.toFixed(value === 2 ? 0 : 1)}</option>)}
+                          </select>
+                        </label>
                         <button className={props.studyTextAlign === "left" ? "active" : ""} onClick={() => saveTextAlign("left")}><AlignLeft />左对齐</button>
                         <button className={props.studyTextAlign === "center" ? "active" : ""} onClick={() => saveTextAlign("center")}><AlignCenter />居中</button>
                         <button className={props.studyChoiceLayout === "auto" ? "active" : ""} onClick={() => saveChoiceLayout("auto")}><SlidersHorizontal />自动列数</button>
@@ -3532,6 +3544,7 @@ function AboutView(props: { syncStatus: SyncStatus | null }) {
       <div className="schedule-box"><h3>同步状态</h3><p>最近同步：{props.syncStatus ? fullDateTime(props.syncStatus.lastSyncAt) : "暂无"} · 数据更新：{props.syncStatus?.dataUpdatedAt ? fullDateTime(props.syncStatus.dataUpdatedAt) : "暂无"}</p></div>
       <div className="schedule-box changelog-box">
         <h3>更新日志</h3>
+        <div className="changelog-row"><strong>0.7.2</strong><span>2026-07-18</span><p>学习设置中的字体大小和行间距改为下拉选择；单词卡大字号时会同步拓宽正文区域、缩小左右留白，并修复背面底部内容与卡片边界重叠。</p></div>
         <div className="changelog-row"><strong>0.7.1</strong><span>2026-07-17</span><p>卡组与首页卡片摘要完整支持 Markdown；普通卡翻面后支持在右侧显示题目参考；统一普通卡正面文字与 LaTeX 字号，并修复长内容顶部裁切和底部布局溢出。</p></div>
         <div className="changelog-row"><strong>0.7.0</strong><span>2026-07-17</span><p>学习页新增 50% 和 62.5% 字号；卡组卡片改为 14px，并支持按加入、到期、最新学习时间正倒序排列；桌面导航默认收起、靠近左侧弹出；连续新建卡片不再返回卡组。</p></div>
         <div className="changelog-row"><strong>0.6.9</strong><span>2026-07-17</span><p>块级 LaTeX 多行公式内部改为 1.5 倍行距，提升连续推导的可读性。</p></div>

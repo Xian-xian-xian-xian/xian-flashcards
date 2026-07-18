@@ -67,7 +67,7 @@ type BlankAnswerConfig = { version: 1; orderless: boolean; answers: string[][] }
 const maxDeckDepth = 5;
 const sessionCookieName = "flashcards_session";
 const sessionDays = 30;
-const appVersion = "0.7.1";
+const appVersion = "0.7.2";
 const timeZone = "Asia/Shanghai";
 const pronunciationCacheDir = process.env.PRONUNCIATION_CACHE_DIR ?? path.resolve(process.cwd(), "runtime/pronunciations");
 const doubaoTtsApiKey = process.env.DOUBAO_TTS_API_KEY ?? "";
@@ -369,7 +369,7 @@ function normalizedCardOptionsPayload(cardType: CardType, choices: unknown, back
 function clampStudyTextScale(value: unknown) {
   const scale = Number(value);
   if (!Number.isFinite(scale)) return 1;
-  return Math.min(1.35, Math.max(0.85, Math.round(scale * 100) / 100));
+  return Math.min(1.35, Math.max(0.5, Math.round(scale * 1000) / 1000));
 }
 
 function clampStudyLineHeight(value: unknown) {
