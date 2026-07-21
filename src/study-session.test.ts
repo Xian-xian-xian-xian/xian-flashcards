@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { shouldUsePractice, studyAnswerWeight } from "./study-session";
+import { shouldUsePractice, studyAnswerWeight, updateGrindStudyWords } from "./study-session";
 
 describe("学习会话评分路由", () => {
   it("新卡先模糊再掌握时重新提交长期排程", () => {
@@ -51,5 +51,11 @@ describe("学习数量加权", () => {
   it("旧卡每次复习都计 1", () => {
     expect(studyAnswerWeight({ startedAsNew: false, alreadySubmitted: false })).toBe(1);
     expect(studyAnswerWeight({ startedAsNew: false, alreadySubmitted: true })).toBe(1);
+  });
+
+  it("无尽模式继续下一轮时累计，休息时清零", () => {
+    expect(updateGrindStudyWords(8, { type: "continue" })).toBe(8);
+    expect(updateGrindStudyWords(8, { type: "answer", weight: 5 })).toBe(13);
+    expect(updateGrindStudyWords(13, { type: "rest" })).toBe(0);
   });
 });

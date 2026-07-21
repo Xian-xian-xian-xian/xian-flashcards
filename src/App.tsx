@@ -60,7 +60,7 @@ import {
 } from "./blank-answers";
 import { insertImageMarkdown } from "./card-images";
 import { latexRenderSource } from "./latex";
-import { shouldUsePractice, studyAnswerWeight } from "./study-session";
+import { shouldUsePractice, studyAnswerWeight, updateGrindStudyWords } from "./study-session";
 import { resolveStudySwipe } from "./study-gestures";
 import type { Card, CardType, DailyTask, Deck, ImportBatch, ReviewRating, ReviewRemaining, ReviewSnapshot, Settings, Stats, SyncStatus, ThemeMode, TomatoState, User } from "./types";
 
@@ -79,7 +79,7 @@ declare global {
   }
 }
 
-const version = "0.7.4";
+const version = "0.7.5";
 const logExportPressCount = 6;
 const logExportKey = "a";
 const logExportResetMs = 1800;
@@ -2357,7 +2357,6 @@ function StudyView(props: {
     setQueue([]);
     setMasteredIds([]);
     setLongTermSubmittedIds([]);
-    setRoundStudyWords(0);
     setHistory([]);
     setGrindGroupNumber(0);
     setGrindGroupStartedAt("");
@@ -2384,7 +2383,6 @@ function StudyView(props: {
       setQueue(nextCards);
       setMasteredIds([]);
       setLongTermSubmittedIds([]);
-      setRoundStudyWords(0);
       setHistory([]);
       setFlipped(false);
       setAnswer("");
@@ -2433,8 +2431,11 @@ function StudyView(props: {
     try {
       const startedAt = new Date().toISOString();
       const nextCards = await loadGrindCards([], size);
+      const continuingGroup = sessionCards.length > 0 && queue.length === 0;
+      const nextGroupNumber = continuingGroup ? grindGroupNumber + 1 : 1;
       resetSession();
-      setGrindGroupNumber(nextCards.length > 0 ? 1 : 0);
+      setRoundStudyWords((value) => updateGrindStudyWords(value, { type: "continue" }));
+      setGrindGroupNumber(nextCards.length > 0 ? nextGroupNumber : 0);
       setGrindGroupStartedAt(nextCards.length > 0 ? startedAt : "");
       setSessionCards(nextCards);
       setQueue(nextCards);
@@ -2537,7 +2538,7 @@ function StudyView(props: {
       setQueue(nextQueue);
       setMasteredIds(finalMasteredIds);
       setLongTermSubmittedIds(finalLongTermSubmittedIds);
-      setRoundStudyWords(beforeRoundStudyWords + answerWeight);
+      setRoundStudyWords(updateGrindStudyWords(beforeRoundStudyWords, { type: "answer", weight: answerWeight }));
       setFlipped(false);
       setAnswer("");
       setChecked(null);
@@ -2823,6 +2824,7 @@ function StudyView(props: {
       setImmersive(Boolean(document.fullscreenElement));
     }
     resetSession();
+    setRoundStudyWords((value) => updateGrindStudyWords(value, { type: "rest" }));
     setGrindMessage("已休息，准备好后再开始无尽学习。");
   }
 
@@ -3556,6 +3558,7 @@ function AboutView(props: { syncStatus: SyncStatus | null }) {
       <div className="schedule-box"><h3>同步状态</h3><p>最近同步：{props.syncStatus ? fullDateTime(props.syncStatus.lastSyncAt) : "暂无"} · 数据更新：{props.syncStatus?.dataUpdatedAt ? fullDateTime(props.syncStatus.dataUpdatedAt) : "暂无"}</p></div>
       <div className="schedule-box changelog-box">
         <h3>更新日志</h3>
+        <div className="changelog-row"><strong>0.7.5</strong><span>2026-07-21</span><p>无尽模式的本轮学习数量会跨组持续累计；点击“继续下一组”不再清零，只有选择“休息一下”才会重置。</p></div>
         <div className="changelog-row"><strong>0.7.4</strong><span>2026-07-21</span><p>无尽模式新增本轮学习数量胶囊；每日学习数量改为按每次作答累计，新学首次计 5、之后每次复习计 1。</p></div>
         <div className="changelog-row"><strong>0.7.3</strong><span>2026-07-21</span><p>修复单词卡在全屏学习中翻到背面后，卡面未填满可用高度、底部出现空白的问题。</p></div>
         <div className="changelog-row"><strong>0.7.2</strong><span>2026-07-18</span><p>学习设置中的字体大小和行间距改为下拉选择；单词卡大字号时会同步拓宽正文区域、缩小左右留白，并修复背面底部内容与卡片边界重叠。</p></div>
