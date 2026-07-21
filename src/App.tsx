@@ -79,7 +79,7 @@ declare global {
   }
 }
 
-const version = "0.7.2";
+const version = "0.7.3";
 const logExportPressCount = 6;
 const logExportKey = "a";
 const logExportResetMs = 1800;
@@ -3544,6 +3544,7 @@ function AboutView(props: { syncStatus: SyncStatus | null }) {
       <div className="schedule-box"><h3>同步状态</h3><p>最近同步：{props.syncStatus ? fullDateTime(props.syncStatus.lastSyncAt) : "暂无"} · 数据更新：{props.syncStatus?.dataUpdatedAt ? fullDateTime(props.syncStatus.dataUpdatedAt) : "暂无"}</p></div>
       <div className="schedule-box changelog-box">
         <h3>更新日志</h3>
+        <div className="changelog-row"><strong>0.7.3</strong><span>2026-07-21</span><p>修复单词卡在全屏学习中翻到背面后，卡面未填满可用高度、底部出现空白的问题。</p></div>
         <div className="changelog-row"><strong>0.7.2</strong><span>2026-07-18</span><p>学习设置中的字体大小和行间距改为下拉选择；单词卡大字号时会同步拓宽正文区域、缩小左右留白，并修复背面底部内容与卡片边界重叠。</p></div>
         <div className="changelog-row"><strong>0.7.1</strong><span>2026-07-17</span><p>卡组与首页卡片摘要完整支持 Markdown；普通卡翻面后支持在右侧显示题目参考；统一普通卡正面文字与 LaTeX 字号，并修复长内容顶部裁切和底部布局溢出。</p></div>
         <div className="changelog-row"><strong>0.7.0</strong><span>2026-07-17</span><p>学习页新增 50% 和 62.5% 字号；卡组卡片改为 14px，并支持按加入、到期、最新学习时间正倒序排列；桌面导航默认收起、靠近左侧弹出；连续新建卡片不再返回卡组。</p></div>
