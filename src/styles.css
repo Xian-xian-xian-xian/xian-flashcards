@@ -1669,15 +1669,15 @@ textarea:focus {
 }
 
 @container (max-width: 1050px) {
-  .study-meta-left > .type-pill:nth-child(5) { display: none; }
+  .study-review-remaining-pill { display: none; }
 }
 
 @container (max-width: 920px) {
-  .study-meta-left > .type-pill:nth-child(4) { display: none; }
+  .study-new-remaining-pill { display: none; }
 }
 
 @container (max-width: 790px) {
-  .study-meta-left > .type-pill:nth-child(3) { display: none; }
+  .study-schedule-pill { display: none; }
 }
 
 @container (max-width: 660px) {

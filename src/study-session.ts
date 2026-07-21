@@ -12,3 +12,7 @@ export function shouldUsePractice({ alreadySubmitted, alreadyMastered, startedAs
   const isFirstNewCardMastery = startedAsNew && !alreadyMastered && rating === "known";
   return !isFirstNewCardMastery;
 }
+
+export function studyAnswerWeight({ startedAsNew, alreadySubmitted }: Pick<PracticeDecision, "startedAsNew" | "alreadySubmitted">) {
+  return startedAsNew && !alreadySubmitted ? 5 : 1;
+}

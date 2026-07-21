@@ -105,6 +105,8 @@ export type DailyTaskSnapshot = {
   new_card_ids: string;
   new_mastered_card_ids: string;
   review_mastered_card_ids: string;
+  new_study_count: number;
+  review_study_count: number;
   completed_at: string;
 };
 

@@ -67,7 +67,7 @@ type BlankAnswerConfig = { version: 1; orderless: boolean; answers: string[][] }
 const maxDeckDepth = 5;
 const sessionCookieName = "flashcards_session";
 const sessionDays = 30;
-const appVersion = "0.7.3";
+const appVersion = "0.7.4";
 const timeZone = "Asia/Shanghai";
 const pronunciationCacheDir = process.env.PRONUNCIATION_CACHE_DIR ?? path.resolve(process.cwd(), "runtime/pronunciations");
 const doubaoTtsApiKey = process.env.DOUBAO_TTS_API_KEY ?? "";
@@ -4461,10 +4461,30 @@ type DailyTaskRow = Record<string, unknown> & {
   new_card_ids: string;
   new_mastered_card_ids: string;
   review_mastered_card_ids: string;
+  new_study_count: number;
+  review_study_count: number;
   completed_at: string;
 };
 
-type DailyTaskSnapshot = Pick<DailyTaskRow, "new_card_ids" | "new_mastered_card_ids" | "review_mastered_card_ids" | "completed_at">;
+type DailyTaskSnapshot = Pick<DailyTaskRow, "new_card_ids" | "new_mastered_card_ids" | "review_mastered_card_ids" | "new_study_count" | "review_study_count" | "completed_at">;
+
+function normalizeDailyStudyCounts(userId: number, task: DailyTaskRow) {
+  if (Number(task.new_study_count) >= 0 && Number(task.review_study_count) >= 0) return task;
+  const reviewIds = parseJsonArray(task.review_card_ids);
+  const reviewRows = reviewIds.length
+    ? all<{ updated_at: string }>(
+        `SELECT updated_at FROM reviews WHERE card_id IN (${reviewIds.map(() => "?").join(",")})`,
+        reviewIds
+      )
+    : [];
+  task.new_study_count = parseJsonArray(task.new_card_ids).length;
+  task.review_study_count = reviewRows.filter((row) => sameShanghaiDay(String(row.updated_at), String(task.date))).length;
+  run(
+    "UPDATE daily_tasks SET new_study_count = ?, review_study_count = ? WHERE user_id = ? AND date = ?",
+    [task.new_study_count, task.review_study_count, userId, task.date]
+  );
+  return task;
+}
 
 function ensureDailyTask(userId: number) {
   const date = shanghaiDateKey();
@@ -4474,16 +4494,16 @@ function ensureDailyTask(userId: number) {
     run(
       `INSERT INTO daily_tasks (
          user_id, date, daily_new_goal, review_card_ids, new_card_ids,
-         new_mastered_card_ids, review_mastered_card_ids, completed_at, created_at, updated_at
+         new_mastered_card_ids, review_mastered_card_ids, new_study_count, review_study_count, completed_at, created_at, updated_at
        )
-       VALUES (?, ?, ?, ?, ?, ?, ?, '', ?, ?)`,
+       VALUES (?, ?, ?, ?, ?, ?, ?, 0, 0, '', ?, ?)`,
       [userId, date, getDailyGoal(userId), JSON.stringify(dueReviewIdsForToday(userId, now)), "[]", "[]", "[]", now, now]
     );
   }
-  return get<DailyTaskRow>(
+  return normalizeDailyStudyCounts(userId, get<DailyTaskRow>(
     "SELECT * FROM daily_tasks WHERE user_id = ? AND date = ?",
     [userId, date]
-  )!;
+  )!);
 }
 
 function dailyTaskSnapshot(task: DailyTaskRow): DailyTaskSnapshot {
@@ -4491,6 +4511,8 @@ function dailyTaskSnapshot(task: DailyTaskRow): DailyTaskSnapshot {
     new_card_ids: String(task.new_card_ids ?? "[]"),
     new_mastered_card_ids: String(task.new_mastered_card_ids ?? "[]"),
     review_mastered_card_ids: String(task.review_mastered_card_ids ?? "[]"),
+    new_study_count: Math.max(0, Number(task.new_study_count) || 0),
+    review_study_count: Math.max(0, Number(task.review_study_count) || 0),
     completed_at: String(task.completed_at ?? "")
   };
 }
@@ -4505,6 +4527,8 @@ function restoreDailyTaskSnapshot(userId: number, snapshot: unknown) {
      SET new_card_ids = ?,
          new_mastered_card_ids = ?,
          review_mastered_card_ids = ?,
+         new_study_count = ?,
+         review_study_count = ?,
          completed_at = ?,
          updated_at = ?
      WHERE user_id = ? AND date = ?`,
@@ -4512,6 +4536,8 @@ function restoreDailyTaskSnapshot(userId: number, snapshot: unknown) {
       typeof value.new_card_ids === "string" ? value.new_card_ids : task.new_card_ids,
       typeof value.new_mastered_card_ids === "string" ? value.new_mastered_card_ids : task.new_mastered_card_ids,
       typeof value.review_mastered_card_ids === "string" ? value.review_mastered_card_ids : task.review_mastered_card_ids,
+      Number.isFinite(Number(value.new_study_count)) ? Math.max(0, Number(value.new_study_count)) : task.new_study_count,
+      Number.isFinite(Number(value.review_study_count)) ? Math.max(0, Number(value.review_study_count)) : task.review_study_count,
       typeof value.completed_at === "string" ? value.completed_at : task.completed_at,
       now,
       userId,
@@ -4527,6 +4553,8 @@ function updateDailyTaskProgress(userId: number, cardId: number, rating: ReviewR
   const newIds = new Set(parseJsonArray(task.new_card_ids));
   const newMasteredIds = new Set(parseJsonArray(task.new_mastered_card_ids));
   const reviewMasteredIds = new Set(parseJsonArray(task.review_mastered_card_ids));
+  const newStudyCount = Math.max(0, Number(task.new_study_count)) + (originalStage === 0 ? 1 : 0);
+  const reviewStudyCount = Math.max(0, Number(task.review_study_count)) + (originalStage > 0 ? 1 : 0);
 
   if (originalStage === 0) {
     newIds.add(cardId);
@@ -4543,6 +4571,8 @@ function updateDailyTaskProgress(userId: number, cardId: number, rating: ReviewR
      SET new_card_ids = ?,
          new_mastered_card_ids = ?,
          review_mastered_card_ids = ?,
+         new_study_count = ?,
+         review_study_count = ?,
          completed_at = '',
          updated_at = ?
      WHERE user_id = ? AND date = ?`,
@@ -4550,6 +4580,8 @@ function updateDailyTaskProgress(userId: number, cardId: number, rating: ReviewR
       JSON.stringify([...newIds]),
       JSON.stringify([...newMasteredIds]),
       JSON.stringify([...reviewMasteredIds]),
+      newStudyCount,
+      reviewStudyCount,
       now,
       userId,
       task.date
@@ -4587,6 +4619,7 @@ function updateDailyPracticeMastery(userId: number, cardId: number, rating: Revi
   const reviewIds = new Set(parseJsonArray(task.review_card_ids));
   const newMasteredIds = new Set(parseJsonArray(task.new_mastered_card_ids));
   const reviewMasteredIds = new Set(parseJsonArray(task.review_mastered_card_ids));
+  const reviewStudyCount = Math.max(0, Number(task.review_study_count)) + 1;
 
   if (newIds.has(cardId)) {
     if (rating === "known") newMasteredIds.add(cardId);
@@ -4601,12 +4634,14 @@ function updateDailyPracticeMastery(userId: number, cardId: number, rating: Revi
     `UPDATE daily_tasks
      SET new_mastered_card_ids = ?,
          review_mastered_card_ids = ?,
+         review_study_count = ?,
          completed_at = '',
          updated_at = ?
      WHERE user_id = ? AND date = ?`,
     [
       JSON.stringify([...newMasteredIds]),
       JSON.stringify([...reviewMasteredIds]),
+      reviewStudyCount,
       now,
       userId,
       task.date
@@ -4638,16 +4673,9 @@ function dailyTaskSummary(userId: number) {
   const task = ensureDailyTask(userId);
   const date = String(task.date);
   const reviewIds = parseJsonArray(task.review_card_ids);
-  const newIds = parseJsonArray(task.new_card_ids);
   const { newMasteredIds, reviewMasteredIds } = normalizeDailyMasteryLists(userId, task);
-  const reviewRows = reviewIds.length
-    ? all<{ card_id: number; updated_at: string }>(
-        `SELECT card_id, updated_at FROM reviews WHERE card_id IN (${reviewIds.map(() => "?").join(",")})`,
-        reviewIds
-      )
-    : [];
-  const reviewCompleted = reviewRows.filter((row) => sameShanghaiDay(String(row.updated_at), date)).length;
-  const newCompleted = newIds.length;
+  const reviewCompleted = Math.max(0, Number(task.review_study_count) || 0);
+  const newCompleted = Math.max(0, Number(task.new_study_count) || 0);
   const progressWords = reviewCompleted + newCompleted * 5;
   const completed = progressWords >= Math.max(1, Number(task.daily_new_goal));
   if (completed && !task.completed_at) {

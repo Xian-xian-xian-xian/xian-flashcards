@@ -60,7 +60,7 @@ import {
 } from "./blank-answers";
 import { insertImageMarkdown } from "./card-images";
 import { latexRenderSource } from "./latex";
-import { shouldUsePractice } from "./study-session";
+import { shouldUsePractice, studyAnswerWeight } from "./study-session";
 import { resolveStudySwipe } from "./study-gestures";
 import type { Card, CardType, DailyTask, Deck, ImportBatch, ReviewRating, ReviewRemaining, ReviewSnapshot, Settings, Stats, SyncStatus, ThemeMode, TomatoState, User } from "./types";
 
@@ -79,7 +79,7 @@ declare global {
   }
 }
 
-const version = "0.7.3";
+const version = "0.7.4";
 const logExportPressCount = 6;
 const logExportKey = "a";
 const logExportResetMs = 1800;
@@ -2098,6 +2098,7 @@ function StudyView(props: {
   const [queue, setQueue] = useState<Card[]>([]);
   const [masteredIds, setMasteredIds] = useState<number[]>([]);
   const [longTermSubmittedIds, setLongTermSubmittedIds] = useState<number[]>([]);
+  const [roundStudyWords, setRoundStudyWords] = useState(0);
   const [history, setHistory] = useState<Array<{
     card: Card;
     previous: ReviewSnapshot | Pick<ReviewSnapshot, "dailyTaskPrevious">;
@@ -2106,6 +2107,7 @@ function StudyView(props: {
     queue: Card[];
     masteredIds: number[];
     longTermSubmittedIds: number[];
+    roundStudyWords: number;
     grindGroupNumber: number;
     grindGroupStartedAt: string;
     grindMessage: string;
@@ -2355,6 +2357,7 @@ function StudyView(props: {
     setQueue([]);
     setMasteredIds([]);
     setLongTermSubmittedIds([]);
+    setRoundStudyWords(0);
     setHistory([]);
     setGrindGroupNumber(0);
     setGrindGroupStartedAt("");
@@ -2381,6 +2384,7 @@ function StudyView(props: {
       setQueue(nextCards);
       setMasteredIds([]);
       setLongTermSubmittedIds([]);
+      setRoundStudyWords(0);
       setHistory([]);
       setFlipped(false);
       setAnswer("");
@@ -2466,13 +2470,17 @@ function StudyView(props: {
     const beforeSessionCards = sessionCards;
     const beforeMasteredIds = masteredIds;
     const beforeLongTermSubmittedIds = longTermSubmittedIds;
+    const beforeRoundStudyWords = roundStudyWords;
     try {
+      const startedAsNew = beforeSessionCards.some((item) => item.id === card.id && item.stage <= 0);
+      const alreadySubmitted = beforeLongTermSubmittedIds.includes(card.id);
       const practice = shouldUsePractice({
-        alreadySubmitted: beforeLongTermSubmittedIds.includes(card.id),
+        alreadySubmitted,
         alreadyMastered: beforeMasteredIds.includes(card.id),
-        startedAsNew: beforeSessionCards.some((item) => item.id === card.id && item.stage <= 0),
+        startedAsNew,
         rating
       });
+      const answerWeight = studyAnswerWeight({ startedAsNew, alreadySubmitted });
       const result = practice ? await props.onPractice(card, rating) : await props.onAnswer(card, rating);
       const feedback = ratingFeedback(rating, card.stage, result);
       playAnswerSound(rating === "known" ? "right" : "wrong");
@@ -2513,6 +2521,7 @@ function StudyView(props: {
         queue: beforeQueue,
         masteredIds: beforeMasteredIds,
         longTermSubmittedIds: beforeLongTermSubmittedIds,
+        roundStudyWords: beforeRoundStudyWords,
         grindGroupNumber,
         grindGroupStartedAt,
         grindMessage,
@@ -2528,6 +2537,7 @@ function StudyView(props: {
       setQueue(nextQueue);
       setMasteredIds(finalMasteredIds);
       setLongTermSubmittedIds(finalLongTermSubmittedIds);
+      setRoundStudyWords(beforeRoundStudyWords + answerWeight);
       setFlipped(false);
       setAnswer("");
       setChecked(null);
@@ -2624,6 +2634,7 @@ function StudyView(props: {
       setQueue(previous.queue);
       setMasteredIds(previous.masteredIds);
       setLongTermSubmittedIds(previous.longTermSubmittedIds);
+      setRoundStudyWords(previous.roundStudyWords);
       setGrindGroupNumber(previous.grindGroupNumber);
       setGrindGroupStartedAt(previous.grindGroupStartedAt);
       setGrindMessage(previous.grindMessage);
@@ -3008,10 +3019,11 @@ function StudyView(props: {
                     />
                   </svg>
                 </div>
+                {studyMode === "grind" && <span className="type-pill study-round-count-pill">本轮学习 {roundStudyWords}</span>}
                 <span className="type-pill">{cardTypeLabels[card.card_type]}</span>
                 <span className="type-pill study-schedule-pill" title={`下次复习：${fullDateTime(card.due_at)}（${dueText(card.due_at)}）`}>{studyScheduleText(card)}</span>
-                <span className="type-pill">新学剩余 {remaining.newRemaining}</span>
-                <span className="type-pill">旧卡剩余 {remaining.reviewRemaining}</span>
+                <span className="type-pill study-new-remaining-pill">新学剩余 {remaining.newRemaining}</span>
+                <span className="type-pill study-review-remaining-pill">旧卡剩余 {remaining.reviewRemaining}</span>
               </div>
               <div className="study-quick-actions">
                 <button className="mini-button" title="发音" onClick={() => props.onSpeak(isWordCard(card) && card.phonetic ? card.phonetic : card.front, card.language ?? props.selectedDeck?.language, card.front)}><Volume2 /></button>
@@ -3544,6 +3556,7 @@ function AboutView(props: { syncStatus: SyncStatus | null }) {
       <div className="schedule-box"><h3>同步状态</h3><p>最近同步：{props.syncStatus ? fullDateTime(props.syncStatus.lastSyncAt) : "暂无"} · 数据更新：{props.syncStatus?.dataUpdatedAt ? fullDateTime(props.syncStatus.dataUpdatedAt) : "暂无"}</p></div>
       <div className="schedule-box changelog-box">
         <h3>更新日志</h3>
+        <div className="changelog-row"><strong>0.7.4</strong><span>2026-07-21</span><p>无尽模式新增本轮学习数量胶囊；每日学习数量改为按每次作答累计，新学首次计 5、之后每次复习计 1。</p></div>
         <div className="changelog-row"><strong>0.7.3</strong><span>2026-07-21</span><p>修复单词卡在全屏学习中翻到背面后，卡面未填满可用高度、底部出现空白的问题。</p></div>
         <div className="changelog-row"><strong>0.7.2</strong><span>2026-07-18</span><p>学习设置中的字体大小和行间距改为下拉选择；单词卡大字号时会同步拓宽正文区域、缩小左右留白，并修复背面底部内容与卡片边界重叠。</p></div>
         <div className="changelog-row"><strong>0.7.1</strong><span>2026-07-17</span><p>卡组与首页卡片摘要完整支持 Markdown；普通卡翻面后支持在右侧显示题目参考；统一普通卡正面文字与 LaTeX 字号，并修复长内容顶部裁切和底部布局溢出。</p></div>

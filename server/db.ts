@@ -94,6 +94,8 @@ export async function initDb() {
       daily_new_goal INTEGER DEFAULT 20,
       review_card_ids TEXT DEFAULT '[]',
       new_card_ids TEXT DEFAULT '[]',
+      new_study_count INTEGER DEFAULT 0,
+      review_study_count INTEGER DEFAULT 0,
       completed_at TEXT DEFAULT '',
       created_at TEXT NOT NULL,
       updated_at TEXT NOT NULL,
@@ -179,6 +181,12 @@ export async function initDb() {
   }
   if (!dailyTaskColumns.includes("review_mastered_card_ids")) {
     exec("ALTER TABLE daily_tasks ADD COLUMN review_mastered_card_ids TEXT DEFAULT '[]'");
+  }
+  if (!dailyTaskColumns.includes("new_study_count")) {
+    exec("ALTER TABLE daily_tasks ADD COLUMN new_study_count INTEGER DEFAULT -1");
+  }
+  if (!dailyTaskColumns.includes("review_study_count")) {
+    exec("ALTER TABLE daily_tasks ADD COLUMN review_study_count INTEGER DEFAULT -1");
   }
   const pronunciationOverrideColumns = all<{ name: string }>("PRAGMA table_info(pronunciation_ssml_overrides)").map((column) => column.name);
   if (!pronunciationOverrideColumns.includes("prompt")) {
