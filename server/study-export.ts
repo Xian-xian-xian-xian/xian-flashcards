@@ -4,15 +4,11 @@ export type StudyEventRating = "known" | "fuzzy" | "unknown";
 export type StudyExportEvent = {
   id: number;
   card_id: number | null;
+  deck_id: number | null;
   deck_name: string;
-  card_type: string;
+  deck_path: string;
   front: string;
   back: string;
-  phonetic: string;
-  example: string;
-  mnemonic: string;
-  note: string;
-  choices: string;
   event_kind: StudyEventKind;
   rating: StudyEventRating;
   stage_before: number;
@@ -26,13 +22,6 @@ const ratingLabels: Record<StudyEventRating, string> = {
   known: "掌握",
   fuzzy: "模糊",
   unknown: "不会"
-};
-
-const cardTypeLabels: Record<string, string> = {
-  basic: "普通卡",
-  word: "单词卡",
-  choice: "选择题",
-  blank: "填空题"
 };
 
 export function previousDateKey(dateKey: string) {
@@ -79,6 +68,17 @@ function stageLabel(stage: number) {
   return stage <= 0 ? "第 0 阶段（未开始）" : `第 ${stage} 阶段`;
 }
 
+function folderLabels(event: StudyExportEvent) {
+  const folders = (event.deck_path || event.deck_name)
+    .split(" / ")
+    .map((item) => item.trim())
+    .filter(Boolean);
+  return {
+    root: folders[0] || "（未命名）",
+    children: folders.length > 1 ? folders.slice(1).join(" / ") : "（无）"
+  };
+}
+
 export function buildDailyStudyMarkdown(date: string, events: StudyExportEvent[]) {
   const newCount = events.filter((event) => event.event_kind === "new").length;
   const reviewCount = events.length - newCount;
@@ -105,32 +105,25 @@ export function buildDailyStudyMarkdown(date: string, events: StudyExportEvent[]
 
   Array.from(grouped.values()).forEach((cardEvents, index) => {
     const first = cardEvents[0];
+    const folders = folderLabels(first);
     const cardNewCount = cardEvents.filter((event) => event.event_kind === "new").length;
     const cardReviewCount = cardEvents.length - cardNewCount;
     lines.push(
-      `## ${index + 1}. 题目 ${first.card_id ?? "（卡片已删除）"}`,
+      `## ${index + 1}. 题目`,
       "",
-      `- 卡组：${first.deck_name || "（未命名）"}`,
-      `- 类型：${cardTypeLabels[first.card_type] ?? first.card_type}`,
+      `- 大文件夹：${folders.root}`,
+      `- 子文件夹：${folders.children}`,
       `- 新学：${cardNewCount} 次；复习：${cardReviewCount} 次`,
       "",
-      "### 题目",
+      "### 正面",
       "",
       markdownBlock(first.front),
       "",
-      "### 答案",
+      "### 反面",
       "",
       markdownBlock(first.back),
       ""
     );
-    const details = [
-      ["音标", first.phonetic],
-      ["例句 / 解析", first.example],
-      ["助记", first.mnemonic],
-      ["备注", first.note],
-      ["选项 / 填空配置", first.choices]
-    ].filter(([, value]) => value.trim() && value.trim() !== "[]");
-    details.forEach(([label, value]) => lines.push(`### ${label}`, "", markdownBlock(value), ""));
     lines.push(
       "### 学习明细",
       "",

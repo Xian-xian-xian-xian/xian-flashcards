@@ -81,6 +81,7 @@ export async function initDb() {
       card_id INTEGER,
       deck_id INTEGER,
       deck_name TEXT DEFAULT '',
+      deck_path TEXT DEFAULT '',
       card_type TEXT DEFAULT 'basic',
       front TEXT NOT NULL,
       back TEXT DEFAULT '',
@@ -199,6 +200,10 @@ export async function initDb() {
   const sessionColumns = all<{ name: string }>("PRAGMA table_info(study_sessions)").map((column) => column.name);
   if (!sessionColumns.includes("user_id")) {
     exec("ALTER TABLE study_sessions ADD COLUMN user_id INTEGER");
+  }
+  const studyEventColumns = all<{ name: string }>("PRAGMA table_info(study_events)").map((column) => column.name);
+  if (!studyEventColumns.includes("deck_path")) {
+    exec("ALTER TABLE study_events ADD COLUMN deck_path TEXT DEFAULT ''");
   }
   const dailyTaskColumns = all<{ name: string }>("PRAGMA table_info(daily_tasks)").map((column) => column.name);
   if (!dailyTaskColumns.includes("new_card_ids")) {

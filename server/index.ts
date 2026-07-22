@@ -68,7 +68,7 @@ type BlankAnswerConfig = { version: 1; orderless: boolean; answers: string[][] }
 const maxDeckDepth = 5;
 const sessionCookieName = "flashcards_session";
 const sessionDays = 30;
-const appVersion = "0.8.2";
+const appVersion = "0.8.3";
 const timeZone = "Asia/Shanghai";
 const pronunciationCacheDir = process.env.PRONUNCIATION_CACHE_DIR ?? path.resolve(process.cwd(), "runtime/pronunciations");
 const doubaoTtsApiKey = process.env.DOUBAO_TTS_API_KEY ?? "";
@@ -4365,6 +4365,23 @@ function cardRow(userId: number, cardId: number) {
   );
 }
 
+function deckNamePath(userId: number, deckId: number) {
+  const names: string[] = [];
+  const visited = new Set<number>();
+  let currentId: number | null = deckId;
+  while (currentId && !visited.has(currentId) && names.length <= maxDeckDepth) {
+    visited.add(currentId);
+    const deckRow: { name: string; parent_id: number | null } | undefined = get<{ name: string; parent_id: number | null }>(
+      "SELECT name, parent_id FROM decks WHERE id = ? AND user_id = ?",
+      [currentId, userId]
+    );
+    if (!deckRow) break;
+    names.unshift(String(deckRow.name));
+    currentId = deckRow.parent_id === null ? null : Number(deckRow.parent_id);
+  }
+  return names.join(" / ");
+}
+
 function recordStudyEvent(
   userId: number,
   card: Record<string, SqlValue>,
@@ -4376,14 +4393,15 @@ function recordStudyEvent(
 ) {
   run(
     `INSERT INTO study_events (
-       user_id, card_id, deck_id, deck_name, card_type, front, back, phonetic, example, mnemonic, note, choices,
+       user_id, card_id, deck_id, deck_name, deck_path, card_type, front, back, phonetic, example, mnemonic, note, choices,
        event_kind, rating, stage_before, stage_after, study_date, answered_at
-     ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+     ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     [
       userId,
       Number(card.id),
       Number(card.deck_id),
       String(card.deck_name ?? ""),
+      deckNamePath(userId, Number(card.deck_id)),
       String(card.card_type ?? "basic"),
       String(card.front ?? ""),
       String(card.back ?? ""),
@@ -4783,14 +4801,21 @@ app.get("/api/study-records/export", requireUser, (req, res) => {
     res.status(400).json({ error: "只能导出今天起最近 14 天内的单日学习记录" });
     return;
   }
+  const userId = currentUserId(res);
+  const deckPaths = new Map<number, string>();
   const events = all<StudyExportEvent>(
-    `SELECT id, card_id, deck_name, card_type, front, back, phonetic, example, mnemonic, note, choices,
+    `SELECT id, card_id, deck_id, deck_name, deck_path, front, back,
             event_kind, rating, stage_before, stage_after, answered_at
      FROM study_events
      WHERE user_id = ? AND study_date = ?
      ORDER BY answered_at ASC, id ASC`,
-    [currentUserId(res), date]
-  );
+    [userId, date]
+  ).map((event) => {
+    if (event.deck_path || !event.deck_id) return event;
+    const deckId = Number(event.deck_id);
+    if (!deckPaths.has(deckId)) deckPaths.set(deckId, deckNamePath(userId, deckId));
+    return { ...event, deck_path: deckPaths.get(deckId) || event.deck_name };
+  });
   const filename = `flashcards-study-record-${date}.md`;
   res.setHeader("Content-Type", "text/markdown; charset=utf-8");
   res.setHeader("Content-Disposition", `attachment; filename*=UTF-8''${encodeURIComponent(filename)}`);

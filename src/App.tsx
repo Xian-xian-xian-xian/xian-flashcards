@@ -79,7 +79,7 @@ declare global {
   }
 }
 
-const version = "0.8.2";
+const version = "0.8.3";
 const logExportPressCount = 6;
 const logExportKey = "a";
 const logExportResetMs = 1800;
@@ -3583,7 +3583,7 @@ function SettingsView(props: { settings: Settings; onThemeChange: (theme: ThemeM
         <div className="study-export-box">
           <div>
             <strong>导出学习记录</strong>
-            <p>选择最近 14 天内的日期，默认前一天。文件将以 Markdown 格式保存。</p>
+            <p>选择最近 14 天内的日期，默认前一天。Markdown 将记录题目正反面、所属文件夹和逐次学习情况。</p>
           </div>
           <label>导出日期<input type="date" min={studyExportMin} max={studyExportMax} value={studyExportDate} onChange={(event) => setStudyExportDate(event.target.value)} /></label>
           <button className="primary-button" type="button" disabled={props.exportingStudyRecord || !studyExportDate} onClick={() => props.onExportStudyRecord(studyExportDate)}><Download />{props.exportingStudyRecord ? "导出中" : "下载 Markdown"}</button>
@@ -3601,6 +3601,7 @@ function AboutView(props: { syncStatus: SyncStatus | null }) {
       <div className="schedule-box"><h3>同步状态</h3><p>最近同步：{props.syncStatus ? fullDateTime(props.syncStatus.lastSyncAt) : "暂无"} · 数据更新：{props.syncStatus?.dataUpdatedAt ? fullDateTime(props.syncStatus.dataUpdatedAt) : "暂无"}</p></div>
       <div className="schedule-box changelog-box">
         <h3>更新日志</h3>
+        <div className="changelog-row"><strong>0.8.3</strong><span>2026-07-22</span><p>学习记录 Markdown 聚焦题目与学习情况：仅保留正面、反面、大文件夹与子文件夹、新学/复习次数、每次选择及结束阶段。</p></div>
         <div className="changelog-row"><strong>0.8.2</strong><span>2026-07-22</span><p>修复宽屏上单词卡例句提前换行、右侧留下大块空白的问题，例句现在会使用单词卡的完整内容宽度。</p></div>
         <div className="changelog-row"><strong>0.8.1</strong><span>2026-07-22</span><p>设置页新增学习记录导出：可选择最近 14 天内的单日，默认前一天，并以 Markdown 保存题目详情、新学与复习次数、每次选择及结束后的阶段。</p></div>
         <div className="changelog-row"><strong>0.7.5</strong><span>2026-07-21</span><p>无尽模式的本轮学习数量会跨组持续累计；点击“继续下一组”不再清零，只有选择“休息一下”才会重置。</p></div>
