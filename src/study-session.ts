@@ -17,6 +17,13 @@ export function studyAnswerWeight({ startedAsNew, alreadySubmitted }: Pick<Pract
   return startedAsNew && !alreadySubmitted ? 5 : 1;
 }
 
+export function ratingShortcutForKey(key: string): ReviewRating | null {
+  if (key === "1" || key === "<") return "unknown";
+  if (key === "2" || key === ">") return "fuzzy";
+  if (key === "3" || key === "?") return "known";
+  return null;
+}
+
 type GrindStudyWordsAction =
   | { type: "answer"; weight: number }
   | { type: "continue" }

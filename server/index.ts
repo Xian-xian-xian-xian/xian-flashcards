@@ -68,7 +68,7 @@ type BlankAnswerConfig = { version: 1; orderless: boolean; answers: string[][] }
 const maxDeckDepth = 5;
 const sessionCookieName = "flashcards_session";
 const sessionDays = 30;
-const appVersion = "0.8.4";
+const appVersion = "0.8.5";
 const timeZone = "Asia/Shanghai";
 const pronunciationCacheDir = process.env.PRONUNCIATION_CACHE_DIR ?? path.resolve(process.cwd(), "runtime/pronunciations");
 const doubaoTtsApiKey = process.env.DOUBAO_TTS_API_KEY ?? "";
@@ -371,6 +371,13 @@ function clampStudyTextScale(value: unknown) {
   const scale = Number(value);
   if (!Number.isFinite(scale)) return 1;
   return Math.min(1.35, Math.max(0.5, Math.round(scale * 1000) / 1000));
+}
+
+function clampStudyPageWidth(value: unknown) {
+  const width = Number(value);
+  if (!Number.isFinite(width)) return 1;
+  const options = [0.5, 0.625, 0.75, 0.875, 1];
+  return options.reduce((closest, option) => Math.abs(option - width) < Math.abs(closest - width) ? option : closest, 1);
 }
 
 function clampStudyLineHeight(value: unknown) {
@@ -6894,6 +6901,7 @@ app.get("/api/settings", (_req, res) => {
     autoSpeak: getUserSetting(userId, "autoSpeak", "off"),
     dailyWordGoal: getDailyGoal(userId),
     studyTextScale: clampStudyTextScale(getUserSetting(userId, "studyTextScale", "1")),
+    studyPageWidth: clampStudyPageWidth(getUserSetting(userId, "studyPageWidth", "1")),
     studyTextAlign: getUserSetting(userId, "studyTextAlign", "center") === "left" ? "left" : "center",
     studyChoiceLayout: ["one", "two"].includes(getUserSetting(userId, "studyChoiceLayout", "auto")) ? getUserSetting(userId, "studyChoiceLayout", "auto") : "auto",
     studyLineHeight: clampStudyLineHeight(getUserSetting(userId, "studyLineHeight", "1.5")),
@@ -6903,9 +6911,13 @@ app.get("/api/settings", (_req, res) => {
 
 app.put("/api/settings", (req, res) => {
   const userId = currentUserId(res);
-  for (const key of ["theme", "notifications", "autoSpeak", "dailyWordGoal", "studyTextScale", "studyTextAlign", "studyChoiceLayout", "studyLineHeight", "studyFontFamily"]) {
+  for (const key of ["theme", "notifications", "autoSpeak", "dailyWordGoal", "studyTextScale", "studyPageWidth", "studyTextAlign", "studyChoiceLayout", "studyLineHeight", "studyFontFamily"]) {
     if (key === "studyTextScale" && (typeof req.body[key] === "string" || typeof req.body[key] === "number")) {
       setUserSetting(userId, key, String(clampStudyTextScale(req.body[key])));
+      continue;
+    }
+    if (key === "studyPageWidth" && (typeof req.body[key] === "string" || typeof req.body[key] === "number")) {
+      setUserSetting(userId, key, String(clampStudyPageWidth(req.body[key])));
       continue;
     }
     if (key === "studyLineHeight" && (typeof req.body[key] === "string" || typeof req.body[key] === "number")) {

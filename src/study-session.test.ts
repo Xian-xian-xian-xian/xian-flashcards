@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { isPhrasePartOfSpeech, shouldUsePractice, studyAnswerWeight, updateGrindStudyWords } from "./study-session";
+import { isPhrasePartOfSpeech, ratingShortcutForKey, shouldUsePractice, studyAnswerWeight, updateGrindStudyWords } from "./study-session";
 
 describe("学习会话评分路由", () => {
   it("新卡先模糊再掌握时重新提交长期排程", () => {
@@ -57,6 +57,15 @@ describe("学习数量加权", () => {
     expect(updateGrindStudyWords(8, { type: "continue" })).toBe(8);
     expect(updateGrindStudyWords(8, { type: "answer", weight: 5 })).toBe(13);
     expect(updateGrindStudyWords(13, { type: "reset" })).toBe(0);
+  });
+});
+
+describe("学习评分快捷键", () => {
+  it("将数字 1、2、3 映射到不会、模糊、掌握", () => {
+    expect(ratingShortcutForKey("1")).toBe("unknown");
+    expect(ratingShortcutForKey("2")).toBe("fuzzy");
+    expect(ratingShortcutForKey("3")).toBe("known");
+    expect(ratingShortcutForKey("4")).toBeNull();
   });
 });
 

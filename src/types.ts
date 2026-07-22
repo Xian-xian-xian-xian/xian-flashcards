@@ -76,6 +76,7 @@ export type Settings = {
   autoSpeak: "on" | "off";
   dailyWordGoal: number;
   studyTextScale: number;
+  studyPageWidth: number;
   studyTextAlign: "center" | "left";
   studyChoiceLayout: "auto" | "one" | "two";
   studyLineHeight: number;

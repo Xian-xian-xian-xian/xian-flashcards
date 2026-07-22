@@ -60,7 +60,7 @@ import {
 } from "./blank-answers";
 import { insertImageMarkdown } from "./card-images";
 import { latexRenderSource } from "./latex";
-import { isPhrasePartOfSpeech, shouldUsePractice, studyAnswerWeight, updateGrindStudyWords } from "./study-session";
+import { isPhrasePartOfSpeech, ratingShortcutForKey, shouldUsePractice, studyAnswerWeight, updateGrindStudyWords } from "./study-session";
 import { resolveStudySwipe } from "./study-gestures";
 import type { Card, CardType, DailyTask, Deck, ImportBatch, ReviewRating, ReviewRemaining, ReviewSnapshot, Settings, Stats, SyncStatus, ThemeMode, TomatoState, User } from "./types";
 
@@ -79,7 +79,7 @@ declare global {
   }
 }
 
-const version = "0.8.4";
+const version = "0.8.5";
 const logExportPressCount = 6;
 const logExportKey = "a";
 const logExportResetMs = 1800;
@@ -765,6 +765,7 @@ export default function App() {
     autoSpeak: "off",
     dailyWordGoal: 20,
     studyTextScale: 1,
+    studyPageWidth: 1,
     studyTextAlign: "center",
     studyChoiceLayout: "auto",
     studyLineHeight: 1.5,
@@ -1260,6 +1261,7 @@ export default function App() {
             onSelectStudyDeck={selectStudyDeck}
             selectedDeck={studyDeck}
             studyTextScale={settings.studyTextScale}
+            studyPageWidth={settings.studyPageWidth}
             studyTextAlign={settings.studyTextAlign}
             studyChoiceLayout={settings.studyChoiceLayout}
             studyLineHeight={settings.studyLineHeight}
@@ -1267,6 +1269,10 @@ export default function App() {
             onStudyTextScale={async (studyTextScale) => {
               await api.saveSettings({ studyTextScale });
               setSettings((current) => ({ ...current, studyTextScale }));
+            }}
+            onStudyPageWidth={async (studyPageWidth) => {
+              await api.saveSettings({ studyPageWidth });
+              setSettings((current) => ({ ...current, studyPageWidth }));
             }}
             onStudyTextAlign={async (studyTextAlign) => {
               await api.saveSettings({ studyTextAlign });
@@ -2109,11 +2115,13 @@ function StudyView(props: {
   onSelectStudyDeck: (id: number) => void;
   selectedDeck?: Deck;
   studyTextScale: number;
+  studyPageWidth: number;
   studyTextAlign: Settings["studyTextAlign"];
   studyChoiceLayout: Settings["studyChoiceLayout"];
   studyLineHeight: number;
   studyFontFamily: Settings["studyFontFamily"];
   onStudyTextScale: (scale: number) => Promise<void>;
+  onStudyPageWidth: (width: number) => Promise<void>;
   onStudyTextAlign: (align: Settings["studyTextAlign"]) => Promise<void>;
   onStudyChoiceLayout: (layout: Settings["studyChoiceLayout"]) => Promise<void>;
   onStudyLineHeight: (lineHeight: number) => Promise<void>;
@@ -2714,6 +2722,8 @@ function StudyView(props: {
   function submitBlankAnswer(event: FormEvent) {
     event.preventDefault();
     if (!card || !splitBlankAnswers(answer, Math.max(1, blankMarkerCount(card.front))).every((part) => part.trim()) || busy) return;
+    const focused = document.activeElement;
+    if (focused instanceof HTMLElement && event.currentTarget.contains(focused)) focused.blur();
     checkWritten();
   }
 
@@ -2774,6 +2784,7 @@ function StudyView(props: {
     "--study-result-size": `${Math.round(16 * scale)}px`,
     "--study-word-content-max": `${Math.round(720 * Math.max(1, scale))}px`,
     "--study-word-back-edge-space": `${Math.round(80 * Math.max(0, scale - 1))}px`,
+    "--study-page-width": `${props.studyPageWidth * 100}%`,
     "--study-text-align": props.studyTextAlign,
     "--study-line-height": String(props.studyLineHeight),
     "--study-font-family": studyFontStack(props.studyFontFamily),
@@ -2793,6 +2804,11 @@ function StudyView(props: {
     } finally {
       setScaleSaving(false);
     }
+  }
+
+  async function savePageWidth(nextWidth: number) {
+    if (Math.abs(nextWidth - props.studyPageWidth) < 0.001) return;
+    await props.onStudyPageWidth(nextWidth);
   }
 
   async function saveTextAlign(nextAlign: Settings["studyTextAlign"]) {
@@ -2927,7 +2943,14 @@ function StudyView(props: {
       const target = event.target as HTMLElement | null;
       const tagName = target?.tagName ?? "";
       const editable = Boolean(target?.isContentEditable || ["INPUT", "TEXTAREA", "SELECT"].includes(tagName));
-      if (editable || editingStudyCard || pronunciationXmlOpen || event.metaKey || event.ctrlKey || event.altKey || busyRef.current) return;
+      const ratingShortcut = ratingShortcutForKey(event.key);
+      const submittedBlankInputShortcut = Boolean(
+        ratingShortcut
+        && checked
+        && card?.card_type === "blank"
+        && target?.matches("input.blank-inline-input")
+      );
+      if ((editable && !submittedBlankInputShortcut) || editingStudyCard || pronunciationXmlOpen || event.metaKey || event.ctrlKey || event.altKey || busyRef.current) return;
 
       if ((event.key === "ArrowRight" || event.key === " ") && !card && total > 0) {
         event.preventDefault();
@@ -2952,21 +2975,9 @@ function StudyView(props: {
         return;
       }
 
-      if (!showManualRatings) return;
-      if (event.key === "1" || event.key === "<") {
-        event.preventDefault();
-        rate("unknown");
-        return;
-      }
-      if (event.key === "2" || event.key === ">") {
-        event.preventDefault();
-        rate("fuzzy");
-        return;
-      }
-      if (event.key === "3" || event.key === "?") {
-        event.preventDefault();
-        rate("known");
-      }
+      if (!showManualRatings || !ratingShortcut) return;
+      event.preventDefault();
+      rate(ratingShortcut);
     };
 
     window.addEventListener("keydown", onKeyDown);
@@ -3096,6 +3107,12 @@ function StudyView(props: {
                           <span>字体大小</span>
                           <select aria-label="字体大小" value={scaleDraft} disabled={scaleSaving} onChange={(event) => saveScale(Number(event.target.value))}>
                             {[0.5, 0.625, 0.85, 1, 1.15, 1.25, 1.35].map((value) => <option key={value} value={value}>{Math.round(value * 1000) / 10}%</option>)}
+                          </select>
+                        </label>
+                        <label className="study-more-select">
+                          <span>页宽</span>
+                          <select aria-label="页宽" value={props.studyPageWidth} onChange={(event) => savePageWidth(Number(event.target.value))}>
+                            {[0.5, 0.625, 0.75, 0.875, 1].map((value) => <option key={value} value={value}>{Math.round(value * 1000) / 10}%</option>)}
                           </select>
                         </label>
                         <label className="study-more-select">
@@ -3250,7 +3267,7 @@ function StudyView(props: {
                               }}
                               aria-label="填空答案"
                               autoComplete="off"
-                              disabled={Boolean(busy)}
+                              disabled={Boolean(busy) || checked !== null}
                             />
                           )}
                         />
@@ -3261,10 +3278,10 @@ function StudyView(props: {
                             onChange={(event) => { setAnswer(event.target.value); setChecked(null); }}
                             aria-label="填空答案"
                             autoComplete="off"
-                            disabled={Boolean(busy)}
+                            disabled={Boolean(busy) || checked !== null}
                           />
                         )}
-                        <button className="primary-button blank-submit-button" disabled={Boolean(busy) || !blankAnswerReady}>{busy ? "提交中" : "提交"}</button>
+                        <button className="primary-button blank-submit-button" disabled={Boolean(busy) || checked !== null || !blankAnswerReady}>{busy ? "提交中" : "提交"}</button>
                       </form>
                       {checked && <AnswerFeedback checked={checked} correct={correctAnswer(card)} explanation={explanation} other={otherNote} selected={displayedBlankAnswer} />}
                     </div>
@@ -3643,6 +3660,7 @@ function AboutView(props: { syncStatus: SyncStatus | null }) {
       <div className="schedule-box"><h3>同步状态</h3><p>最近同步：{props.syncStatus ? fullDateTime(props.syncStatus.lastSyncAt) : "暂无"} · 数据更新：{props.syncStatus?.dataUpdatedAt ? fullDateTime(props.syncStatus.dataUpdatedAt) : "暂无"}</p></div>
       <div className="schedule-box changelog-box">
         <h3>更新日志</h3>
+        <div className="changelog-row"><strong>0.8.5</strong><span>2026-07-22</span><p>学习卡片更多选项新增百分比页宽；修复填空题提交后数字评分键重新进入填写状态，以及含 LaTeX 分数的普通卡题面行间距不明显的问题。</p></div>
         <div className="changelog-row"><strong>0.8.4</strong><span>2026-07-22</span><p>修复单词卡正面行间距不生效的问题；短语词性卡片会适当缩小正面文字；本轮学习数量仅在点击胶囊并确认后重置，且会跨刷新保留。</p></div>
         <div className="changelog-row"><strong>0.8.3</strong><span>2026-07-22</span><p>学习记录 Markdown 聚焦题目与学习情况：仅保留正面、反面、大文件夹与子文件夹、新学/复习次数、每次选择及结束阶段。</p></div>
         <div className="changelog-row"><strong>0.8.2</strong><span>2026-07-22</span><p>修复宽屏上单词卡例句提前换行、右侧留下大块空白的问题，例句现在会使用单词卡的完整内容宽度。</p></div>
