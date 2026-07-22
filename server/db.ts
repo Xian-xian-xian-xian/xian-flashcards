@@ -75,6 +75,34 @@ export async function initDb() {
       FOREIGN KEY(deck_id) REFERENCES decks(id) ON DELETE SET NULL
     );
 
+    CREATE TABLE IF NOT EXISTS study_events (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      user_id INTEGER NOT NULL,
+      card_id INTEGER,
+      deck_id INTEGER,
+      deck_name TEXT DEFAULT '',
+      card_type TEXT DEFAULT 'basic',
+      front TEXT NOT NULL,
+      back TEXT DEFAULT '',
+      phonetic TEXT DEFAULT '',
+      example TEXT DEFAULT '',
+      mnemonic TEXT DEFAULT '',
+      note TEXT DEFAULT '',
+      choices TEXT DEFAULT '',
+      event_kind TEXT NOT NULL,
+      rating TEXT NOT NULL,
+      stage_before INTEGER NOT NULL,
+      stage_after INTEGER NOT NULL,
+      study_date TEXT NOT NULL,
+      answered_at TEXT NOT NULL,
+      FOREIGN KEY(user_id) REFERENCES users(id) ON DELETE CASCADE,
+      FOREIGN KEY(card_id) REFERENCES cards(id) ON DELETE SET NULL,
+      FOREIGN KEY(deck_id) REFERENCES decks(id) ON DELETE SET NULL
+    );
+
+    CREATE INDEX IF NOT EXISTS idx_study_events_user_date
+      ON study_events(user_id, study_date, answered_at);
+
     CREATE TABLE IF NOT EXISTS settings (
       key TEXT PRIMARY KEY,
       value TEXT NOT NULL
@@ -225,7 +253,7 @@ export function get<T extends Record<string, unknown>>(sql: string, params: SqlV
   return all<T>(sql, params)[0];
 }
 
-export function lastTableId(table: "decks" | "cards" | "study_sessions" | "users") {
+export function lastTableId(table: "decks" | "cards" | "study_sessions" | "study_events" | "users") {
   return Number(get<{ id: number }>(`SELECT COALESCE(MAX(id), 0) AS id FROM ${table}`)?.id ?? 0);
 }
 

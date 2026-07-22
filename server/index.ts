@@ -14,6 +14,7 @@ import { isSuperuserUsername, publicAuthUser, type AuthUser } from "./auth.js";
 import { cardImagePath, cardImageTypeFromFilename, maxCardImageBytes, storeCardImage } from "./card-images.js";
 import { nextReviewState, type ReviewRating } from "./ebbinghaus.js";
 import { normalizeImportRows } from "./import-utils.js";
+import { buildDailyStudyMarkdown, isAllowedStudyExportDate, type StudyEventKind, type StudyExportEvent } from "./study-export.js";
 import { buildDoubaoRequestBody, buildDoubaoTtsPrompt, buildPlainTextSsml, doubaoTtsEndpoint, doubaoTtsPromptCandidates, doubaoTtsResourceId, doubaoTtsVoice, maxDoubaoPromptLength, maxDoubaoSsmlLength, normalizeCustomSsml, normalizeDoubaoPrompt, parseDoubaoAudioChunks } from "./doubao-tts.js";
 
 const app = express();
@@ -67,7 +68,7 @@ type BlankAnswerConfig = { version: 1; orderless: boolean; answers: string[][] }
 const maxDeckDepth = 5;
 const sessionCookieName = "flashcards_session";
 const sessionDays = 30;
-const appVersion = "0.7.5";
+const appVersion = "0.8.1";
 const timeZone = "Asia/Shanghai";
 const pronunciationCacheDir = process.env.PRONUNCIATION_CACHE_DIR ?? path.resolve(process.cwd(), "runtime/pronunciations");
 const doubaoTtsApiKey = process.env.DOUBAO_TTS_API_KEY ?? "";
@@ -4355,13 +4356,56 @@ function reviewRemainingCounts(userId: number, deckId?: number) {
 
 function cardRow(userId: number, cardId: number) {
   return get<Record<string, SqlValue>>(
-    `SELECT c.*, d.language, r.stage, r.due_at, r.last_rating, r.known_count, r.fuzzy_count, r.unknown_count
+    `SELECT c.*, d.name AS deck_name, d.language, r.stage, r.due_at, r.last_rating, r.known_count, r.fuzzy_count, r.unknown_count
      FROM cards c
      JOIN decks d ON d.id = c.deck_id
      JOIN reviews r ON r.card_id = c.id
      WHERE c.user_id = ? AND c.id = ?`,
     [userId, cardId]
   );
+}
+
+function recordStudyEvent(
+  userId: number,
+  card: Record<string, SqlValue>,
+  eventKind: StudyEventKind,
+  rating: ReviewRating,
+  stageBefore: number,
+  stageAfter: number,
+  answeredAt: string
+) {
+  run(
+    `INSERT INTO study_events (
+       user_id, card_id, deck_id, deck_name, card_type, front, back, phonetic, example, mnemonic, note, choices,
+       event_kind, rating, stage_before, stage_after, study_date, answered_at
+     ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    [
+      userId,
+      Number(card.id),
+      Number(card.deck_id),
+      String(card.deck_name ?? ""),
+      String(card.card_type ?? "basic"),
+      String(card.front ?? ""),
+      String(card.back ?? ""),
+      String(card.phonetic ?? ""),
+      String(card.example ?? ""),
+      String(card.mnemonic ?? ""),
+      String(card.note ?? ""),
+      String(card.choices ?? ""),
+      eventKind,
+      rating,
+      stageBefore,
+      stageAfter,
+      shanghaiDateKey(new Date(answeredAt)),
+      answeredAt
+    ]
+  );
+  return lastTableId("study_events");
+}
+
+function deleteStudyEvent(userId: number, eventId: unknown) {
+  const id = Number(eventId);
+  if (Number.isInteger(id) && id > 0) run("DELETE FROM study_events WHERE id = ? AND user_id = ?", [id, userId]);
 }
 
 function createCard(userId: number, deckId: number, input: CardInput) {
@@ -4730,6 +4774,27 @@ app.get("/api/logs/recent", requireUser, (req, res) => {
   res.setHeader("Content-Type", "application/x-ndjson; charset=utf-8");
   res.setHeader("Content-Disposition", `attachment; filename*=UTF-8''${encodeURIComponent(filename)}`);
   res.send(lines ? `${lines}\n` : "");
+});
+
+app.get("/api/study-records/export", requireUser, (req, res) => {
+  const date = String(req.query.date ?? "");
+  const today = shanghaiDateKey();
+  if (!isAllowedStudyExportDate(date, today)) {
+    res.status(400).json({ error: "只能导出今天起最近 14 天内的单日学习记录" });
+    return;
+  }
+  const events = all<StudyExportEvent>(
+    `SELECT id, card_id, deck_name, card_type, front, back, phonetic, example, mnemonic, note, choices,
+            event_kind, rating, stage_before, stage_after, answered_at
+     FROM study_events
+     WHERE user_id = ? AND study_date = ?
+     ORDER BY answered_at ASC, id ASC`,
+    [currentUserId(res), date]
+  );
+  const filename = `flashcards-study-record-${date}.md`;
+  res.setHeader("Content-Type", "text/markdown; charset=utf-8");
+  res.setHeader("Content-Disposition", `attachment; filename*=UTF-8''${encodeURIComponent(filename)}`);
+  res.send(buildDailyStudyMarkdown(date, events));
 });
 
 app.get("/api/auth/status", (req, res) => {
@@ -6626,10 +6691,11 @@ app.post("/api/reviews/:cardId/answer", (req, res) => {
     return;
   }
 
-  const current = get<{ stage: number; due_at: string; last_rating: string; known_count: number; fuzzy_count: number; unknown_count: number; updated_at: string }>(
-    `SELECT r.stage, r.due_at, r.last_rating, r.known_count, r.fuzzy_count, r.unknown_count, r.updated_at
+  const current = get<Record<string, SqlValue>>(
+    `SELECT c.*, d.name AS deck_name, r.stage, r.due_at, r.last_rating, r.known_count, r.fuzzy_count, r.unknown_count, r.updated_at
      FROM reviews r
      JOIN cards c ON c.id = r.card_id
+     JOIN decks d ON d.id = c.deck_id
      WHERE r.card_id = ? AND c.user_id = ?`,
     [Number(req.params.cardId), userId]
   );
@@ -6645,6 +6711,7 @@ app.post("/api/reviews/:cardId/answer", (req, res) => {
   });
   const cardId = Number(req.params.cardId);
   const previousDailyTask = dailyTaskSnapshot(ensureDailyTask(userId));
+  const answeredAt = nowIso();
   run(
     `UPDATE reviews
      SET stage = ?,
@@ -6662,7 +6729,7 @@ app.post("/api/reviews/:cardId/answer", (req, res) => {
       rating === "known" ? 1 : 0,
       rating === "fuzzy" ? 1 : 0,
       rating === "unknown" ? 1 : 0,
-      nowIso(),
+      answeredAt,
       cardId,
       userId
     ]
@@ -6670,7 +6737,8 @@ app.post("/api/reviews/:cardId/answer", (req, res) => {
 
   updateDailyTaskProgress(userId, cardId, rating, Number(current.stage));
   dailyTaskSummary(userId);
-  res.json({ ...next, previous: { ...current, dailyTaskPrevious: previousDailyTask } });
+  const studyEventId = recordStudyEvent(userId, current, Number(current.stage) === 0 ? "new" : "review", rating, Number(current.stage), next.stage, answeredAt);
+  res.json({ ...next, previous: { ...current, studyEventId, dailyTaskPrevious: previousDailyTask } });
 });
 
 app.post("/api/reviews/:cardId/practice", (req, res) => {
@@ -6689,10 +6757,12 @@ app.post("/api/reviews/:cardId/practice", (req, res) => {
   const previousDailyTask = dailyTaskSnapshot(ensureDailyTask(userId));
   updateDailyPracticeMastery(userId, cardId, rating);
   dailyTaskSummary(userId);
+  const answeredAt = nowIso();
+  const studyEventId = recordStudyEvent(userId, card, "review", rating, Number(card.stage), Number(card.stage), answeredAt);
   res.json({
     stage: Number(card.stage),
     dueAt: String(card.due_at),
-    previous: { dailyTaskPrevious: previousDailyTask }
+    previous: { studyEventId, dailyTaskPrevious: previousDailyTask }
   });
 });
 
@@ -6705,6 +6775,7 @@ app.post("/api/reviews/:cardId/practice/restore", (req, res) => {
     return;
   }
   restoreDailyTaskSnapshot(userId, req.body.dailyTaskPrevious ?? req.body);
+  deleteStudyEvent(userId, req.body.studyEventId);
   dailyTaskSummary(userId);
   res.json({ ok: true });
 });
@@ -6718,6 +6789,7 @@ app.post("/api/reviews/:cardId/restore", (req, res) => {
     return;
   }
   const restoredDailyTask = restoreDailyTaskSnapshot(userId, req.body.dailyTaskPrevious);
+  deleteStudyEvent(userId, req.body.studyEventId);
   if (!restoredDailyTask && Math.max(0, Number(req.body.stage ?? 0)) === 0) removeDailyNewCard(userId, cardId);
   run(
     `UPDATE reviews

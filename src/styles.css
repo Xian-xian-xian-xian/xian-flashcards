@@ -2920,6 +2920,33 @@ body.resizing-answer-dock .question-dock-resizer::after {
   gap: 16px;
 }
 
+.study-export-box {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(180px, 240px) auto;
+  gap: 14px;
+  align-items: end;
+  padding: 16px;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: var(--surface-2);
+}
+
+.study-export-box > div p {
+  margin: 6px 0 0;
+  color: var(--muted);
+}
+
+.study-export-box label {
+  margin: 0;
+}
+
+@media (max-width: 720px) {
+  .study-export-box {
+    grid-template-columns: 1fr;
+    align-items: stretch;
+  }
+}
+
 .import-panel {
   display: grid;
   gap: 18px;

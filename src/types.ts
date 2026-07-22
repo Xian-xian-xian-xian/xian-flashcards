@@ -55,6 +55,7 @@ export type ReviewSnapshot = {
   fuzzy_count: number;
   unknown_count: number;
   updated_at: string;
+  studyEventId?: number;
   dailyTaskPrevious?: DailyTaskSnapshot;
 };
 

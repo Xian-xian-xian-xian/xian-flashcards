@@ -68,7 +68,7 @@ type View = "home" | "deck" | "create-card" | "study" | "import" | "settings" | 
 type SyncState = "idle" | "syncing" | "success" | "error" | "conflict";
 type StudyMode = "review" | "new" | "grind";
 type ReviewResult = { stage: number; dueAt: string; previous: ReviewSnapshot };
-type PracticeResult = { stage: number; dueAt: string; previous: Pick<ReviewSnapshot, "dailyTaskPrevious"> };
+type PracticeResult = { stage: number; dueAt: string; previous: Pick<ReviewSnapshot, "dailyTaskPrevious" | "studyEventId"> };
 type RatingFeedback = { key: number; rating: ReviewRating; title: string; stageText: string; dueText: string };
 type PronunciationSettings = { ssml: string; prompt: string; customized: boolean; promptCustomized: boolean; maxSsmlLength: number; maxPromptLength: number };
 type KatexRuntime = { renderToString: (value: string, options: { displayMode?: boolean; throwOnError: boolean; trust: boolean; strict: "ignore" }) => string };
@@ -79,10 +79,23 @@ declare global {
   }
 }
 
-const version = "0.7.5";
+const version = "0.8.1";
 const logExportPressCount = 6;
 const logExportKey = "a";
 const logExportResetMs = 1800;
+
+function shanghaiDateKey(offsetDays = 0) {
+  const today = new Intl.DateTimeFormat("en-CA", {
+    timeZone: "Asia/Shanghai",
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit"
+  }).format(new Date());
+  if (offsetDays === 0) return today;
+  const date = new Date(`${today}T12:00:00Z`);
+  date.setUTCDate(date.getUTCDate() + offsetDays);
+  return date.toISOString().slice(0, 10);
+}
 const studyDeckStoragePrefix = "xian-flashcards-study-root-deck";
 
 const cardTypeLabels: Record<CardType, string> = {
@@ -920,6 +933,19 @@ export default function App() {
     showToast("已导出最近 10 分钟日志");
   }
 
+  async function downloadStudyRecord(date: string) {
+    const { blob, filename } = await api.exportStudyRecord(date);
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement("a");
+    link.href = url;
+    link.download = filename;
+    document.body.append(link);
+    link.click();
+    link.remove();
+    URL.revokeObjectURL(url);
+    showToast(`已导出 ${date} 学习记录`);
+  }
+
   useEffect(() => {
     let pressCount = 0;
     let resetTimer = 0;
@@ -1308,9 +1334,11 @@ export default function App() {
               });
             }}
             onNotify={enableNotifications}
+            onExportStudyRecord={(date) => withPending("study-record", () => downloadStudyRecord(date))}
             onExportLogs={() => withPending("logs", downloadRecentLogs)}
             saving={Boolean(pending.settings)}
             notifying={Boolean(pending.notify)}
+            exportingStudyRecord={Boolean(pending["study-record"])}
             exportingLogs={Boolean(pending.logs)}
           />
         )}
@@ -2082,7 +2110,7 @@ function StudyView(props: {
   onAnswer: (card: Card, rating: ReviewRating) => Promise<ReviewResult>;
   onPractice: (card: Card, rating: ReviewRating) => Promise<PracticeResult>;
   onUndoAnswer: (card: Card, snapshot: ReviewSnapshot) => Promise<void>;
-  onUndoPractice: (card: Card, snapshot: Pick<ReviewSnapshot, "dailyTaskPrevious">) => Promise<void>;
+  onUndoPractice: (card: Card, snapshot: Pick<ReviewSnapshot, "dailyTaskPrevious" | "studyEventId">) => Promise<void>;
   onUpdateCard: (id: number, payload: CardPayload) => Promise<Card | null | undefined>;
   onSpeak: (text: string, language?: string, fallback?: string) => void;
   onLoadPronunciationXml: (payload: { text: string; fallback: string }) => Promise<PronunciationSettings>;
@@ -2101,7 +2129,7 @@ function StudyView(props: {
   const [roundStudyWords, setRoundStudyWords] = useState(0);
   const [history, setHistory] = useState<Array<{
     card: Card;
-    previous: ReviewSnapshot | Pick<ReviewSnapshot, "dailyTaskPrevious">;
+    previous: ReviewSnapshot | Pick<ReviewSnapshot, "dailyTaskPrevious" | "studyEventId">;
     practice: boolean;
     sessionCards: Card[];
     queue: Card[];
@@ -2626,7 +2654,7 @@ function StudyView(props: {
     setBusy("undo");
     try {
       if (previous.practice) {
-        await props.onUndoPractice(previous.card, previous.previous as Pick<ReviewSnapshot, "dailyTaskPrevious">);
+        await props.onUndoPractice(previous.card, previous.previous as Pick<ReviewSnapshot, "dailyTaskPrevious" | "studyEventId">);
       } else {
         await props.onUndoAnswer(previous.card, previous.previous as ReviewSnapshot);
       }
@@ -3513,8 +3541,12 @@ function ImportView(props: { decks: Deck[]; selectedDeckId: number | null; onSel
   );
 }
 
-function SettingsView(props: { settings: Settings; onThemeChange: (theme: ThemeMode) => Promise<void>; onSave: (settings: Partial<Settings>) => Promise<void>; onNotify: () => Promise<void>; onExportLogs: () => Promise<void>; saving: boolean; notifying: boolean; exportingLogs: boolean }) {
+function SettingsView(props: { settings: Settings; onThemeChange: (theme: ThemeMode) => Promise<void>; onSave: (settings: Partial<Settings>) => Promise<void>; onNotify: () => Promise<void>; onExportStudyRecord: (date: string) => Promise<void>; onExportLogs: () => Promise<void>; saving: boolean; notifying: boolean; exportingStudyRecord: boolean; exportingLogs: boolean }) {
   const [draft, setDraft] = useState<Settings>(props.settings);
+  const [studyExportOpen, setStudyExportOpen] = useState(false);
+  const [studyExportDate, setStudyExportDate] = useState(() => shanghaiDateKey(-1));
+  const studyExportMax = shanghaiDateKey();
+  const studyExportMin = shanghaiDateKey(-13);
 
   useEffect(() => {
     setDraft(props.settings);
@@ -3544,8 +3576,19 @@ function SettingsView(props: { settings: Settings; onThemeChange: (theme: ThemeM
       <div className="settings-actions">
         <button className="primary-button" disabled={props.saving}><Save />{props.saving ? "保存中" : "保存设置"}</button>
         <button className="primary-button secondary-button" type="button" disabled={props.notifying} onClick={props.onNotify}><Bell />{props.notifying ? "授权中" : "开启浏览器通知"}</button>
+        <button className="primary-button secondary-button" type="button" aria-expanded={studyExportOpen} onClick={() => setStudyExportOpen((open) => !open)}><Download />导出学习记录</button>
         <button className="primary-button secondary-button" type="button" disabled={props.exportingLogs} onClick={props.onExportLogs}><Download />{props.exportingLogs ? "导出中" : "导出最近日志"}</button>
       </div>
+      {studyExportOpen && (
+        <div className="study-export-box">
+          <div>
+            <strong>导出学习记录</strong>
+            <p>选择最近 14 天内的日期，默认前一天。文件将以 Markdown 格式保存。</p>
+          </div>
+          <label>导出日期<input type="date" min={studyExportMin} max={studyExportMax} value={studyExportDate} onChange={(event) => setStudyExportDate(event.target.value)} /></label>
+          <button className="primary-button" type="button" disabled={props.exportingStudyRecord || !studyExportDate} onClick={() => props.onExportStudyRecord(studyExportDate)}><Download />{props.exportingStudyRecord ? "导出中" : "下载 Markdown"}</button>
+        </div>
+      )}
       <div className="schedule-box"><h3>艾宾浩斯间隔</h3><p>5 分钟 · 30 分钟 · 12 小时 · 1 天 · 2 天 · 4 天 · 7 天 · 15 天 · 30 天 · 90 天</p></div>
     </form>
   );
@@ -3558,6 +3601,7 @@ function AboutView(props: { syncStatus: SyncStatus | null }) {
       <div className="schedule-box"><h3>同步状态</h3><p>最近同步：{props.syncStatus ? fullDateTime(props.syncStatus.lastSyncAt) : "暂无"} · 数据更新：{props.syncStatus?.dataUpdatedAt ? fullDateTime(props.syncStatus.dataUpdatedAt) : "暂无"}</p></div>
       <div className="schedule-box changelog-box">
         <h3>更新日志</h3>
+        <div className="changelog-row"><strong>0.8.1</strong><span>2026-07-22</span><p>设置页新增学习记录导出：可选择最近 14 天内的单日，默认前一天，并以 Markdown 保存题目详情、新学与复习次数、每次选择及结束后的阶段。</p></div>
         <div className="changelog-row"><strong>0.7.5</strong><span>2026-07-21</span><p>无尽模式的本轮学习数量会跨组持续累计；点击“继续下一组”不再清零，只有选择“休息一下”才会重置。</p></div>
         <div className="changelog-row"><strong>0.7.4</strong><span>2026-07-21</span><p>无尽模式新增本轮学习数量胶囊；每日学习数量改为按每次作答累计，新学首次计 5、之后每次复习计 1。</p></div>
         <div className="changelog-row"><strong>0.7.3</strong><span>2026-07-21</span><p>修复单词卡在全屏学习中翻到背面后，卡面未填满可用高度、底部出现空白的问题。</p></div>
