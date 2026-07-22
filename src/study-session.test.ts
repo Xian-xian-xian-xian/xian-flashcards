@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { shouldUsePractice, studyAnswerWeight, updateGrindStudyWords } from "./study-session";
+import { isPhrasePartOfSpeech, shouldUsePractice, studyAnswerWeight, updateGrindStudyWords } from "./study-session";
 
 describe("学习会话评分路由", () => {
   it("新卡先模糊再掌握时重新提交长期排程", () => {
@@ -53,9 +53,22 @@ describe("学习数量加权", () => {
     expect(studyAnswerWeight({ startedAsNew: false, alreadySubmitted: true })).toBe(1);
   });
 
-  it("无尽模式继续下一轮时累计，休息时清零", () => {
+  it("无尽模式继续下一轮时累计，只有明确重置时清零", () => {
     expect(updateGrindStudyWords(8, { type: "continue" })).toBe(8);
     expect(updateGrindStudyWords(8, { type: "answer", weight: 5 })).toBe(13);
-    expect(updateGrindStudyWords(13, { type: "rest" })).toBe(0);
+    expect(updateGrindStudyWords(13, { type: "reset" })).toBe(0);
+  });
+});
+
+describe("短语词性识别", () => {
+  it("识别常见的 phr. 词性写法", () => {
+    expect(isPhrasePartOfSpeech("phr. 照顾")).toBe(true);
+    expect(isPhrasePartOfSpeech("**phr.** 照顾")).toBe(true);
+    expect(isPhrasePartOfSpeech("v. 看；phr. 照顾")).toBe(true);
+  });
+
+  it("不会把其他文本误判为短语词性", () => {
+    expect(isPhrasePartOfSpeech("n. 照料")).toBe(false);
+    expect(isPhrasePartOfSpeech("ephrata")).toBe(false);
   });
 });

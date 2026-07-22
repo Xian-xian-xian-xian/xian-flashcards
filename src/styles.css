@@ -1126,6 +1126,23 @@ textarea:focus {
   white-space: nowrap;
 }
 
+.study-round-count-pill {
+  border: 0;
+  font-family: inherit;
+  cursor: pointer;
+}
+
+.study-round-count-pill:hover,
+.study-round-count-pill:focus-visible {
+  background: color-mix(in srgb, var(--primary-soft), var(--primary) 12%);
+  outline: 2px solid color-mix(in srgb, var(--primary), transparent 55%);
+  outline-offset: 1px;
+}
+
+.study-round-reset-dialog {
+  width: min(440px, 100%);
+}
+
 .card-summary-markdown {
   gap: 0.35em;
   line-height: 1.5;
@@ -1209,6 +1226,8 @@ textarea:focus {
   --study-face-max: 72px;
   --study-word-min: 38px;
   --study-word-max: 72px;
+  --study-phrase-word-min: 32px;
+  --study-phrase-word-max: 61px;
   --study-phonetic-min: 18px;
   --study-phonetic-max: 28px;
   --study-back-min: 22px;
@@ -2241,7 +2260,11 @@ textarea:focus {
 .flip-card .word-text {
   font-size: clamp(var(--study-word-min), 8vw, var(--study-word-max));
   font-weight: 800;
-  line-height: 1;
+  line-height: var(--study-line-height);
+}
+
+.flip-card .word-face.phrase-face .word-text {
+  font-size: clamp(var(--study-phrase-word-min), 6.8vw, var(--study-phrase-word-max));
 }
 
 .flip-card .word-face em,

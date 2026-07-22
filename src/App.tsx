@@ -60,7 +60,7 @@ import {
 } from "./blank-answers";
 import { insertImageMarkdown } from "./card-images";
 import { latexRenderSource } from "./latex";
-import { shouldUsePractice, studyAnswerWeight, updateGrindStudyWords } from "./study-session";
+import { isPhrasePartOfSpeech, shouldUsePractice, studyAnswerWeight, updateGrindStudyWords } from "./study-session";
 import { resolveStudySwipe } from "./study-gestures";
 import type { Card, CardType, DailyTask, Deck, ImportBatch, ReviewRating, ReviewRemaining, ReviewSnapshot, Settings, Stats, SyncStatus, ThemeMode, TomatoState, User } from "./types";
 
@@ -79,7 +79,7 @@ declare global {
   }
 }
 
-const version = "0.8.3";
+const version = "0.8.4";
 const logExportPressCount = 6;
 const logExportKey = "a";
 const logExportResetMs = 1800;
@@ -97,6 +97,16 @@ function shanghaiDateKey(offsetDays = 0) {
   return date.toISOString().slice(0, 10);
 }
 const studyDeckStoragePrefix = "xian-flashcards-study-root-deck";
+const roundStudyWordsStoragePrefix = "xian-flashcards-round-study-words";
+
+function storedRoundStudyWords(userId: number) {
+  try {
+    const value = Number(window.localStorage.getItem(`${roundStudyWordsStoragePrefix}:${userId}`));
+    return Number.isFinite(value) && value > 0 ? Math.floor(value) : 0;
+  } catch {
+    return 0;
+  }
+}
 
 const cardTypeLabels: Record<CardType, string> = {
   basic: "普通卡",
@@ -1242,6 +1252,7 @@ export default function App() {
 
         {view === "study" && (
           <StudyView
+            userId={user.id}
             isSuperuser={user.isSuperuser}
             cards={dueCards}
             decks={decks}
@@ -2090,6 +2101,7 @@ function SmartTextField(props: { value: string; onChange: (value: string) => voi
 }
 
 function StudyView(props: {
+  userId: number;
   isSuperuser: boolean;
   cards: Card[];
   decks: Deck[];
@@ -2126,7 +2138,8 @@ function StudyView(props: {
   const [queue, setQueue] = useState<Card[]>([]);
   const [masteredIds, setMasteredIds] = useState<number[]>([]);
   const [longTermSubmittedIds, setLongTermSubmittedIds] = useState<number[]>([]);
-  const [roundStudyWords, setRoundStudyWords] = useState(0);
+  const [roundStudyWords, setRoundStudyWords] = useState(() => storedRoundStudyWords(props.userId));
+  const [roundResetOpen, setRoundResetOpen] = useState(false);
   const [history, setHistory] = useState<Array<{
     card: Card;
     previous: ReviewSnapshot | Pick<ReviewSnapshot, "dailyTaskPrevious" | "studyEventId">;
@@ -2368,6 +2381,14 @@ function StudyView(props: {
   useEffect(() => {
     setScaleDraft(props.studyTextScale);
   }, [props.studyTextScale]);
+
+  useEffect(() => {
+    try {
+      window.localStorage.setItem(`${roundStudyWordsStoragePrefix}:${props.userId}`, String(roundStudyWords));
+    } catch {
+      // The in-memory counter still works when storage is unavailable.
+    }
+  }, [props.userId, roundStudyWords]);
 
   useEffect(() => {
     document.documentElement.classList.toggle("study-immersive-active", immersive);
@@ -2739,6 +2760,8 @@ function StudyView(props: {
     "--study-face-max": `${Math.round(72 * scale)}px`,
     "--study-word-min": `${Math.round(34 * scale)}px`,
     "--study-word-max": `${Math.round(64 * scale)}px`,
+    "--study-phrase-word-min": `${Math.round(29 * scale)}px`,
+    "--study-phrase-word-max": `${Math.round(54 * scale)}px`,
     "--study-phonetic-min": `${Math.round(18 * scale)}px`,
     "--study-phonetic-max": `${Math.round(28 * scale)}px`,
     "--study-back-min": `${Math.round(20 * scale)}px`,
@@ -2852,8 +2875,12 @@ function StudyView(props: {
       setImmersive(Boolean(document.fullscreenElement));
     }
     resetSession();
-    setRoundStudyWords((value) => updateGrindStudyWords(value, { type: "rest" }));
     setGrindMessage("已休息，准备好后再开始无尽学习。");
+  }
+
+  function resetRoundStudyWords() {
+    setRoundStudyWords((value) => updateGrindStudyWords(value, { type: "reset" }));
+    setRoundResetOpen(false);
   }
 
   function editCurrentStudyCard() {
@@ -3049,7 +3076,7 @@ function StudyView(props: {
                     />
                   </svg>
                 </div>
-                {studyMode === "grind" && <span className="type-pill study-round-count-pill">本轮学习 {roundStudyWords}</span>}
+                {studyMode === "grind" && <button type="button" className="type-pill study-round-count-pill" title="重置本轮学习数量" onClick={() => setRoundResetOpen(true)}>本轮学习 {roundStudyWords}</button>}
                 <span className="type-pill">{cardTypeLabels[card.card_type]}</span>
                 <span className="type-pill study-schedule-pill" title={`下次复习：${fullDateTime(card.due_at)}（${dueText(card.due_at)}）`}>{studyScheduleText(card)}</span>
                 <span className="type-pill study-new-remaining-pill">新学剩余 {remaining.newRemaining}</span>
@@ -3264,6 +3291,20 @@ function StudyView(props: {
               <button className="rating known" disabled={Boolean(busy)} onClick={() => rate("known")}><CheckCircle2 />{busy === "rate-known" ? "提交中" : "认识"}</button>
             </div>
           )}
+          {roundResetOpen && (
+            <div className="modal-backdrop" role="presentation" onMouseDown={(event) => {
+              if (event.target === event.currentTarget) setRoundResetOpen(false);
+            }}>
+              <section className="modal-panel study-round-reset-dialog" role="dialog" aria-modal="true" aria-labelledby="study-round-reset-title">
+                <div className="modal-title"><h2 id="study-round-reset-title"><AlertTriangle />重置本轮学习数量</h2></div>
+                <p className="hint">当前本轮学习数量为 {roundStudyWords}。是否重置为 0？</p>
+                <div className="rating-row">
+                  <button type="button" className="primary-button secondary-button" onClick={() => setRoundResetOpen(false)}>取消</button>
+                  <button type="button" className="primary-button" onClick={resetRoundStudyWords}>确认重置</button>
+                </div>
+              </section>
+            </div>
+          )}
         </div>
       )}
     </section>
@@ -3364,7 +3405,8 @@ function CardFront(props: { card: Card }) {
   if (props.card.card_type === "blank") return <MarkdownText value={props.card.front} renderBlank={(key) => <span key={key} className="blank-dock-gap" />} />;
   if (props.card.card_type === "choice") return <MarkdownText value={props.card.front} />;
   if (!isWordCard(props.card)) return <span className="basic-face"><MarkdownText value={props.card.front} /></span>;
-  return <span className="word-face"><span className="word-text"><MarkdownText value={props.card.front} /></span>{props.card.phonetic && <em>{props.card.phonetic}</em>}</span>;
+  const phrase = isPhrasePartOfSpeech(props.card.back);
+  return <span className={`word-face ${phrase ? "phrase-face" : ""}`}><span className="word-text"><MarkdownText value={props.card.front} /></span>{props.card.phonetic && <em>{props.card.phonetic}</em>}</span>;
 }
 
 function CardBack(props: { card: Card; layout: Settings["studyChoiceLayout"]; showFront?: boolean }) {
@@ -3601,6 +3643,7 @@ function AboutView(props: { syncStatus: SyncStatus | null }) {
       <div className="schedule-box"><h3>同步状态</h3><p>最近同步：{props.syncStatus ? fullDateTime(props.syncStatus.lastSyncAt) : "暂无"} · 数据更新：{props.syncStatus?.dataUpdatedAt ? fullDateTime(props.syncStatus.dataUpdatedAt) : "暂无"}</p></div>
       <div className="schedule-box changelog-box">
         <h3>更新日志</h3>
+        <div className="changelog-row"><strong>0.8.4</strong><span>2026-07-22</span><p>修复单词卡正面行间距不生效的问题；短语词性卡片会适当缩小正面文字；本轮学习数量仅在点击胶囊并确认后重置，且会跨刷新保留。</p></div>
         <div className="changelog-row"><strong>0.8.3</strong><span>2026-07-22</span><p>学习记录 Markdown 聚焦题目与学习情况：仅保留正面、反面、大文件夹与子文件夹、新学/复习次数、每次选择及结束阶段。</p></div>
         <div className="changelog-row"><strong>0.8.2</strong><span>2026-07-22</span><p>修复宽屏上单词卡例句提前换行、右侧留下大块空白的问题，例句现在会使用单词卡的完整内容宽度。</p></div>
         <div className="changelog-row"><strong>0.8.1</strong><span>2026-07-22</span><p>设置页新增学习记录导出：可选择最近 14 天内的单日，默认前一天，并以 Markdown 保存题目详情、新学与复习次数、每次选择及结束后的阶段。</p></div>
