@@ -68,7 +68,7 @@ type BlankAnswerConfig = { version: 1; orderless: boolean; answers: string[][] }
 const maxDeckDepth = 5;
 const sessionCookieName = "flashcards_session";
 const sessionDays = 30;
-const appVersion = "0.8.6";
+const appVersion = "0.9.0";
 const timeZone = "Asia/Shanghai";
 const pronunciationCacheDir = process.env.PRONUNCIATION_CACHE_DIR ?? path.resolve(process.cwd(), "runtime/pronunciations");
 const doubaoTtsApiKey = process.env.DOUBAO_TTS_API_KEY ?? "";
@@ -2798,6 +2798,123 @@ function monthDailyMap(userId: number, state: GameState | null, monthId = monthI
     days.push({ date, completedTomatoes, focusMinutes, active, level });
   }
   return days;
+}
+
+function tomatoRecordDateKey(record: TomatoRecord) {
+  const dateText = String(record.date ?? "").slice(0, 10);
+  if (/^\d{4}-\d{2}-\d{2}$/.test(dateText)) return dateText;
+  const timestamp = String(record.createdAt ?? record.endTime ?? record.startedAt ?? "");
+  const date = new Date(timestamp);
+  return Number.isNaN(date.getTime()) ? null : shanghaiDateKey(date);
+}
+
+function activityCalendarPayload(userId: number, state: GameState | null, dayCount = 30) {
+  const endDate = shanghaiDateKey();
+  const dates = [endDate];
+  while (dates.length < dayCount) dates.unshift(previousShanghaiDateKey(dates[0]));
+  const dateSet = new Set(dates);
+  const claimedDailyTaskIdsByDate = new Map(dates.map((date) => [date, new Set<string>()]));
+  const dayMap = new Map(dates.map((date) => [date, {
+    date,
+    tomatoCount: 0,
+    focusMinutes: 0,
+    claimedDailyTasks: 0,
+    completedOrders: 0,
+    plantedCount: 0,
+    harvestedCount: 0,
+    openedCrates: 0,
+    checkedIn: false
+  }]));
+
+  tomatoRecords(userId).forEach((record) => {
+    const date = tomatoRecordDateKey(record);
+    if (!date || !dateSet.has(date)) return;
+    const day = dayMap.get(date);
+    if (!day) return;
+    day.tomatoCount += recordWeight(record);
+    day.focusMinutes += recordFocusMinutes(record);
+  });
+
+  if (state) {
+    state.operationStats.taskHistory.forEach((entry) => {
+      if (entry.type !== "daily") return;
+      const timestamp = new Date(entry.claimedAt);
+      if (Number.isNaN(timestamp.getTime())) return;
+      const taskIds = claimedDailyTaskIdsByDate.get(shanghaiDateKey(timestamp));
+      if (taskIds) taskIds.add(entry.taskId);
+    });
+    state.dailyOrders.completedOrderIds.forEach((orderId) => {
+      const date = orderId.replace("daily_basic_", "");
+      const day = dayMap.get(date);
+      if (day) day.completedOrders += 1;
+    });
+    state.events.forEach((event) => {
+      const timestamp = new Date(event.createdAt);
+      if (Number.isNaN(timestamp.getTime())) return;
+      const day = dayMap.get(shanghaiDateKey(timestamp));
+      if (!day) return;
+      if (event.type === "seed_planted") day.plantedCount += 1;
+      if (event.type === "planting_harvested") day.harvestedCount += 1;
+      if (event.type === "operation_check_in") day.checkedIn = true;
+      if (event.type === "task_board_reward_claimed" && event.taskId?.includes("task_daily_")) {
+        claimedDailyTaskIdsByDate.get(day.date)?.add(event.taskId);
+      }
+    });
+    state.supply.history.forEach((entry) => {
+      const timestamp = new Date(entry.createdAt);
+      if (Number.isNaN(timestamp.getTime())) return;
+      const day = dayMap.get(shanghaiDateKey(timestamp));
+      if (day) day.openedCrates += 1;
+    });
+    const lastActiveDate = state.operationStats.streak.lastActiveDate;
+    const lastActiveDay = lastActiveDate ? dayMap.get(lastActiveDate) : null;
+    if (lastActiveDay) lastActiveDay.checkedIn = true;
+  }
+
+  const days = dates.map((date) => {
+    const day = dayMap.get(date)!;
+    day.claimedDailyTasks = claimedDailyTaskIdsByDate.get(date)?.size ?? 0;
+    day.tomatoCount = Math.round(day.tomatoCount * 100) / 100;
+    day.focusMinutes = Math.round(day.focusMinutes);
+    const activityCount = day.tomatoCount
+      + day.focusMinutes / 60
+      + day.claimedDailyTasks
+      + day.completedOrders
+      + day.plantedCount
+      + day.harvestedCount
+      + day.openedCrates
+      + (day.checkedIn ? 1 : 0);
+    const status = activityCount >= 6 || day.tomatoCount >= 3
+      ? "active"
+      : activityCount >= 3
+        ? "steady"
+        : activityCount > 0
+          ? "light"
+          : "empty";
+    const highlights: string[] = [];
+    if (day.tomatoCount > 0) highlights.push(`完成 ${day.tomatoCount} 颗有效番茄`);
+    if (day.claimedDailyTasks > 0) highlights.push(`领取 ${day.claimedDailyTasks} 个每日任务`);
+    if (day.completedOrders > 0) highlights.push(`提交 ${day.completedOrders} 个每日订单`);
+    if (day.plantedCount > 0 || day.harvestedCount > 0) highlights.push(`播种 ${day.plantedCount} 次，收获 ${day.harvestedCount} 次`);
+    if (day.openedCrates > 0) highlights.push(`开启 ${day.openedCrates} 次补给`);
+    if (day.checkedIn) highlights.push("完成经营打卡");
+    return {
+      ...day,
+      status,
+      highlights: highlights.length ? highlights : ["这一天暂时没有经营记录"]
+    };
+  });
+
+  return {
+    ok: true,
+    initialized: Boolean(state),
+    range: {
+      startDate: dates[0],
+      endDate
+    },
+    serverToday: endDate,
+    days
+  };
 }
 
 function monthlyReportHighlights(summary: {
@@ -6250,6 +6367,16 @@ app.get("/api/game/monthly-report/current", (_req, res) => {
     res.json(monthlyReportPayload(userId, state));
   } catch (error) {
     res.status(500).json({ error: "无法读取本月经营月报" });
+  }
+});
+
+app.get("/api/game/activity-calendar/recent", (_req, res) => {
+  try {
+    const userId = currentUserId(res);
+    const state = readGameState(userId);
+    res.json(activityCalendarPayload(userId, state));
+  } catch (error) {
+    res.status(500).json({ error: "无法读取基地经营日历" });
   }
 });
 

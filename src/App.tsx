@@ -79,7 +79,7 @@ declare global {
   }
 }
 
-const version = "0.8.6";
+const version = "0.9.0";
 const logExportPressCount = 6;
 const logExportKey = "a";
 const logExportResetMs = 1800;
@@ -2607,6 +2607,10 @@ function StudyView(props: {
       setSessionCards(nextSessionCards);
       setQueue(nextQueue);
       setMasteredIds(finalMasteredIds);
+      if (nextQueue.length === 0 && document.fullscreenElement) {
+        document.exitFullscreen().catch(() => undefined);
+        setImmersive(false);
+      }
       setLongTermSubmittedIds(finalLongTermSubmittedIds);
       updateCurrentRoundStudyWords({ type: "answer", weight: answerWeight });
       setFlipped(false);
@@ -2907,6 +2911,31 @@ function StudyView(props: {
     setGrindMessage("已休息，准备好后再开始无尽学习。");
   }
 
+  async function handleRest() {
+    if (document.fullscreenElement) {
+      await new Promise<void>((resolve) => {
+        let settled = false;
+        const finish = () => {
+          if (settled) return;
+          settled = true;
+          window.clearTimeout(timeout);
+          document.removeEventListener("fullscreenchange", finish);
+          resolve();
+        };
+        const timeout = window.setTimeout(finish, 800);
+        document.addEventListener("fullscreenchange", finish);
+        document.exitFullscreen().catch(finish);
+      });
+      setImmersive(Boolean(document.fullscreenElement));
+    }
+    if (studyMode === "grind") {
+      resetSession();
+      setGrindMessage("已休息，准备好后再开始无尽学习。");
+    } else {
+      resetSession();
+    }
+  }
+
   function resetRoundStudyWords() {
     if (busyRef.current) return;
     updateCurrentRoundStudyWords({ type: "reset" });
@@ -2971,6 +3000,12 @@ function StudyView(props: {
         if (studyMode === "grind" && grindMessage.startsWith("无尽模式完成")) return;
         if (studyMode === "grind") startGrindSession();
         else startSession();
+        return;
+      }
+
+      if (event.key === "ArrowLeft" && !card && total > 0 && history.length > 0) {
+        event.preventDefault();
+        undo();
         return;
       }
 
@@ -3062,7 +3097,8 @@ function StudyView(props: {
               total={total}
               completed={completed}
               onRestart={() => studyMode === "grind" ? startGrindSession() : startSession()}
-              onRest={studyMode === "grind" ? restFromGrind : undefined}
+              onRest={handleRest}
+              onUndo={history.length > 0 ? undo : undefined}
               restartLabel={studyMode === "grind" ? "继续下一组" : "再来一轮"}
               busy={busy === "session"}
             />
@@ -3101,7 +3137,7 @@ function StudyView(props: {
                     />
                   </svg>
                 </div>
-                {studyMode === "grind" && <button type="button" className="type-pill study-round-count-pill" title="重置本轮学习数量" disabled={Boolean(busy)} onClick={() => setRoundResetOpen(true)}>本轮学习 {roundStudyWords}</button>}
+                {<button type="button" className="type-pill study-round-count-pill" title="重置本轮学习数量" disabled={Boolean(busy)} onClick={() => setRoundResetOpen(true)}>本轮学习 {roundStudyWords}</button>}
                 <span className="type-pill">{cardTypeLabels[card.card_type]}</span>
                 <span className="type-pill study-schedule-pill" title={`下次复习：${fullDateTime(card.due_at)}（${dueText(card.due_at)}）`}>{studyScheduleText(card)}</span>
                 <span className="type-pill study-new-remaining-pill">新学剩余 {remaining.newRemaining}</span>
@@ -3413,7 +3449,7 @@ function TextToolButton(props: { icon: ReactNode; title: string; active: boolean
   );
 }
 
-function StudyComplete(props: { total: number; completed: number; onRestart: () => void; onRest?: () => void; restartLabel?: string; busy: boolean }) {
+function StudyComplete(props: { total: number; completed: number; onRestart: () => void; onRest?: () => void; onUndo?: () => void; restartLabel?: string; busy: boolean }) {
   return (
     <section className="study-complete-panel">
       <div className="finish-burst" aria-hidden="true">
@@ -3425,6 +3461,7 @@ function StudyComplete(props: { total: number; completed: number; onRestart: () 
       <h2>{props.completed}/{props.total}</h2>
       <p>这一组已经全部掌握，今天的脑力很亮。</p>
       <div className="study-complete-actions">
+        {props.onUndo && <button className="primary-button secondary-button" disabled={props.busy} onClick={props.onUndo}><ArrowLeft />返回最后一个单词</button>}
         <button className="primary-button" disabled={props.busy} onClick={props.onRestart}><Sparkles />{props.busy ? "载入中" : props.restartLabel ?? "再来一轮"}</button>
         {props.onRest && <button className="primary-button secondary-button" disabled={props.busy} onClick={props.onRest}>休息一下</button>}
       </div>
@@ -3674,6 +3711,7 @@ function AboutView(props: { syncStatus: SyncStatus | null }) {
       <div className="schedule-box"><h3>同步状态</h3><p>最近同步：{props.syncStatus ? fullDateTime(props.syncStatus.lastSyncAt) : "暂无"} · 数据更新：{props.syncStatus?.dataUpdatedAt ? fullDateTime(props.syncStatus.dataUpdatedAt) : "暂无"}</p></div>
       <div className="schedule-box changelog-box">
         <h3>更新日志</h3>
+        <div className="changelog-row"><strong>0.9.0</strong><span>2026-07-23</span><p>一组完成后新增"返回最后一个单词"按钮（左方向键可触发）；休息一下和全部学完自动退出全屏并同步；学习模式和复习模式也显示本轮学习数量胶囊；移除胶囊在卡片切换时的变暗动效；修复页宽75%以上不起效的问题。</p></div>
         <div className="changelog-row"><strong>0.8.6</strong><span>2026-07-23</span><p>学习页宽仅调整卡片内文字的左右留白与显示宽度，保持卡片外框不变；修复手动重置本轮学习数量后，下一次作答又写回旧数值的问题。</p></div>
         <div className="changelog-row"><strong>0.8.5</strong><span>2026-07-22</span><p>学习卡片更多选项新增百分比页宽；修复填空题提交后数字评分键重新进入填写状态，以及含 LaTeX 分数的普通卡题面行间距不明显的问题。</p></div>
         <div className="changelog-row"><strong>0.8.4</strong><span>2026-07-22</span><p>修复单词卡正面行间距不生效的问题；短语词性卡片会适当缩小正面文字；本轮学习数量仅在点击胶囊并确认后重置，且会跨刷新保留。</p></div>
