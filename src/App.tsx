@@ -79,7 +79,7 @@ declare global {
   }
 }
 
-const version = "0.8.5";
+const version = "0.8.6";
 const logExportPressCount = 6;
 const logExportKey = "a";
 const logExportResetMs = 1800;
@@ -2147,6 +2147,7 @@ function StudyView(props: {
   const [masteredIds, setMasteredIds] = useState<number[]>([]);
   const [longTermSubmittedIds, setLongTermSubmittedIds] = useState<number[]>([]);
   const [roundStudyWords, setRoundStudyWords] = useState(() => storedRoundStudyWords(props.userId));
+  const roundStudyWordsRef = useRef(roundStudyWords);
   const [roundResetOpen, setRoundResetOpen] = useState(false);
   const [history, setHistory] = useState<Array<{
     card: Card;
@@ -2430,6 +2431,18 @@ function StudyView(props: {
     setCardMotion("entering");
   }
 
+  function setCurrentRoundStudyWords(nextValue: number) {
+    const next = Math.max(0, Math.floor(nextValue));
+    roundStudyWordsRef.current = next;
+    setRoundStudyWords(next);
+  }
+
+  function updateCurrentRoundStudyWords(action: Parameters<typeof updateGrindStudyWords>[1]) {
+    const next = updateGrindStudyWords(roundStudyWordsRef.current, action);
+    setCurrentRoundStudyWords(next);
+    return next;
+  }
+
   async function startSession(nextLimit = sessionLimit) {
     if (!props.selectedStudyDeckId || busyRef.current) return;
     busyRef.current = true;
@@ -2491,7 +2504,7 @@ function StudyView(props: {
       const continuingGroup = sessionCards.length > 0 && queue.length === 0;
       const nextGroupNumber = continuingGroup ? grindGroupNumber + 1 : 1;
       resetSession();
-      setRoundStudyWords((value) => updateGrindStudyWords(value, { type: "continue" }));
+      updateCurrentRoundStudyWords({ type: "continue" });
       setGrindGroupNumber(nextCards.length > 0 ? nextGroupNumber : 0);
       setGrindGroupStartedAt(nextCards.length > 0 ? startedAt : "");
       setSessionCards(nextCards);
@@ -2528,7 +2541,7 @@ function StudyView(props: {
     const beforeSessionCards = sessionCards;
     const beforeMasteredIds = masteredIds;
     const beforeLongTermSubmittedIds = longTermSubmittedIds;
-    const beforeRoundStudyWords = roundStudyWords;
+    const beforeRoundStudyWords = roundStudyWordsRef.current;
     try {
       const startedAsNew = beforeSessionCards.some((item) => item.id === card.id && item.stage <= 0);
       const alreadySubmitted = beforeLongTermSubmittedIds.includes(card.id);
@@ -2595,7 +2608,7 @@ function StudyView(props: {
       setQueue(nextQueue);
       setMasteredIds(finalMasteredIds);
       setLongTermSubmittedIds(finalLongTermSubmittedIds);
-      setRoundStudyWords(updateGrindStudyWords(beforeRoundStudyWords, { type: "answer", weight: answerWeight }));
+      updateCurrentRoundStudyWords({ type: "answer", weight: answerWeight });
       setFlipped(false);
       setAnswer("");
       setChecked(null);
@@ -2692,7 +2705,7 @@ function StudyView(props: {
       setQueue(previous.queue);
       setMasteredIds(previous.masteredIds);
       setLongTermSubmittedIds(previous.longTermSubmittedIds);
-      setRoundStudyWords(previous.roundStudyWords);
+      setCurrentRoundStudyWords(previous.roundStudyWords);
       setGrindGroupNumber(previous.grindGroupNumber);
       setGrindGroupStartedAt(previous.grindGroupStartedAt);
       setGrindMessage(previous.grindMessage);
@@ -2895,7 +2908,8 @@ function StudyView(props: {
   }
 
   function resetRoundStudyWords() {
-    setRoundStudyWords((value) => updateGrindStudyWords(value, { type: "reset" }));
+    if (busyRef.current) return;
+    updateCurrentRoundStudyWords({ type: "reset" });
     setRoundResetOpen(false);
   }
 
@@ -2950,7 +2964,7 @@ function StudyView(props: {
         && card?.card_type === "blank"
         && target?.matches("input.blank-inline-input")
       );
-      if ((editable && !submittedBlankInputShortcut) || editingStudyCard || pronunciationXmlOpen || event.metaKey || event.ctrlKey || event.altKey || busyRef.current) return;
+      if ((editable && !submittedBlankInputShortcut) || editingStudyCard || pronunciationXmlOpen || roundResetOpen || event.metaKey || event.ctrlKey || event.altKey || busyRef.current) return;
 
       if ((event.key === "ArrowRight" || event.key === " ") && !card && total > 0) {
         event.preventDefault();
@@ -2982,7 +2996,7 @@ function StudyView(props: {
 
     window.addEventListener("keydown", onKeyDown);
     return () => window.removeEventListener("keydown", onKeyDown);
-  }, [card?.id, card?.card_type, editingStudyCard, pronunciationXmlOpen, total, studyMode, grindMessage, showManualRatings, history.length, checked]);
+  }, [card?.id, card?.card_type, editingStudyCard, pronunciationXmlOpen, roundResetOpen, total, studyMode, grindMessage, showManualRatings, history.length, checked]);
 
   return (
     <section className={`stack study-view ${immersive ? "immersive" : ""}`}>
@@ -3087,7 +3101,7 @@ function StudyView(props: {
                     />
                   </svg>
                 </div>
-                {studyMode === "grind" && <button type="button" className="type-pill study-round-count-pill" title="重置本轮学习数量" onClick={() => setRoundResetOpen(true)}>本轮学习 {roundStudyWords}</button>}
+                {studyMode === "grind" && <button type="button" className="type-pill study-round-count-pill" title="重置本轮学习数量" disabled={Boolean(busy)} onClick={() => setRoundResetOpen(true)}>本轮学习 {roundStudyWords}</button>}
                 <span className="type-pill">{cardTypeLabels[card.card_type]}</span>
                 <span className="type-pill study-schedule-pill" title={`下次复习：${fullDateTime(card.due_at)}（${dueText(card.due_at)}）`}>{studyScheduleText(card)}</span>
                 <span className="type-pill study-new-remaining-pill">新学剩余 {remaining.newRemaining}</span>
@@ -3317,7 +3331,7 @@ function StudyView(props: {
                 <p className="hint">当前本轮学习数量为 {roundStudyWords}。是否重置为 0？</p>
                 <div className="rating-row">
                   <button type="button" className="primary-button secondary-button" onClick={() => setRoundResetOpen(false)}>取消</button>
-                  <button type="button" className="primary-button" onClick={resetRoundStudyWords}>确认重置</button>
+                  <button type="button" className="primary-button" disabled={Boolean(busy)} onClick={resetRoundStudyWords}>确认重置</button>
                 </div>
               </section>
             </div>
@@ -3660,6 +3674,7 @@ function AboutView(props: { syncStatus: SyncStatus | null }) {
       <div className="schedule-box"><h3>同步状态</h3><p>最近同步：{props.syncStatus ? fullDateTime(props.syncStatus.lastSyncAt) : "暂无"} · 数据更新：{props.syncStatus?.dataUpdatedAt ? fullDateTime(props.syncStatus.dataUpdatedAt) : "暂无"}</p></div>
       <div className="schedule-box changelog-box">
         <h3>更新日志</h3>
+        <div className="changelog-row"><strong>0.8.6</strong><span>2026-07-23</span><p>学习页宽仅调整卡片内文字的左右留白与显示宽度，保持卡片外框不变；修复手动重置本轮学习数量后，下一次作答又写回旧数值的问题。</p></div>
         <div className="changelog-row"><strong>0.8.5</strong><span>2026-07-22</span><p>学习卡片更多选项新增百分比页宽；修复填空题提交后数字评分键重新进入填写状态，以及含 LaTeX 分数的普通卡题面行间距不明显的问题。</p></div>
         <div className="changelog-row"><strong>0.8.4</strong><span>2026-07-22</span><p>修复单词卡正面行间距不生效的问题；短语词性卡片会适当缩小正面文字；本轮学习数量仅在点击胶囊并确认后重置，且会跨刷新保留。</p></div>
         <div className="changelog-row"><strong>0.8.3</strong><span>2026-07-22</span><p>学习记录 Markdown 聚焦题目与学习情况：仅保留正面、反面、大文件夹与子文件夹、新学/复习次数、每次选择及结束阶段。</p></div>

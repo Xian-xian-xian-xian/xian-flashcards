@@ -58,6 +58,11 @@ describe("学习数量加权", () => {
     expect(updateGrindStudyWords(8, { type: "answer", weight: 5 })).toBe(13);
     expect(updateGrindStudyWords(13, { type: "reset" })).toBe(0);
   });
+
+  it("手动重置后，下一次作答只从 0 开始累计", () => {
+    const reset = updateGrindStudyWords(13, { type: "reset" });
+    expect(updateGrindStudyWords(reset, { type: "answer", weight: 1 })).toBe(1);
+  });
 });
 
 describe("学习评分快捷键", () => {
