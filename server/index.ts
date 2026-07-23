@@ -4378,7 +4378,7 @@ function normalizeExistingCards(userId: number) {
     const currentType = normalizeCardType(card.card_type);
     let nextType: CardType | null = null;
     const parsedChoices = normalizeChoices(card.choices);
-    if (currentType !== "choice" && parsedChoices.length > 0) nextType = "choice";
+    if (currentType !== "choice" && currentType !== "blank" && parsedChoices.length > 0) nextType = "choice";
     else if ((currentType === "basic" || currentType === "word") && /(\[\s*\]|_{2,})/.test(String(card.front))) nextType = "blank";
     const finalType = nextType ?? currentType;
     const nextChoices = normalizedChoicePayload(finalType, parsedChoices, String(card.back));
