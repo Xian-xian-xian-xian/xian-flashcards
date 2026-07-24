@@ -79,7 +79,7 @@ declare global {
   }
 }
 
-const version = "0.9.0";
+const version = "0.8.8";
 const logExportPressCount = 6;
 const logExportKey = "a";
 const logExportResetMs = 1800;
@@ -2568,6 +2568,7 @@ function StudyView(props: {
       let nextQueue = nextStudyQueue(beforeQueue, card, rating, result);
       let finalMasteredIds = nextMasteredIds;
       let finalLongTermSubmittedIds = nextLongTermSubmittedIds;
+      let grindMoreAvailable = false;
       if (studyMode === "grind") {
         const interrupts = await dueReviewInterrupts(nextQueue, finalLongTermSubmittedIds);
         if (interrupts.length > 0) {
@@ -2579,6 +2580,7 @@ function StudyView(props: {
           const latestRemaining = await api.reviewRemaining(props.selectedStudyDeckId ?? undefined);
           if (latestRemaining.reviewRemaining > 0 || latestRemaining.newRemaining > 0) {
             setGrindMessage("本组完成，可以继续下一组或休息一下。");
+            grindMoreAvailable = true;
           } else {
             setGrindMessage("无尽模式完成：当前卡组下暂无到期复习卡和新卡。");
           }
@@ -2607,7 +2609,7 @@ function StudyView(props: {
       setSessionCards(nextSessionCards);
       setQueue(nextQueue);
       setMasteredIds(finalMasteredIds);
-      if (nextQueue.length === 0 && document.fullscreenElement) {
+      if (nextQueue.length === 0 && document.fullscreenElement && !grindMoreAvailable) {
         document.exitFullscreen().catch(() => undefined);
         setImmersive(false);
       }
@@ -3711,7 +3713,8 @@ function AboutView(props: { syncStatus: SyncStatus | null }) {
       <div className="schedule-box"><h3>同步状态</h3><p>最近同步：{props.syncStatus ? fullDateTime(props.syncStatus.lastSyncAt) : "暂无"} · 数据更新：{props.syncStatus?.dataUpdatedAt ? fullDateTime(props.syncStatus.dataUpdatedAt) : "暂无"}</p></div>
       <div className="schedule-box changelog-box">
         <h3>更新日志</h3>
-        <div className="changelog-row"><strong>0.9.0</strong><span>2026-07-23</span><p>一组完成后新增"返回最后一个单词"按钮（左方向键可触发）；休息一下和全部学完自动退出全屏并同步；学习模式和复习模式也显示本轮学习数量胶囊；移除胶囊在卡片切换时的变暗动效；修复页宽75%以上不起效的问题。</p></div>
+        <div className="changelog-row"><strong>0.8.8</strong><span>2026-07-24</span><p>单词卡页宽100%现在完全占满横屏页面；无尽模式一组完成后若还有可练习卡片则不退出全屏。</p></div>
+        <div className="changelog-row"><strong>0.8.7</strong><span>2026-07-23</span><p>一组完成后新增"返回最后一个单词"按钮（左方向键可触发）；休息一下和全部学完自动退出全屏并同步；学习模式和复习模式也显示本轮学习数量胶囊；移除胶囊在卡片切换时的变暗动效；修复页宽75%以上不起效的问题。</p></div>
         <div className="changelog-row"><strong>0.8.6</strong><span>2026-07-23</span><p>学习页宽仅调整卡片内文字的左右留白与显示宽度，保持卡片外框不变；修复手动重置本轮学习数量后，下一次作答又写回旧数值的问题。</p></div>
         <div className="changelog-row"><strong>0.8.5</strong><span>2026-07-22</span><p>学习卡片更多选项新增百分比页宽；修复填空题提交后数字评分键重新进入填写状态，以及含 LaTeX 分数的普通卡题面行间距不明显的问题。</p></div>
         <div className="changelog-row"><strong>0.8.4</strong><span>2026-07-22</span><p>修复单词卡正面行间距不生效的问题；短语词性卡片会适当缩小正面文字；本轮学习数量仅在点击胶囊并确认后重置，且会跨刷新保留。</p></div>

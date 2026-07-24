@@ -2242,7 +2242,7 @@ textarea:focus {
   display: grid;
   gap: 10px;
   justify-items: center;
-  width: min(min(var(--study-word-content-max), 45vw), max(280px, var(--study-page-width)), 100%);
+  width: min(var(--study-word-content-max), max(280px, var(--study-page-width)), 100%);
   font-size: inherit;
 }
 

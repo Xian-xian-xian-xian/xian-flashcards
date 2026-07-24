@@ -1,6 +1,6 @@
 {
   "name": "xian-flashcards",
-  "version": "0.9.1",
+  "version": "0.8.8",
   "private": true,
   "type": "module",
   "scripts": {
