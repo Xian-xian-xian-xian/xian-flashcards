@@ -2368,7 +2368,8 @@ function StudyView(props: {
       panel.style.setProperty("--rating-toast-right", `${Math.max(0, panelRect.right - cardRect.right + inset)}px`);
       panel.style.setProperty("--rating-toast-bottom", `${Math.max(0, panelRect.bottom - cardRect.bottom + inset)}px`);
       panel.style.setProperty("--rating-toast-max-width", `${Math.max(220, cardRect.width - inset * 2)}px`);
-      const contentWidth = Math.round(panelRect.width * props.studyPageWidth);
+      const parentWidth = panel.parentElement?.clientWidth ?? panelRect.width;
+      const contentWidth = Math.round(parentWidth * props.studyPageWidth);
       panel.style.setProperty("--study-content-width", `${contentWidth}px`);
     };
 
