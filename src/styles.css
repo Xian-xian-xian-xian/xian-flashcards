@@ -1957,7 +1957,7 @@ textarea:focus {
 }
 
 .flip-card-face > span {
-  width: min(min(840px, 50vw), max(280px, var(--study-page-width)), 100%);
+  width: min(max(280px, var(--study-page-width)), 100%);
   font-size: clamp(var(--study-face-min), 8vw, var(--study-face-max));
   font-weight: 950;
 }
@@ -1998,7 +1998,7 @@ textarea:focus {
 }
 
 .flip-card-face .basic-back.two-column-back {
-  width: min(min(980px, 57vw), max(280px, var(--study-page-width)), 100%);
+  width: min(max(280px, var(--study-page-width)), 100%);
 }
 
 .flip-card-face .basic-answer {
@@ -2436,22 +2436,22 @@ body.resizing-answer-dock .question-dock-resizer::after {
 
 .choice-question.short .question-text,
 .choice-question.short .question-note {
-  width: min(min(680px, 42vw), max(280px, var(--study-page-width)), 100%);
+  width: min(max(280px, var(--study-page-width)), 100%);
 }
 
 .choice-question.medium .question-text,
 .choice-question.medium .question-note {
-  width: min(min(860px, 51vw), max(280px, var(--study-page-width)), 100%);
+  width: min(max(280px, var(--study-page-width)), 100%);
 }
 
 .choice-question.long .question-text,
 .choice-question.long .question-note {
-  width: min(min(940px, 55vw), max(280px, var(--study-page-width)), 100%);
+  width: min(max(280px, var(--study-page-width)), 100%);
 }
 
 .question-box p,
 .question-text {
-  width: min(min(840px, 50vw), max(280px, var(--study-page-width)), 100%);
+  width: min(max(280px, var(--study-page-width)), 100%);
   margin: 0;
   font-size: var(--study-question-size);
   font-weight: 900;
@@ -2464,7 +2464,7 @@ body.resizing-answer-dock .question-dock-resizer::after {
 
 .question-box small,
 .question-note {
-  width: min(min(840px, 50vw), max(280px, var(--study-page-width)), 100%);
+  width: min(max(280px, var(--study-page-width)), 100%);
   font-size: var(--study-small-size);
   color: var(--muted);
 }
@@ -2472,7 +2472,7 @@ body.resizing-answer-dock .question-dock-resizer::after {
 .blank-answer-form {
   display: grid;
   justify-items: center;
-  width: min(min(840px, 50vw), max(280px, var(--study-page-width)), 100%);
+  width: min(max(280px, var(--study-page-width)), 100%);
   gap: 16px;
 }
 
@@ -2546,16 +2546,16 @@ body.resizing-answer-dock .question-dock-resizer::after {
 
 .choice-area {
   display: grid;
-  width: min(min(680px, 42vw), max(280px, var(--study-page-width)), 100%);
+  width: min(max(280px, var(--study-page-width)), 100%);
   gap: 12px;
 }
 
 .choice-area.medium {
-  width: min(min(860px, 51vw), max(280px, var(--study-page-width)), 100%);
+  width: min(max(280px, var(--study-page-width)), 100%);
 }
 
 .choice-area.long {
-  width: min(min(940px, 55vw), max(280px, var(--study-page-width)), 100%);
+  width: min(max(280px, var(--study-page-width)), 100%);
 }
 
 .choice-grid {
