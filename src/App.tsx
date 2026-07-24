@@ -2368,6 +2368,8 @@ function StudyView(props: {
       panel.style.setProperty("--rating-toast-right", `${Math.max(0, panelRect.right - cardRect.right + inset)}px`);
       panel.style.setProperty("--rating-toast-bottom", `${Math.max(0, panelRect.bottom - cardRect.bottom + inset)}px`);
       panel.style.setProperty("--rating-toast-max-width", `${Math.max(220, cardRect.width - inset * 2)}px`);
+      const contentWidth = Math.round(panelRect.width * props.studyPageWidth);
+      panel.style.setProperty("--study-content-width", `${contentWidth}px`);
     };
 
     updateAnchor();
@@ -2385,7 +2387,7 @@ function StudyView(props: {
       document.removeEventListener("fullscreenchange", updateAnchor);
       scrollElement?.removeEventListener("scroll", updateAnchor);
     };
-  }, [card?.id, cardRevision, flipped, checked, answerDockOpen, answerDockWidth, immersive, props.studyChoiceLayout, props.studyTextScale, props.studyTextAlign, props.studyLineHeight, props.studyFontFamily]);
+  }, [card?.id, cardRevision, flipped, checked, answerDockOpen, answerDockWidth, immersive, props.studyChoiceLayout, props.studyTextScale, props.studyTextAlign, props.studyLineHeight, props.studyFontFamily, props.studyPageWidth]);
 
   useEffect(() => {
     setScaleDraft(props.studyTextScale);
