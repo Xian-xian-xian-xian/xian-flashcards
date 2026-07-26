@@ -79,7 +79,7 @@ declare global {
   }
 }
 
-const version = "0.8.8";
+const version = "0.8.9";
 const logExportPressCount = 6;
 const logExportKey = "a";
 const logExportResetMs = 1800;
@@ -2364,10 +2364,12 @@ function StudyView(props: {
     const updateAnchor = () => {
       const panelRect = panel.getBoundingClientRect();
       const cardRect = cardFrame.getBoundingClientRect();
+      const referenceRect = showReferenceDock ? answerLayoutRef.current?.getBoundingClientRect() : undefined;
       const inset = 8;
-      panel.style.setProperty("--rating-toast-right", `${Math.max(0, panelRect.right - cardRect.right + inset)}px`);
+      const rightEdge = referenceRect?.right ?? cardRect.right;
+      panel.style.setProperty("--rating-toast-right", `${Math.max(0, panelRect.right - rightEdge + inset)}px`);
       panel.style.setProperty("--rating-toast-bottom", `${Math.max(0, panelRect.bottom - cardRect.bottom + inset)}px`);
-      panel.style.setProperty("--rating-toast-max-width", `${Math.max(220, cardRect.width - inset * 2)}px`);
+      panel.style.setProperty("--rating-toast-max-width", `${Math.max(220, (referenceRect?.width ?? cardRect.width) - inset * 2)}px`);
       // Content width is now computed in CSS via calc(100% * var(--study-page-width))
     };
 
@@ -2386,7 +2388,7 @@ function StudyView(props: {
       document.removeEventListener("fullscreenchange", updateAnchor);
       scrollElement?.removeEventListener("scroll", updateAnchor);
     };
-  }, [card?.id, cardRevision, flipped, checked, answerDockOpen, answerDockWidth, immersive, props.studyChoiceLayout, props.studyTextScale, props.studyTextAlign, props.studyLineHeight, props.studyFontFamily]);
+  }, [card?.id, cardRevision, flipped, checked, answerDockOpen, answerDockWidth, showReferenceDock, immersive, props.studyChoiceLayout, props.studyTextScale, props.studyTextAlign, props.studyLineHeight, props.studyFontFamily]);
 
   useEffect(() => {
     setScaleDraft(props.studyTextScale);
@@ -3414,7 +3416,7 @@ function RatingNotice(props: { feedback: RatingFeedback; onClose: () => void }) 
 
 function QuestionDock(props: { card: Card; choices?: string[]; selected: string; answer: string; onResize: (event: ReactPointerEvent<HTMLButtonElement>) => void; onClose: () => void }) {
   return (
-    <aside className="question-dock" aria-label="题目参考">
+    <aside className={`question-dock ${props.card.card_type}-question-dock`} aria-label="题目参考">
       <button className="question-dock-resizer" type="button" aria-label="调整题目参考宽度" onPointerDown={props.onResize} />
       <div className="question-dock-title">
         <span>题目参考</span>
@@ -3464,7 +3466,7 @@ function StudyComplete(props: { total: number; completed: number; onRestart: () 
       <h2>{props.completed}/{props.total}</h2>
       <p>这一组已经全部掌握，今天的脑力很亮。</p>
       <div className="study-complete-actions">
-        {props.onUndo && <button className="primary-button secondary-button" disabled={props.busy} onClick={props.onUndo}><ArrowLeft />返回最后一个单词</button>}
+        {props.onUndo && <button className="primary-button secondary-button" disabled={props.busy} onClick={props.onUndo}><ArrowLeft />返回最后一张卡片</button>}
         <button className="primary-button" disabled={props.busy} onClick={props.onRestart}><Sparkles />{props.busy ? "载入中" : props.restartLabel ?? "再来一轮"}</button>
         {props.onRest && <button className="primary-button secondary-button" disabled={props.busy} onClick={props.onRest}>休息一下</button>}
       </div>
@@ -3491,7 +3493,7 @@ function CardBack(props: { card: Card; layout: Settings["studyChoiceLayout"]; sh
     );
   }
   return (
-    <span className="word-back">
+    <span className={`word-back ${isPhrasePartOfSpeech(props.card.back) ? "phrase-back" : ""}`}>
       <span className="word-text"><MarkdownText value={props.card.front} /></span>
       {props.card.phonetic && <em>{props.card.phonetic}</em>}
       <span className="word-meaning"><MarkdownText value={props.card.back} /></span>
@@ -3714,6 +3716,7 @@ function AboutView(props: { syncStatus: SyncStatus | null }) {
       <div className="schedule-box"><h3>同步状态</h3><p>最近同步：{props.syncStatus ? fullDateTime(props.syncStatus.lastSyncAt) : "暂无"} · 数据更新：{props.syncStatus?.dataUpdatedAt ? fullDateTime(props.syncStatus.dataUpdatedAt) : "暂无"}</p></div>
       <div className="schedule-box changelog-box">
         <h3>更新日志</h3>
+        <div className="changelog-row"><strong>0.8.9</strong><span>2026-07-26</span><p>完成页“返回最后一个单词”更正为“返回最后一张卡片”；短语词性单词卡正反面标题字号统一缩小；普通、填空和选择题的题目参考字号、间距及答题提示对齐同步优化。</p></div>
         <div className="changelog-row"><strong>0.8.8</strong><span>2026-07-24</span><p>单词卡页宽100%现在完全占满横屏页面；无尽模式一组完成后若还有可练习卡片则不退出全屏。</p></div>
         <div className="changelog-row"><strong>0.8.7</strong><span>2026-07-23</span><p>一组完成后新增"返回最后一个单词"按钮（左方向键可触发）；休息一下和全部学完自动退出全屏并同步；学习模式和复习模式也显示本轮学习数量胶囊；移除胶囊在卡片切换时的变暗动效；修复页宽75%以上不起效的问题。</p></div>
         <div className="changelog-row"><strong>0.8.6</strong><span>2026-07-23</span><p>学习页宽仅调整卡片内文字的左右留白与显示宽度，保持卡片外框不变；修复手动重置本轮学习数量后，下一次作答又写回旧数值的问题。</p></div>
