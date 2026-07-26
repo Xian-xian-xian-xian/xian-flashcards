@@ -79,7 +79,7 @@ declare global {
   }
 }
 
-const version = "0.8.9";
+const version = "0.8.10";
 const logExportPressCount = 6;
 const logExportKey = "a";
 const logExportResetMs = 1800;
@@ -2364,7 +2364,8 @@ function StudyView(props: {
     const updateAnchor = () => {
       const panelRect = panel.getBoundingClientRect();
       const cardRect = cardFrame.getBoundingClientRect();
-      const referenceRect = showReferenceDock ? answerLayoutRef.current?.getBoundingClientRect() : undefined;
+      const answerLayout = answerLayoutRef.current;
+      const referenceRect = answerLayout?.classList.contains("with-dock") ? answerLayout.getBoundingClientRect() : undefined;
       const inset = 8;
       const rightEdge = referenceRect?.right ?? cardRect.right;
       panel.style.setProperty("--rating-toast-right", `${Math.max(0, panelRect.right - rightEdge + inset)}px`);
@@ -2388,7 +2389,7 @@ function StudyView(props: {
       document.removeEventListener("fullscreenchange", updateAnchor);
       scrollElement?.removeEventListener("scroll", updateAnchor);
     };
-  }, [card?.id, cardRevision, flipped, checked, answerDockOpen, answerDockWidth, showReferenceDock, immersive, props.studyChoiceLayout, props.studyTextScale, props.studyTextAlign, props.studyLineHeight, props.studyFontFamily]);
+  }, [card?.id, cardRevision, flipped, checked, answerDockOpen, answerDockWidth, immersive, props.studyChoiceLayout, props.studyTextScale, props.studyTextAlign, props.studyLineHeight, props.studyFontFamily]);
 
   useEffect(() => {
     setScaleDraft(props.studyTextScale);
@@ -3716,6 +3717,7 @@ function AboutView(props: { syncStatus: SyncStatus | null }) {
       <div className="schedule-box"><h3>同步状态</h3><p>最近同步：{props.syncStatus ? fullDateTime(props.syncStatus.lastSyncAt) : "暂无"} · 数据更新：{props.syncStatus?.dataUpdatedAt ? fullDateTime(props.syncStatus.dataUpdatedAt) : "暂无"}</p></div>
       <div className="schedule-box changelog-box">
         <h3>更新日志</h3>
+        <div className="changelog-row"><strong>0.8.10</strong><span>2026-07-26</span><p>修复进入学习界面时可能显示空白页的问题。</p></div>
         <div className="changelog-row"><strong>0.8.9</strong><span>2026-07-26</span><p>完成页“返回最后一个单词”更正为“返回最后一张卡片”；短语词性单词卡正反面标题字号统一缩小；普通、填空和选择题的题目参考字号、间距及答题提示对齐同步优化。</p></div>
         <div className="changelog-row"><strong>0.8.8</strong><span>2026-07-24</span><p>单词卡页宽100%现在完全占满横屏页面；无尽模式一组完成后若还有可练习卡片则不退出全屏。</p></div>
         <div className="changelog-row"><strong>0.8.7</strong><span>2026-07-23</span><p>一组完成后新增"返回最后一个单词"按钮（左方向键可触发）；休息一下和全部学完自动退出全屏并同步；学习模式和复习模式也显示本轮学习数量胶囊；移除胶囊在卡片切换时的变暗动效；修复页宽75%以上不起效的问题。</p></div>
