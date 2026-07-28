@@ -79,7 +79,7 @@ declare global {
   }
 }
 
-const version = "0.8.10";
+const version = "0.8.11";
 const logExportPressCount = 6;
 const logExportKey = "a";
 const logExportResetMs = 1800;
@@ -1976,7 +1976,7 @@ function CardEditor(props: { card?: Card; layout?: "default" | "single"; onSubmi
       )}
       {cardType === "choice" && (
         <EditorField label="选项">
-          <SmartTextField value={choices} onChange={setChoices} placeholder="用 |、; 分隔，或一行一个选项" multilineThreshold={28} />
+          <SmartTextField value={choices} onChange={setChoices} placeholder="用 |、; 分隔，或一行一个选项" multilineThreshold={28} allowImageInsert />
         </EditorField>
       )}
       {cardType === "word" && (
@@ -2026,11 +2026,11 @@ function CardEditor(props: { card?: Card; layout?: "default" | "single"; onSubmi
       </EditorField>
       {cardType === "word" && (
         <EditorField label="助记">
-          <SmartTextField value={mnemonic} onChange={setMnemonic} placeholder="可选" />
+          <SmartTextField value={mnemonic} onChange={setMnemonic} placeholder="可选" allowImageInsert />
         </EditorField>
       )}
       <EditorField label="备注">
-        <SmartTextField value={note} onChange={setNote} placeholder="可选" />
+        <SmartTextField value={note} onChange={setNote} placeholder="可选" allowImageInsert />
       </EditorField>
       <button className="primary-button" disabled={saving}>{props.card ? <Save /> : <Plus />}{saving ? "处理中" : props.card ? "保存" : "添加"}</button>
       {props.onCancel && <button className="primary-button secondary-button" type="button" disabled={saving} onClick={props.onCancel}><XCircle />取消</button>}
@@ -3490,6 +3490,7 @@ function CardBack(props: { card: Card; layout: Settings["studyChoiceLayout"]; sh
         {props.showFront && <span className="basic-face"><MarkdownText value={props.card.front} /></span>}
         <span className="basic-answer"><MarkdownText value={props.card.back} /></span>
         {props.card.example && <small><MarkdownText value={props.card.example} /></small>}
+        <LabeledMarkdown label="备注" value={props.card.note} />
       </span>
     );
   }
@@ -3717,6 +3718,7 @@ function AboutView(props: { syncStatus: SyncStatus | null }) {
       <div className="schedule-box"><h3>同步状态</h3><p>最近同步：{props.syncStatus ? fullDateTime(props.syncStatus.lastSyncAt) : "暂无"} · 数据更新：{props.syncStatus?.dataUpdatedAt ? fullDateTime(props.syncStatus.dataUpdatedAt) : "暂无"}</p></div>
       <div className="schedule-box changelog-box">
         <h3>更新日志</h3>
+        <div className="changelog-row"><strong>0.8.11</strong><span>2026-07-28</span><p>LaTeX 公式字号略小于正文；卡片全部内容（含普通卡说明、备注与选项）统一支持 Markdown 和图片；每组学习完成页现在填满可视区域。</p></div>
         <div className="changelog-row"><strong>0.8.10</strong><span>2026-07-26</span><p>修复进入学习界面时可能显示空白页的问题。</p></div>
         <div className="changelog-row"><strong>0.8.9</strong><span>2026-07-26</span><p>完成页“返回最后一个单词”更正为“返回最后一张卡片”；短语词性单词卡正反面标题字号统一缩小；普通、填空和选择题的题目参考字号、间距及答题提示对齐同步优化。</p></div>
         <div className="changelog-row"><strong>0.8.8</strong><span>2026-07-24</span><p>单词卡页宽100%现在完全占满横屏页面；无尽模式一组完成后若还有可练习卡片则不退出全屏。</p></div>

@@ -2125,7 +2125,7 @@ textarea:focus {
   border: 1px solid color-mix(in srgb, var(--yellow), transparent 45%);
   border-radius: 8px;
   background: color-mix(in srgb, var(--yellow), transparent 88%);
-  font-size: 1.08em;
+  font-size: 1em;
   line-height: var(--study-line-height, 1.5);
   text-align: center;
 }
@@ -2139,7 +2139,9 @@ textarea:focus {
   line-height: inherit;
 }
 
-.math-block .katex {
+.math-block .katex,
+.math-inline .katex {
+  font-size: 0.92em;
   line-height: inherit;
 }
 
@@ -2814,7 +2816,8 @@ body.resizing-answer-dock .question-dock-resizer::after {
 .study-complete-panel {
   position: relative;
   display: grid;
-  min-height: min(620px, calc(100vh - 220px));
+  min-height: calc(100vh - 220px);
+  min-height: calc(100dvh - 220px);
   place-items: center;
   overflow: hidden;
   padding: clamp(28px, 6vw, 72px) 22px;
@@ -4059,7 +4062,8 @@ textarea {
   }
 
   .study-complete-panel {
-    min-height: min(520px, calc(100vh - 150px));
+    min-height: calc(100vh - 150px);
+    min-height: calc(100dvh - 150px);
     padding: 28px 16px;
   }
 }
