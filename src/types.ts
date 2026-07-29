@@ -35,6 +35,7 @@ export type Card = {
   note: string;
   choices: string;
   favorite: number;
+  paused: number;
   created_at: string;
   updated_at: string;
   stage: number;

@@ -10,6 +10,7 @@ export type CardPayload = {
   note?: string;
   choices?: string | string[] | BlankAnswerConfig;
   favorite?: number;
+  paused?: number;
   baseUpdatedAt?: string;
   force?: boolean;
 };
@@ -71,6 +72,7 @@ export const api = {
     request<{ ok: true }>(`/api/decks/${id}`, { method: "PATCH", body: JSON.stringify(payload) }),
   deleteDeck: (id: number) => request<{ ok: true }>(`/api/decks/${id}`, { method: "DELETE" }),
   cards: (deckId: number) => request<Card[]>(`/api/decks/${deckId}/cards`),
+  pausedCards: (deckId: number) => request<Card[]>(`/api/decks/${deckId}/cards?scope=descendants&paused=1`),
   createCard: (deckId: number, payload: CardPayload) =>
     request<{ id: number }>(`/api/decks/${deckId}/cards`, { method: "POST", body: JSON.stringify(payload) }),
   uploadCardImage: (file: File) => {

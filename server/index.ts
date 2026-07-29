@@ -68,7 +68,7 @@ type BlankAnswerConfig = { version: 1; orderless: boolean; answers: string[][] }
 const maxDeckDepth = 5;
 const sessionCookieName = "flashcards_session";
 const sessionDays = 30;
-const appVersion = "0.8.11";
+const appVersion = "0.8.12";
 const timeZone = "Asia/Shanghai";
 const pronunciationCacheDir = process.env.PRONUNCIATION_CACHE_DIR ?? path.resolve(process.cwd(), "runtime/pronunciations");
 const doubaoTtsApiKey = process.env.DOUBAO_TTS_API_KEY ?? "";
@@ -4402,7 +4402,7 @@ function deckRows(userId: number) {
   const decks = all<Record<string, SqlValue>>(
     `SELECT d.*,
       COUNT(c.id) AS card_count,
-      COALESCE(SUM(CASE WHEN r.due_at <= ? THEN 1 ELSE 0 END), 0) AS due_count,
+      COALESCE(SUM(CASE WHEN r.due_at <= ? AND c.paused = 0 THEN 1 ELSE 0 END), 0) AS due_count,
       (SELECT COUNT(*) FROM decks child WHERE child.parent_id = d.id) AS child_count
      FROM decks d
      LEFT JOIN cards c ON c.deck_id = d.id AND c.user_id = d.user_id
@@ -4469,7 +4469,7 @@ function reviewRemainingCounts(userId: number, deckId?: number) {
        COALESCE(SUM(CASE WHEN r.stage > 0 THEN 1 ELSE 0 END), 0) AS review_remaining
      FROM cards c
      JOIN reviews r ON r.card_id = c.id
-     WHERE c.user_id = ? AND r.due_at <= ? ${deckFilter}`,
+     WHERE c.user_id = ? AND c.paused = 0 AND r.due_at <= ? ${deckFilter}`,
     params
   );
   return {
@@ -4635,7 +4635,7 @@ function dueReviewIdsForToday(userId: number, now = nowIso()) {
     `SELECT c.id
      FROM cards c
      JOIN reviews r ON r.card_id = c.id
-     WHERE c.user_id = ? AND r.due_at <= ? AND r.stage > 0`,
+     WHERE c.user_id = ? AND c.paused = 0 AND r.due_at <= ? AND r.stage > 0`,
     [userId, now]
   ).map((row) => Number(row.id));
 }
@@ -4793,6 +4793,26 @@ function removeDailyNewCard(userId: number, cardId: number) {
       JSON.stringify([...newIds]),
       JSON.stringify([...newMasteredIds]),
       now,
+      userId,
+      task.date
+    ]
+  );
+}
+
+function removeCardFromTodayTaskQueues(userId: number, cardId: number) {
+  const task = get<DailyTaskRow>("SELECT * FROM daily_tasks WHERE user_id = ? AND date = ?", [userId, shanghaiDateKey()]);
+  if (!task) return;
+  const remove = (value: unknown) => parseJsonArray(String(value ?? "[]")).filter((id) => id !== cardId);
+  run(
+    `UPDATE daily_tasks
+     SET review_card_ids = ?, new_card_ids = ?, new_mastered_card_ids = ?, review_mastered_card_ids = ?, completed_at = '', updated_at = ?
+     WHERE user_id = ? AND date = ?`,
+    [
+      JSON.stringify(remove(task.review_card_ids)),
+      JSON.stringify(remove(task.new_card_ids)),
+      JSON.stringify(remove(task.new_mastered_card_ids)),
+      JSON.stringify(remove(task.review_mastered_card_ids)),
+      nowIso(),
       userId,
       task.date
     ]
@@ -6610,7 +6630,18 @@ app.delete("/api/decks/:id", (req, res) => {
 });
 
 app.get("/api/decks/:id/cards", (req, res) => {
-  res.json(cardRows(currentUserId(res), "AND c.deck_id = ?", [Number(req.params.id)]));
+  const userId = currentUserId(res);
+  const deckId = Number(req.params.id);
+  if (req.query.scope === "descendants" && req.query.paused === "1") {
+    const deckIds = descendantDeckIds(userId, deckId);
+    if (deckIds.length === 0) {
+      res.json([]);
+      return;
+    }
+    res.json(cardRows(userId, `AND c.deck_id IN (${deckIds.map(() => "?").join(",")}) AND c.paused = 1`, deckIds));
+    return;
+  }
+  res.json(cardRows(userId, "AND c.deck_id = ?", [deckId]));
 });
 
 app.post("/api/decks/:id/cards", (req, res) => {
@@ -6646,6 +6677,9 @@ app.patch("/api/cards/:id", (req, res) => {
   const nextChoices = req.body.choices === undefined && req.body.card_type === undefined && req.body.back === undefined && req.body.front === undefined
     ? null
     : JSON.stringify(normalizedCardOptionsPayload(effectiveType, optionSource, effectiveBack, effectiveFront));
+  const paused = typeof req.body.paused === "boolean" || typeof req.body.paused === "number"
+    ? Number(Boolean(req.body.paused))
+    : null;
   run(
     `UPDATE cards
      SET card_type = COALESCE(?, card_type),
@@ -6657,6 +6691,7 @@ app.patch("/api/cards/:id", (req, res) => {
          note = COALESCE(?, note),
          choices = COALESCE(?, choices),
          favorite = COALESCE(?, favorite),
+         paused = COALESCE(?, paused),
          updated_at = ?
      WHERE id = ? AND user_id = ?`,
     [
@@ -6671,11 +6706,13 @@ app.patch("/api/cards/:id", (req, res) => {
       typeof req.body.favorite === "boolean" || typeof req.body.favorite === "number"
         ? Number(req.body.favorite)
         : null,
+      paused,
       nowIso(),
       cardId,
       userId
     ]
   );
+  if (paused === 1) removeCardFromTodayTaskQueues(userId, cardId);
   res.json({ ok: true, card: cardRow(userId, cardId) });
 });
 
@@ -6820,8 +6857,8 @@ app.get("/api/reviews/due", (req, res) => {
   }
   const stageFilter = kind === "review" ? "AND r.stage > 0" : kind === "new" ? "AND r.stage = 0" : "";
   const where = deckId && deckIds.length
-    ? `WHERE c.user_id = ? AND c.deck_id IN (${deckIds.map(() => "?").join(",")}) AND r.due_at <= ? ${stageFilter}`
-    : `WHERE c.user_id = ? AND r.due_at <= ? ${stageFilter}`;
+    ? `WHERE c.user_id = ? AND c.paused = 0 AND c.deck_id IN (${deckIds.map(() => "?").join(",")}) AND r.due_at <= ? ${stageFilter}`
+    : `WHERE c.user_id = ? AND c.paused = 0 AND r.due_at <= ? ${stageFilter}`;
   const params = deckId && deckIds.length ? [userId, ...deckIds, now, limit] : [userId, now, limit];
   const cards = all(
     `SELECT c.*, d.language, r.stage, r.due_at, r.last_rating, r.known_count, r.fuzzy_count, r.unknown_count
@@ -6855,7 +6892,7 @@ app.post("/api/reviews/:cardId/answer", (req, res) => {
      FROM reviews r
      JOIN cards c ON c.id = r.card_id
      JOIN decks d ON d.id = c.deck_id
-     WHERE r.card_id = ? AND c.user_id = ?`,
+     WHERE r.card_id = ? AND c.user_id = ? AND c.paused = 0`,
     [Number(req.params.cardId), userId]
   );
   if (!current) {
@@ -6909,7 +6946,7 @@ app.post("/api/reviews/:cardId/practice", (req, res) => {
     return;
   }
   const card = cardRow(userId, cardId);
-  if (!card) {
+  if (!card || Number(card.paused) === 1) {
     res.status(404).json({ error: "复习记录不存在" });
     return;
   }
@@ -7013,7 +7050,7 @@ app.get("/api/sync/status", (_req, res) => {
 });
 
 app.get("/api/stats", (_req, res) => {
-  const row = get("SELECT COUNT(c.id) AS total_cards, COALESCE(SUM(CASE WHEN r.stage >= 10 THEN 1 ELSE 0 END), 0) AS mastered_cards, COALESCE(SUM(CASE WHEN r.due_at <= ? THEN 1 ELSE 0 END), 0) AS due_cards FROM cards c JOIN reviews r ON r.card_id = c.id WHERE c.user_id = ?", [
+  const row = get("SELECT COUNT(c.id) AS total_cards, COALESCE(SUM(CASE WHEN r.stage >= 10 THEN 1 ELSE 0 END), 0) AS mastered_cards, COALESCE(SUM(CASE WHEN r.due_at <= ? AND c.paused = 0 THEN 1 ELSE 0 END), 0) AS due_cards FROM cards c JOIN reviews r ON r.card_id = c.id WHERE c.user_id = ?", [
     nowIso(),
     currentUserId(res)
   ]);

@@ -1833,6 +1833,36 @@ textarea:focus {
   box-shadow: none;
 }
 
+.study-paused-controls {
+  display: grid;
+  justify-items: start;
+  gap: 8px;
+}
+
+.study-paused-card-list {
+  display: grid;
+  width: min(100%, 680px);
+  gap: 6px;
+  padding: 8px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--surface-2);
+}
+
+.study-paused-card-list > div {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 8px;
+  border-radius: 6px;
+  background: var(--surface);
+}
+
+.study-paused-card-list .markdown-text {
+  font-size: 14px;
+}
+
 .study-session-controls {
   grid-template-columns: minmax(180px, 260px) minmax(160px, 220px) minmax(120px, 180px) auto;
   margin: 0;
@@ -2403,22 +2433,19 @@ body.resizing-answer-dock .question-dock-resizer::after {
   gap: 8px;
   min-height: 0;
   overflow: auto;
-  font-size: var(--study-small-size);
-  line-height: var(--study-line-height);
-}
-
-.question-dock.basic-question-dock .question-dock-body {
-  font-size: var(--study-basic-front-size);
-}
-
-.question-dock.blank-question-dock .question-dock-body,
-.question-dock.choice-question-dock .question-dock-body {
   font-size: var(--study-question-size);
+  line-height: var(--study-line-height);
 }
 
 .question-dock-prompt {
   gap: 0.72em;
-  font-weight: 800;
+  font-weight: 400;
+}
+
+.paused-card-pill {
+  border-color: color-mix(in srgb, var(--yellow), transparent 30%);
+  background: color-mix(in srgb, var(--yellow), transparent 80%);
+  color: color-mix(in srgb, var(--text), var(--yellow) 45%);
 }
 
 .question-dock-options {

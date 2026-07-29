@@ -46,6 +46,7 @@ export async function initDb() {
       note TEXT DEFAULT '',
       choices TEXT DEFAULT '',
       favorite INTEGER DEFAULT 0,
+      paused INTEGER DEFAULT 0,
       created_at TEXT NOT NULL,
       updated_at TEXT NOT NULL,
       FOREIGN KEY(deck_id) REFERENCES decks(id) ON DELETE CASCADE
@@ -196,6 +197,9 @@ export async function initDb() {
   }
   if (!cardColumns.includes("choices")) {
     exec("ALTER TABLE cards ADD COLUMN choices TEXT DEFAULT ''");
+  }
+  if (!cardColumns.includes("paused")) {
+    exec("ALTER TABLE cards ADD COLUMN paused INTEGER DEFAULT 0");
   }
   const sessionColumns = all<{ name: string }>("PRAGMA table_info(study_sessions)").map((column) => column.name);
   if (!sessionColumns.includes("user_id")) {

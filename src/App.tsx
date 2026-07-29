@@ -27,7 +27,9 @@ import Moon from "lucide-react/dist/esm/icons/moon";
 import MoveRight from "lucide-react/dist/esm/icons/move-right";
 import PanelLeftClose from "lucide-react/dist/esm/icons/panel-left-close";
 import PanelLeftOpen from "lucide-react/dist/esm/icons/panel-left-open";
+import Pause from "lucide-react/dist/esm/icons/pause";
 import Plus from "lucide-react/dist/esm/icons/plus";
+import Play from "lucide-react/dist/esm/icons/play";
 import RefreshCw from "lucide-react/dist/esm/icons/refresh-cw";
 import RotateCcw from "lucide-react/dist/esm/icons/rotate-ccw";
 import Rows2 from "lucide-react/dist/esm/icons/rows-2";
@@ -79,7 +81,7 @@ declare global {
   }
 }
 
-const version = "0.8.11";
+const version = "0.8.12";
 const logExportPressCount = 6;
 const logExportKey = "a";
 const logExportResetMs = 1800;
@@ -1637,9 +1639,12 @@ function DeckView(props: {
   const [deckPanelCollapsed, setDeckPanelCollapsed] = useState(false);
   const [sortField, setSortField] = useState<"created" | "due" | "studied">("created");
   const [sortDirection, setSortDirection] = useState<"asc" | "desc">("desc");
+  const [showPausedOnly, setShowPausedOnly] = useState(false);
   const [busy, setBusy] = useState("");
 
-  const allVisibleSelected = props.cards.length > 0 && props.cards.every((card) => selectedCardIds.includes(card.id));
+  const visibleCards = useMemo(() => showPausedOnly ? props.cards.filter((card) => card.paused) : props.cards, [props.cards, showPausedOnly]);
+  const pausedCards = useMemo(() => props.cards.filter((card) => card.paused), [props.cards]);
+  const allVisibleSelected = visibleCards.length > 0 && visibleCards.every((card) => selectedCardIds.includes(card.id));
   const sortedCards = useMemo(() => {
     const valueFor = (card: Card) => sortField === "due"
       ? card.due_at
@@ -1647,11 +1652,11 @@ function DeckView(props: {
         ? card.last_studied_at ?? ""
         : card.created_at;
     const direction = sortDirection === "asc" ? 1 : -1;
-    return [...props.cards].sort((left, right) => {
+    return [...visibleCards].sort((left, right) => {
       const compared = valueFor(left).localeCompare(valueFor(right));
       return compared === 0 ? direction * (left.id - right.id) : direction * compared;
     });
-  }, [props.cards, sortDirection, sortField]);
+  }, [sortDirection, sortField, visibleCards]);
 
   useEffect(() => {
     setSelectedCardIds((ids) => ids.filter((id) => props.cards.some((card) => card.id === id)));
@@ -1679,7 +1684,11 @@ function DeckView(props: {
   }
 
   function toggleAllCards() {
-    setSelectedCardIds(allVisibleSelected ? [] : props.cards.map((card) => card.id));
+    setSelectedCardIds(allVisibleSelected ? [] : visibleCards.map((card) => card.id));
+  }
+
+  function selectPausedCards() {
+    setSelectedCardIds((ids) => Array.from(new Set([...ids, ...pausedCards.map((card) => card.id)])));
   }
 
   async function batchDelete() {
@@ -1721,6 +1730,16 @@ function DeckView(props: {
     setBusy(`favorite-${card.id}`);
     try {
       await props.onToggleFavorite(card);
+    } finally {
+      setBusy("");
+    }
+  }
+
+  async function togglePaused(card: Card) {
+    if (busy) return;
+    setBusy(`pause-card-${card.id}`);
+    try {
+      await props.onUpdateCard(card.id, { paused: card.paused ? 0 : 1, baseUpdatedAt: card.updated_at });
     } finally {
       setBusy("");
     }
@@ -1794,12 +1813,14 @@ function DeckView(props: {
               <option value="desc">倒序</option>
             </select>
           </div>
+          <button className={`primary-button secondary-button ${showPausedOnly ? "active" : ""}`} onClick={() => setShowPausedOnly((value) => !value)}><Eye />{showPausedOnly ? "显示全部" : "显示已暂停"}</button>
           <button className="primary-button toolbar-create-card" disabled={!props.selectedDeckId} onClick={props.onOpenCreateCard}><Plus />新建卡片</button>
         </div>
         {editingCard && <CardEditor card={editingCard} onCancel={() => setEditingCard(null)} onSubmit={async (payload) => { await props.onUpdateCard(editingCard.id, { ...payload, baseUpdatedAt: editingCard.updated_at }); setEditingCard(null); }} />}
         <div className="batch-toolbar">
           <button className="mini-button" title="全选" onClick={toggleAllCards}>{allVisibleSelected ? <SquareCheck /> : <Square />}</button>
           <span className="batch-title">{selectedCardIds.length ? `已选 ${selectedCardIds.length} 张` : "批量管理"}</span>
+          <button className="primary-button secondary-button" disabled={pausedCards.length === 0} onClick={selectPausedCards}><SquareCheck />选中已暂停</button>
           <select value={batchTargetDeckId ?? ""} onChange={(event) => setBatchTargetDeckId(event.target.value ? Number(event.target.value) : null)}>
             <option value="" disabled>移动到卡组</option>
             {props.decks.map((deck) => <option key={deck.id} value={deck.id}>{"　".repeat(Math.max(deck.depth - 1, 0))}{deck.name}</option>)}
@@ -1815,11 +1836,13 @@ function DeckView(props: {
                   <button className="mini-button" title="选择卡片" onClick={() => toggleCard(card.id)}>{selectedCardIds.includes(card.id) ? <SquareCheck /> : <Square />}</button>
                   <MarkdownText value={card.front} className="word-card-title card-summary-markdown" />
                   <span className="type-pill">{cardTypeLabels[card.card_type]}</span>
+                  {card.paused ? <span className="type-pill paused-card-pill">已暂停</span> : null}
                 </div>
                 <div className="word-card-actions">
                   {isWordCard(card) && card.phonetic && <span className="phonetic">{card.phonetic}</span>}
                   <button className="mini-button" title="发音" onClick={() => props.onSpeak(isWordCard(card) && card.phonetic ? card.phonetic : card.front, undefined, card.front)}><Volume2 /></button>
                   <button className={`mini-button ${card.favorite ? "starred" : ""}`} title="收藏" disabled={busy === `favorite-${card.id}`} onClick={() => toggleFavorite(card)}><Star /></button>
+                  <button className={`mini-button ${card.paused ? "active" : ""}`} title={card.paused ? "启动卡片" : "暂停卡片"} disabled={busy === `pause-card-${card.id}`} onClick={() => togglePaused(card)}>{card.paused ? <Play /> : <Pause />}</button>
                   <button className="mini-button" title="详情" onClick={() => setDetailCard(card)}><Eye /></button>
                   <button className="mini-button" title="编辑" onClick={() => { setEditingCard(card); scrollToPageTop(); }}><Edit3 /></button>
                 </div>
@@ -1830,12 +1853,12 @@ function DeckView(props: {
               </div>
               <div className="card-meta">
                 <span>阶段 {card.stage}/10</span>
-                <span>下次 {dueText(card.due_at)}</span>
+                <span>{card.paused ? "已暂停，不进入学习和复习" : `下次 ${dueText(card.due_at)}`}</span>
                 <button className="mini-button danger" title="删除" disabled={busy === `delete-card-${card.id}`} onClick={() => deleteCard(card)}><Trash2 /></button>
               </div>
             </article>
           ))}
-          {props.cards.length === 0 && <EmptyState text="这个卡组还没有卡片。" />}
+          {visibleCards.length === 0 && <EmptyState text={showPausedOnly ? "这个卡组没有已暂停卡片。" : "这个卡组还没有卡片。"} />}
         </div>
       </div>
       {detailCard && <CardPreview card={detailCard} onClose={() => setDetailCard(null)} />}
@@ -2179,6 +2202,9 @@ function StudyView(props: {
   const [fontLoading, setFontLoading] = useState(false);
   const [fontStatus, setFontStatus] = useState("点击读取系统字体");
   const [remaining, setRemaining] = useState<ReviewRemaining>({ newRemaining: 0, reviewRemaining: 0 });
+  const [pausedCards, setPausedCards] = useState<Card[]>([]);
+  const [pausedCardsOpen, setPausedCardsOpen] = useState(false);
+  const [pausedCardsLoading, setPausedCardsLoading] = useState(false);
   const [immersive, setImmersive] = useState(false);
   const [answerDockOpen, setAnswerDockOpen] = useState(true);
   const [answerDockWidth, setAnswerDockWidth] = useState(300);
@@ -2293,6 +2319,8 @@ function StudyView(props: {
 
   useEffect(() => {
     loadRemaining().catch((error) => console.error(error));
+    setPausedCards([]);
+    setPausedCardsOpen(false);
   }, [props.selectedStudyDeckId]);
 
   useLayoutEffect(() => {
@@ -2528,6 +2556,36 @@ function StudyView(props: {
       return;
     }
     setRemaining(await api.reviewRemaining(props.selectedStudyDeckId));
+  }
+
+  async function togglePausedCards() {
+    if (pausedCardsOpen) {
+      setPausedCardsOpen(false);
+      return;
+    }
+    if (!props.selectedStudyDeckId) return;
+    setPausedCardsLoading(true);
+    try {
+      setPausedCards(await api.pausedCards(props.selectedStudyDeckId));
+      setPausedCardsOpen(true);
+    } finally {
+      setPausedCardsLoading(false);
+    }
+  }
+
+  async function resumePausedCard(pausedCard: Card) {
+    if (busyRef.current) return;
+    busyRef.current = true;
+    setBusy(`resume-card-${pausedCard.id}`);
+    try {
+      const updatedCard = await props.onUpdateCard(pausedCard.id, { paused: 0, baseUpdatedAt: pausedCard.updated_at });
+      if (!updatedCard) return;
+      setPausedCards((items) => items.filter((item) => item.id !== pausedCard.id));
+      await loadRemaining();
+    } finally {
+      busyRef.current = false;
+      setBusy("");
+    }
   }
 
   async function dueReviewInterrupts(nextQueue: Card[], excludeIds: number[] = []) {
@@ -2886,6 +2944,34 @@ function StudyView(props: {
     setEditingStudyCard(null);
   }
 
+  async function pauseCurrentCard() {
+    if (!card || busyRef.current) return;
+    busyRef.current = true;
+    setBusy("pause-card");
+    try {
+      const updatedCard = await props.onUpdateCard(card.id, { paused: 1, baseUpdatedAt: card.updated_at });
+      if (!updatedCard) return;
+      const withoutCurrent = (items: Card[]) => items.filter((item) => item.id !== card.id);
+      setSessionCards(withoutCurrent);
+      setQueue(withoutCurrent);
+      setHistory((items) => items
+        .filter((item) => item.card.id !== card.id)
+        .map((item) => ({ ...item, sessionCards: withoutCurrent(item.sessionCards), queue: withoutCurrent(item.queue) }))
+      );
+      setMasteredIds((ids) => ids.filter((id) => id !== card.id));
+      setLongTermSubmittedIds((ids) => ids.filter((id) => id !== card.id));
+      setFlipped(false);
+      setAnswer("");
+      setChecked(null);
+      setSelectedChoice("");
+      setRatingResult(null);
+      await loadRemaining();
+    } finally {
+      busyRef.current = false;
+      setBusy("");
+    }
+  }
+
   async function toggleImmersive() {
     if (document.fullscreenElement) {
       await document.exitFullscreen().catch(() => undefined);
@@ -3084,6 +3170,19 @@ function StudyView(props: {
             </>
           )}
         </div>
+        <div className="study-paused-controls">
+          <button className="primary-button secondary-button" disabled={!props.selectedStudyDeckId || pausedCardsLoading} onClick={togglePausedCards}><Pause />{pausedCardsOpen ? "收起已暂停卡片" : pausedCardsLoading ? "读取中" : "已暂停卡片"}</button>
+          {pausedCardsOpen && (
+            <div className="study-paused-card-list">
+              {pausedCards.length === 0 ? <span>当前卡组没有已暂停卡片。</span> : pausedCards.map((pausedCard) => (
+                <div key={pausedCard.id}>
+                  <MarkdownText value={pausedCard.front} />
+                  <button className="mini-button" title="启动卡片" disabled={busy === `resume-card-${pausedCard.id}`} onClick={() => resumePausedCard(pausedCard)}><Play /></button>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
         {studyMode === "grind" && (
           <div className="study-remaining" aria-label="无尽模式状态">
             <span>当前模式：无尽模式</span>
@@ -3153,6 +3252,7 @@ function StudyView(props: {
                 <button className="mini-button" title="发音" onClick={() => props.onSpeak(isWordCard(card) && card.phonetic ? card.phonetic : card.front, card.language ?? props.selectedDeck?.language, card.front)}><Volume2 /></button>
                 <button className="mini-button" title="切换到前一张" disabled={history.length === 0 || Boolean(busy)} onClick={undo}><ArrowLeft /></button>
                 <button className="mini-button" title={immersive ? "退出沉浸学习" : "沉浸学习"} onClick={toggleImmersive}>{immersive ? <Minimize2 /> : <Maximize2 />}</button>
+                <button className="mini-button" title="暂停当前卡片" disabled={Boolean(busy)} onClick={pauseCurrentCard}><Pause /></button>
                 <button className="mini-button" title="编辑当前卡片" onClick={editCurrentStudyCard}><Edit3 /></button>
                 <TextToolButton icon={<MoreHorizontal />} title="更多学习工具" active={moreToolsOpen} onClick={() => setMoreToolsOpen((open) => !open)}>
                   {moreToolsOpen && (
@@ -3263,7 +3363,7 @@ function StudyView(props: {
                     <button ref={(node) => { cardFrameRef.current = node; }} className={`flip-card ${flipped ? "flipped" : ""}`} onClick={flipStudyCard}>
                       <span className="flip-card-inner">
                         <span className="flip-card-face flip-card-front"><CardFront card={card} /></span>
-                        <span className="flip-card-face flip-card-back"><CardBack card={card} layout={props.studyChoiceLayout} /></span>
+                        <span className="flip-card-face flip-card-back"><CardBack card={card} layout={props.studyChoiceLayout} showFront /></span>
                       </span>
                     </button>
                     {showBasicReferenceDock && (
@@ -3718,6 +3818,7 @@ function AboutView(props: { syncStatus: SyncStatus | null }) {
       <div className="schedule-box"><h3>同步状态</h3><p>最近同步：{props.syncStatus ? fullDateTime(props.syncStatus.lastSyncAt) : "暂无"} · 数据更新：{props.syncStatus?.dataUpdatedAt ? fullDateTime(props.syncStatus.dataUpdatedAt) : "暂无"}</p></div>
       <div className="schedule-box changelog-box">
         <h3>更新日志</h3>
+        <div className="changelog-row"><strong>0.8.12</strong><span>2026-07-29</span><p>题目参考统一正文与 LaTeX 字号并取消题干加粗；普通卡翻面和填空题答题后均保留题目在顶部；新增卡片暂停/启动、已暂停卡筛选与一键选中，暂停卡不会进入学习或复习序列。</p></div>
         <div className="changelog-row"><strong>0.8.11</strong><span>2026-07-28</span><p>LaTeX 公式字号略小于正文；卡片全部内容（含普通卡说明、备注与选项）统一支持 Markdown 和图片；每组学习完成页现在填满可视区域。</p></div>
         <div className="changelog-row"><strong>0.8.10</strong><span>2026-07-26</span><p>修复进入学习界面时可能显示空白页的问题。</p></div>
         <div className="changelog-row"><strong>0.8.9</strong><span>2026-07-26</span><p>完成页“返回最后一个单词”更正为“返回最后一张卡片”；短语词性单词卡正反面标题字号统一缩小；普通、填空和选择题的题目参考字号、间距及答题提示对齐同步优化。</p></div>
