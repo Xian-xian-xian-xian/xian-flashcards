@@ -81,7 +81,7 @@ declare global {
   }
 }
 
-const version = "0.8.13";
+const version = "0.8.14";
 const logExportPressCount = 6;
 const logExportKey = "a";
 const logExportResetMs = 1800;
@@ -3836,6 +3836,7 @@ function AboutView(props: { syncStatus: SyncStatus | null }) {
       <div className="schedule-box"><h3>同步状态</h3><p>最近同步：{props.syncStatus ? fullDateTime(props.syncStatus.lastSyncAt) : "暂无"} · 数据更新：{props.syncStatus?.dataUpdatedAt ? fullDateTime(props.syncStatus.dataUpdatedAt) : "暂无"}</p></div>
       <div className="schedule-box changelog-box">
         <h3>更新日志</h3>
+        <div className="changelog-row"><strong>0.8.14</strong><span>2026-07-30</span><p>修复学习页题目参考在长内容滚动后会离开右上角的问题；现在会始终固定在学习滚动区域右上方。</p></div>
         <div className="changelog-row"><strong>0.8.13</strong><span>2026-07-29</span><p>学习页会自动识别卡片中的 LaTeX 公式，并在不改变右上角行距设置显示值的前提下，将整张学习卡的实际正文行距增加 0.5。</p></div>
         <div className="changelog-row"><strong>0.8.12</strong><span>2026-07-29</span><p>题目参考统一正文与 LaTeX 字号并取消题干加粗；普通卡翻面和填空题答题后均保留题目在顶部；新增卡片暂停/启动、已暂停卡筛选与一键选中，暂停卡不会进入学习或复习序列。</p></div>
         <div className="changelog-row"><strong>0.8.11</strong><span>2026-07-28</span><p>LaTeX 公式字号略小于正文；卡片全部内容（含普通卡说明、备注与选项）统一支持 Markdown 和图片；每组学习完成页现在填满可视区域。</p></div>
