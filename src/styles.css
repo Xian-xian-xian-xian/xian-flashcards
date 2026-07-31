@@ -2686,6 +2686,17 @@ body.resizing-answer-dock .question-dock-resizer::after {
     0 12px 24px color-mix(in srgb, var(--red), transparent 82%);
 }
 
+.choice-grid button.selected {
+  border-color: color-mix(in srgb, var(--blue), transparent 30%);
+  background: color-mix(in srgb, var(--blue), transparent 88%);
+  box-shadow: inset 0 -4px 0 color-mix(in srgb, var(--blue), transparent 58%);
+}
+
+.choice-submit-button {
+  justify-self: center;
+  min-width: 160px;
+}
+
 .rating-row {
   display: grid;
   grid-template-columns: repeat(3, minmax(0, 1fr));

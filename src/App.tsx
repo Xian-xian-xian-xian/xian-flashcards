@@ -61,6 +61,7 @@ import {
   normalizeBlankAnswerConfig
 } from "./blank-answers";
 import { insertImageMarkdown } from "./card-images";
+import { choiceAnswerSetMatches, choiceAnswersMatch, choiceOptionKey, dedupeChoiceAnswers, normalizeChoiceAnswer, splitChoiceAnswers } from "./choice-answers";
 import { latexRenderSource } from "./latex";
 import { isPhrasePartOfSpeech, ratingShortcutForKey, shouldUsePractice, studyAnswerWeight, updateGrindStudyWords } from "./study-session";
 import { resolveStudySwipe } from "./study-gestures";
@@ -81,7 +82,7 @@ declare global {
   }
 }
 
-const version = "0.8.18";
+const version = "0.9.1";
 const logExportPressCount = 6;
 const logExportKey = "a";
 const logExportResetMs = 1800;
@@ -132,7 +133,7 @@ const emptyDailyTask: DailyTask = {
 };
 
 function normalizeAnswer(value: string) {
-  return value.trim().toLowerCase().replace(/\s+/g, " ");
+  return normalizeChoiceAnswer(value);
 }
 
 function formatPomodoroCountdown(state: TomatoState | null, now: number) {
@@ -164,13 +165,11 @@ function normalizeSpeechLanguage(value?: string) {
 }
 
 function optionKey(value: string) {
-  const normalized = normalizeAnswer(value);
-  const match = normalized.match(/^([a-h])(?:[\s.)、:：-]+|$)/i);
-  return match?.[1] ?? normalized;
+  return choiceOptionKey(value);
 }
 
 function answersMatch(choice: string, answer: string) {
-  return normalizeAnswer(choice) === normalizeAnswer(answer) || optionKey(choice) === optionKey(answer);
+  return choiceAnswersMatch(choice, answer);
 }
 
 function dedupeChoiceOptions(choices: string[]) {
@@ -2051,7 +2050,7 @@ function CardEditor(props: { card?: Card; layout?: "default" | "single"; onSubmi
         </div>
       ) : (
         <EditorField label={cardType === "choice" ? "正确答案" : cardType === "word" ? "释义 / 背面" : "背面 / 答案"}>
-          <SmartTextField value={back} onChange={setBack} placeholder="输入背面或答案内容" required allowImageInsert />
+          <SmartTextField value={back} onChange={setBack} placeholder={cardType === "choice" ? "多选题用 |、逗号、分号或换行分隔正确选项" : "输入背面或答案内容"} required allowImageInsert />
         </EditorField>
       )}
       <EditorField label={cardType === "choice" || cardType === "blank" ? "解析 / 说明" : cardType === "word" ? "例句 / 说明" : "说明 / 例子"}>
@@ -2197,12 +2196,12 @@ function StudyView(props: {
     flipped: boolean;
     answer: string;
     checked: "right" | "wrong" | null;
-    selectedChoice: string;
+    selectedChoice: string[];
   }>>([]);
   const [flipped, setFlipped] = useState(false);
   const [answer, setAnswer] = useState("");
   const [checked, setChecked] = useState<"right" | "wrong" | null>(null);
-  const [selectedChoice, setSelectedChoice] = useState("");
+  const [selectedChoice, setSelectedChoice] = useState<string[]>([]);
   const [editingStudyCard, setEditingStudyCard] = useState<Card | null>(null);
   const [busy, setBusy] = useState("");
   const [scaleDraft, setScaleDraft] = useState(props.studyTextScale);
@@ -2370,7 +2369,7 @@ function StudyView(props: {
     setFlipped(false);
     setAnswer("");
     setChecked(null);
-    setSelectedChoice("");
+    setSelectedChoice([]);
     setCelebrationKey(0);
     setRatingResult(null);
     setAnswerDockOpen(true);
@@ -2471,7 +2470,7 @@ function StudyView(props: {
     setFlipped(false);
     setAnswer("");
     setChecked(null);
-    setSelectedChoice("");
+    setSelectedChoice([]);
     setCelebrationKey(0);
     setRatingResult(null);
     setAnswerDockOpen(true);
@@ -2507,7 +2506,7 @@ function StudyView(props: {
       setFlipped(false);
       setAnswer("");
       setChecked(null);
-      setSelectedChoice("");
+      setSelectedChoice([]);
       setCelebrationKey(0);
       setRatingResult(null);
       setAnswerDockOpen(true);
@@ -2698,7 +2697,7 @@ function StudyView(props: {
       setFlipped(false);
       setAnswer("");
       setChecked(null);
-      setSelectedChoice("");
+      setSelectedChoice([]);
       setCelebrationKey(0);
       setRatingResult(null);
       setCardRevision((value) => value + 1);
@@ -2811,7 +2810,7 @@ function StudyView(props: {
 
   function checkWritten() {
     if (!card) return;
-    setSelectedChoice("");
+    setSelectedChoice([]);
     const result = isCorrectAnswer(card, answer) ? "right" : "wrong";
     playAnswerSound(result);
     if (result === "right") setCelebrationKey((key) => key + 1);
@@ -2828,8 +2827,27 @@ function StudyView(props: {
 
   function checkChoice(choice: string) {
     if (!card || checked) return;
-    setSelectedChoice(choice);
+    setSelectedChoice([choice]);
     const result = answersMatch(choice, card.back) ? "right" : "wrong";
+    playAnswerSound(result);
+    if (result === "right") setCelebrationKey((key) => key + 1);
+    setChecked(result);
+  }
+
+  function selectChoice(choice: string) {
+    if (!card || checked) return;
+    if (splitChoiceAnswers(card.back).length <= 1) {
+      checkChoice(choice);
+      return;
+    }
+    setSelectedChoice((current) => current.some((item) => answersMatch(item, choice))
+      ? current.filter((item) => !answersMatch(item, choice))
+      : [...current, choice]);
+  }
+
+  function submitMultipleChoice() {
+    if (!card || checked || selectedChoice.length === 0) return;
+    const result = choiceAnswerSetMatches(selectedChoice, splitChoiceAnswers(card.back)) ? "right" : "wrong";
     playAnswerSound(result);
     if (result === "right") setCelebrationKey((key) => key + 1);
     setChecked(result);
@@ -2837,14 +2855,19 @@ function StudyView(props: {
 
   const choices = useMemo(() => {
     if (!card) return [];
-    const baseChoices = dedupeChoiceOptions(parseChoices(card.choices));
+    const correctChoices = splitChoiceAnswers(card.back);
+    const baseChoices = dedupeChoiceOptions(parseChoices(card.choices)).filter((choice) => correctChoices.length <= 1 || normalizeAnswer(choice) !== normalizeAnswer(card.back));
     const source = card.card_type === "choice"
-      ? baseChoices.some((choice) => answersMatch(choice, card.back)) ? baseChoices : [...baseChoices, card.back]
+      ? [...baseChoices, ...correctChoices.filter((answer) => !baseChoices.some((choice) => answersMatch(choice, answer)))]
       : sessionCards.filter((item) => item.id !== card.id).slice(0, 3).map((item) => item.back).concat(card.back);
     return dedupeChoiceOptions(source).sort(() => 0.5 - Math.random());
   }, [card?.id, sessionCards]);
 
-  const displayCorrect = card ? choices.find((choice) => answersMatch(choice, card.back)) ?? card.back : "";
+  const correctChoiceAnswers = card ? dedupeChoiceAnswers(splitChoiceAnswers(card.back)) : [];
+  const multipleChoice = correctChoiceAnswers.length > 1;
+  const displayCorrect = card
+    ? correctChoiceAnswers.map((answer) => choices.find((choice) => answersMatch(choice, answer)) ?? answer).join("、")
+    : "";
 
   const completed = masteredIds.length;
   const total = sessionCards.length;
@@ -2989,7 +3012,7 @@ function StudyView(props: {
       setFlipped(false);
       setAnswer("");
       setChecked(null);
-      setSelectedChoice("");
+      setSelectedChoice([]);
       setRatingResult(null);
       await loadRemaining();
     } finally {
@@ -3415,15 +3438,17 @@ function StudyView(props: {
                   <div ref={answerLayoutRef} className={`answer-layout ${showAnswerDock ? "with-dock" : ""}`}>
                     <div ref={(node) => { cardFrameRef.current = node; }} className={`question-box choice-question ${choiceLayoutClass(choices, props.studyChoiceLayout)}`}>
                       <MarkdownText value={card.front} className="question-text" />
-                      <ChoiceArea choices={choices} answer={card.back} selected={selectedChoice} checked={checked} layout={props.studyChoiceLayout} onChoose={checkChoice}>
-                        {checked && <AnswerFeedback checked={checked} correct={displayCorrect} explanation={explanation} other={otherNote} selected={selectedChoice} />}
+                      <ChoiceArea choices={choices} answers={correctChoiceAnswers} selected={selectedChoice} checked={checked} layout={props.studyChoiceLayout} multiple={multipleChoice} onChoose={selectChoice}>
+                        {multipleChoice && !checked && <button className="primary-button choice-submit-button" type="button" disabled={selectedChoice.length === 0 || Boolean(busy)} onClick={submitMultipleChoice}>提交答案</button>}
+                        {checked && <AnswerFeedback checked={checked} correct={displayCorrect} explanation={explanation} other={otherNote} selected={selectedChoice.join("、")} />}
                       </ChoiceArea>
                     </div>
                     {showAnswerDock && (
                       <QuestionDock
                         card={card}
                         choices={choices}
-                        selected={selectedChoice}
+                        selected={selectedChoice.join("、")}
+                        selectedChoices={selectedChoice}
                         answer={card.back}
                         onResize={resizeAnswerDock}
                         onClose={() => setAnswerDockOpen(false)}
@@ -3541,7 +3566,7 @@ function RatingNotice(props: { feedback: RatingFeedback; onClose: () => void }) 
   );
 }
 
-function QuestionDock(props: { card: Card; choices?: string[]; selected: string; answer: string; onResize: (event: ReactPointerEvent<HTMLButtonElement>) => void; onClose: () => void }) {
+function QuestionDock(props: { card: Card; choices?: string[]; selected: string; selectedChoices?: string[]; answer: string; onResize: (event: ReactPointerEvent<HTMLButtonElement>) => void; onClose: () => void }) {
   return (
     <aside className={`question-dock ${props.card.card_type}-question-dock`} aria-label="题目参考">
       <button className="question-dock-resizer" type="button" aria-label="调整题目参考宽度" onPointerDown={props.onResize} />
@@ -3558,7 +3583,7 @@ function QuestionDock(props: { card: Card; choices?: string[]; selected: string;
         {props.choices && props.choices.length > 0 && (
           <div className="question-dock-options">
             {props.choices.map((choice, index) => (
-              <div key={`${choice}-${index}`} className={answersMatch(choice, props.answer) ? "correct" : choice === props.selected ? "selected" : ""}>
+              <div key={`${choice}-${index}`} className={splitChoiceAnswers(props.answer).some((answer) => answersMatch(choice, answer)) ? "correct" : (props.selectedChoices ?? []).some((selected) => answersMatch(choice, selected)) ? "selected" : ""}>
                 <MarkdownText value={choice} />
               </div>
             ))}
@@ -3646,10 +3671,11 @@ function choiceLayoutClass(choices: string[], layout: Settings["studyChoiceLayou
 
 function ChoiceArea(props: {
   choices: string[];
-  answer: string;
-  selected: string;
+  answers: string[];
+  selected: string[];
   checked: "right" | "wrong" | null;
   layout: Settings["studyChoiceLayout"];
+  multiple: boolean;
   onChoose: (choice: string) => void;
   children: ReactNode;
 }) {
@@ -3658,15 +3684,17 @@ function ChoiceArea(props: {
     <div className={`choice-area ${layoutClass}`}>
       <div className={`choice-grid ${layoutClass}`}>
         {props.choices.map((choice, index) => {
-          const isSelected = choice === props.selected;
-          const isAnswer = answersMatch(choice, props.answer);
-          const state = props.checked ? (isAnswer ? "correct" : isSelected ? "wrong" : "") : undefined;
+          const isSelected = props.selected.some((selected) => answersMatch(choice, selected));
+          const isAnswer = props.answers.some((answer) => answersMatch(choice, answer));
+          const state = props.checked ? (isAnswer ? "correct" : isSelected ? "wrong" : "") : isSelected ? "selected" : undefined;
           return (
             <button
               className={state}
+              type="button"
               disabled={props.checked !== null}
               key={`${choice}-${index}`}
               onClick={() => props.onChoose(choice)}
+              aria-pressed={props.multiple ? isSelected : undefined}
             >
               <MarkdownText value={choice} />
             </button>
@@ -3844,6 +3872,7 @@ function AboutView(props: { syncStatus: SyncStatus | null }) {
       <div className="schedule-box"><h3>同步状态</h3><p>最近同步：{props.syncStatus ? fullDateTime(props.syncStatus.lastSyncAt) : "暂无"} · 数据更新：{props.syncStatus?.dataUpdatedAt ? fullDateTime(props.syncStatus.dataUpdatedAt) : "暂无"}</p></div>
       <div className="schedule-box changelog-box">
         <h3>更新日志</h3>
+        <div className="changelog-row"><strong>0.9.1</strong><span>2026-07-31</span><p>选择题答案输入多个选项时自动成为多选题；需选中全部且仅选中正确选项后提交，才会判定正确。</p></div>
         <div className="changelog-row"><strong>0.8.18</strong><span>2026-07-31</span><p>普通卡正面或反面含 LaTeX 公式时，正面及翻面后的题目文字会显示为正文的约 115%。</p></div>
         <div className="changelog-row"><strong>0.8.17</strong><span>2026-07-31</span><p>普通卡正面及翻面后的题目文字字号改为与短语型单词卡一致。</p></div>
         <div className="changelog-row"><strong>0.8.16</strong><span>2026-07-30</span><p>全站加粗文字调整为 650 字重，以提升阅读清晰度。</p></div>
@@ -3962,7 +3991,7 @@ function CardPreview(props: { card: Card; onClose: () => void }) {
               <div className={`choice-area ${layout}`}>
                 <div className={`choice-grid ${layout}`}>
                   {choices.map((choice, index) => (
-                    <div key={`${choice}-${index}`} className={answersMatch(choice, props.card.back) ? "preview-option correct" : "preview-option"}>
+                    <div key={`${choice}-${index}`} className={splitChoiceAnswers(props.card.back).some((answer) => answersMatch(choice, answer)) ? "preview-option correct" : "preview-option"}>
                       <MarkdownText value={choice} />
                     </div>
                   ))}

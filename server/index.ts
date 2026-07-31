@@ -258,6 +258,17 @@ function addAnswerChoice(choices: string[], answer: string) {
   return [...choices, answer.trim()];
 }
 
+function splitChoiceAnswerText(value: string) {
+  return value
+    .split(/[|\n、，,]+|[；;](?=\s*\S)/)
+    .map((item) => item.trim())
+    .filter(Boolean);
+}
+
+function addAnswerChoices(choices: string[], answer: string) {
+  return splitChoiceAnswerText(answer).reduce(addAnswerChoice, choices);
+}
+
 function importChoiceValues(row: Record<string, unknown>) {
   const optionValues = Array.from({ length: 8 }, (_, index) => {
     const number = index + 1;
@@ -280,7 +291,11 @@ function inferCardType(row: Record<string, unknown>, front: string, choices: str
 }
 
 function normalizedChoicePayload(cardType: CardType, choices: string[] | string, answer: string) {
-  return cardType === "choice" ? addAnswerChoice(dedupeChoiceOptions(normalizeChoices(choices)), answer).slice(0, 8) : [];
+  if (cardType !== "choice") return [];
+  const answerChoices = splitChoiceAnswerText(answer);
+  const options = dedupeChoiceOptions(normalizeChoices(choices))
+    .filter((choice) => answerChoices.length <= 1 || normalizeAnswer(choice) !== normalizeAnswer(answer));
+  return addAnswerChoices(options, answer).slice(0, 8);
 }
 
 const blankMarkerPattern = /(\[\s*\]|_{2,}|（\s*）|\(\s*\))/g;

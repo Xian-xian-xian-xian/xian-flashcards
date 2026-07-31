@@ -35,6 +35,20 @@ describe("normalizeImportRows", () => {
     expect(rows[0].example).toBe("也称惯性定律。");
   });
 
+  it("splits multiple correct choice answers into individual options", () => {
+    const rows = normalizeImportRows([{
+      card_type: "choice",
+      front: "哪些是质数？",
+      options: "A. 2 | B. 4 | C. 5 | D. 6",
+      answer: "A、C"
+    }]);
+
+    expect(rows[0]).toMatchObject({
+      back: "A、C",
+      choices: ["A. 2", "B. 4", "C. 5", "D. 6"]
+    });
+  });
+
   it("导入多空、每空多答案和乱序开关", () => {
     const rows = normalizeImportRows([{
       card_type: "blank",
