@@ -2007,6 +2007,11 @@ textarea:focus {
   font-size: clamp(var(--study-phrase-word-min), 6.8vw, var(--study-phrase-word-max));
 }
 
+.study-panel.basic-latex-card .flip-card-face > .basic-face,
+.study-panel.basic-latex-card .flip-card-face .basic-face {
+  font-size: calc(var(--study-question-size) * 1.15);
+}
+
 .flip-card-face .basic-face .math-block {
   font-size: 1em;
 }

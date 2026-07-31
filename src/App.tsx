@@ -81,7 +81,7 @@ declare global {
   }
 }
 
-const version = "0.8.17";
+const version = "0.8.18";
 const logExportPressCount = 6;
 const logExportKey = "a";
 const logExportResetMs = 1800;
@@ -2853,6 +2853,7 @@ function StudyView(props: {
   ].some(hasLatexFormula));
   const explanationIsLong = explanationText.length > 80 || /\n|```|\$\$/.test(explanationText);
   const isBasicCard = card?.card_type === "basic";
+  const basicCardHasLatexFormula = Boolean(isBasicCard && card && [card.front, card.back].some(hasLatexFormula));
   const showAnswerDock = Boolean(card && checked && explanationIsLong && answerDockOpen);
   const showBasicReferenceDock = Boolean(isBasicCard && flipped && answerDockOpen);
   const showReferenceDock = showAnswerDock || showBasicReferenceDock;
@@ -3225,7 +3226,7 @@ function StudyView(props: {
               busy={busy === "session"}
             />
       ) : <EmptyState text={studyMode === "grind" ? (props.selectedStudyDeckId ? "请选择开始无尽学习。" : "请先选择一个卡组。") : studyMode === "new" ? "这个卡组暂无可新学卡片。" : "这个卡组暂无到期复习卡片。"} /> : (
-        <div ref={studyPanelRef} key={`${card.id}-${cardRevision}`} className={`study-panel ${cardMotion} align-${props.studyTextAlign} ${checked === "right" ? "celebrating" : ""} ${pronunciationXmlOpen ? "xml-open" : ""}`} style={studyStyle}>
+        <div ref={studyPanelRef} key={`${card.id}-${cardRevision}`} className={`study-panel ${cardMotion} align-${props.studyTextAlign} ${checked === "right" ? "celebrating" : ""} ${pronunciationXmlOpen ? "xml-open" : ""} ${basicCardHasLatexFormula ? "basic-latex-card" : ""}`} style={studyStyle}>
           {checked === "right" && (
             <div className="answer-celebration" key={celebrationKey} aria-hidden="true">
               <span className="celebration-ring" />
@@ -3835,6 +3836,7 @@ function AboutView(props: { syncStatus: SyncStatus | null }) {
       <div className="schedule-box"><h3>同步状态</h3><p>最近同步：{props.syncStatus ? fullDateTime(props.syncStatus.lastSyncAt) : "暂无"} · 数据更新：{props.syncStatus?.dataUpdatedAt ? fullDateTime(props.syncStatus.dataUpdatedAt) : "暂无"}</p></div>
       <div className="schedule-box changelog-box">
         <h3>更新日志</h3>
+        <div className="changelog-row"><strong>0.8.18</strong><span>2026-07-31</span><p>普通卡正面或反面含 LaTeX 公式时，正面及翻面后的题目文字会显示为正文的约 115%。</p></div>
         <div className="changelog-row"><strong>0.8.17</strong><span>2026-07-31</span><p>普通卡正面及翻面后的题目文字字号改为与短语型单词卡一致。</p></div>
         <div className="changelog-row"><strong>0.8.16</strong><span>2026-07-30</span><p>全站加粗文字调整为 650 字重，以提升阅读清晰度。</p></div>
         <div className="changelog-row"><strong>0.8.15</strong><span>2026-07-30</span><p>全站加粗文字统一调整为 520 字重；普通卡正面内容字号调整为 54px。</p></div>
@@ -3925,9 +3927,10 @@ function CardPreview(props: { card: Card; onClose: () => void }) {
   const [flipped, setFlipped] = useState(false);
   const choices = parseChoices(props.card.choices);
   const layout = choiceLayoutClass(props.card.card_type === "choice" ? choices : [props.card.front, props.card.example], "auto");
+  const basicCardHasLatexFormula = props.card.card_type === "basic" && [props.card.front, props.card.back].some(hasLatexFormula);
   return (
     <div className="card-preview-overlay">
-      <section className="study-panel card-preview-panel align-center">
+      <section className={`study-panel card-preview-panel align-center ${basicCardHasLatexFormula ? "basic-latex-card" : ""}`}>
         <div className="study-fixed-top">
           <div className="study-actions preview-actions">
             <span className="type-pill">{cardTypeLabels[props.card.card_type]}</span>
