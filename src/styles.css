@@ -1240,7 +1240,6 @@ textarea:focus {
   --study-small-size: 16px;
   --study-detail-size: 16px;
   --study-question-size: 24px;
-  --study-basic-front-size: 54px;
   --study-choice-size: 16px;
   --study-result-size: 16px;
   --study-word-content-max: 720px;
@@ -2005,7 +2004,7 @@ textarea:focus {
 
 .flip-card-face > .basic-face,
 .flip-card-face .basic-face {
-  font-size: var(--study-basic-front-size);
+  font-size: clamp(var(--study-phrase-word-min), 6.8vw, var(--study-phrase-word-max));
 }
 
 .flip-card-face .basic-face .math-block {

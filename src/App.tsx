@@ -81,7 +81,7 @@ declare global {
   }
 }
 
-const version = "0.8.16";
+const version = "0.8.17";
 const logExportPressCount = 6;
 const logExportKey = "a";
 const logExportResetMs = 1800;
@@ -2878,7 +2878,6 @@ function StudyView(props: {
     "--study-small-size": `${Math.round(16 * scale)}px`,
     "--study-detail-size": `${Math.round(16 * scale)}px`,
     "--study-question-size": `${Math.round(24 * scale)}px`,
-    "--study-basic-front-size": `${Math.round(54 * scale)}px`,
     "--study-choice-size": `${Math.round(16 * scale)}px`,
     "--study-result-size": `${Math.round(16 * scale)}px`,
     "--study-word-content-max": `${Math.round(720 * Math.max(1, scale))}px`,
@@ -3836,6 +3835,7 @@ function AboutView(props: { syncStatus: SyncStatus | null }) {
       <div className="schedule-box"><h3>同步状态</h3><p>最近同步：{props.syncStatus ? fullDateTime(props.syncStatus.lastSyncAt) : "暂无"} · 数据更新：{props.syncStatus?.dataUpdatedAt ? fullDateTime(props.syncStatus.dataUpdatedAt) : "暂无"}</p></div>
       <div className="schedule-box changelog-box">
         <h3>更新日志</h3>
+        <div className="changelog-row"><strong>0.8.17</strong><span>2026-07-31</span><p>普通卡正面及翻面后的题目文字字号改为与短语型单词卡一致。</p></div>
         <div className="changelog-row"><strong>0.8.16</strong><span>2026-07-30</span><p>全站加粗文字调整为 650 字重，以提升阅读清晰度。</p></div>
         <div className="changelog-row"><strong>0.8.15</strong><span>2026-07-30</span><p>全站加粗文字统一调整为 520 字重；普通卡正面内容字号调整为 54px。</p></div>
         <div className="changelog-row"><strong>0.8.14</strong><span>2026-07-30</span><p>修复学习页题目参考在长内容滚动后会离开右上角的问题；现在会始终固定在学习滚动区域右上方。</p></div>
