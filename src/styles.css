@@ -2372,23 +2372,25 @@ textarea:focus {
   grid-template-columns: minmax(0, 1fr) minmax(240px, var(--answer-dock-width));
 }
 
-/* Keep the sticky reference dock bounded by the learning viewport, rather than
-   by a short card body. Otherwise it starts scrolling away after that body. */
+/* Reserve a right column for the reference dock while its fixed desktop
+   presentation stays anchored to the learning viewport. */
 .study-scroll > .answer-layout.with-dock {
   min-height: 100%;
 }
 
 .question-dock {
-  position: sticky;
-  top: 0;
+  position: fixed;
+  top: var(--question-dock-top, 0px);
+  left: var(--question-dock-left, auto);
   align-self: start;
   z-index: 1;
   display: grid;
   grid-template-rows: auto minmax(0, 1fr);
   gap: 8px;
-  width: 100%;
+  width: var(--answer-dock-width);
   max-width: 100%;
-  max-height: 100%;
+  height: var(--question-dock-height, auto);
+  max-height: var(--question-dock-height, 100%);
   overflow: hidden;
   padding: 10px;
   border: 1px solid var(--border);
@@ -3791,6 +3793,7 @@ textarea {
   .question-dock {
     position: static;
     width: 100%;
+    height: auto;
     max-height: none;
   }
 

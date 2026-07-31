@@ -2403,12 +2403,20 @@ function StudyView(props: {
       const panelRect = panel.getBoundingClientRect();
       const cardRect = cardFrame.getBoundingClientRect();
       const answerLayout = answerLayoutRef.current;
+      const scrollRect = studyScrollRef.current?.getBoundingClientRect();
       const referenceRect = answerLayout?.classList.contains("with-dock") ? answerLayout.getBoundingClientRect() : undefined;
       const inset = 8;
       const rightEdge = referenceRect?.right ?? cardRect.right;
       panel.style.setProperty("--rating-toast-right", `${Math.max(0, panelRect.right - rightEdge + inset)}px`);
       panel.style.setProperty("--rating-toast-bottom", `${Math.max(0, panelRect.bottom - cardRect.bottom + inset)}px`);
       panel.style.setProperty("--rating-toast-max-width", `${Math.max(220, (referenceRect?.width ?? cardRect.width) - inset * 2)}px`);
+      const questionDock = answerLayout?.querySelector<HTMLElement>(".question-dock");
+      if (referenceRect && scrollRect && questionDock) {
+        const dockWidth = questionDock.getBoundingClientRect().width;
+        panel.style.setProperty("--question-dock-left", `${referenceRect.right - dockWidth}px`);
+        panel.style.setProperty("--question-dock-top", `${scrollRect.top}px`);
+        panel.style.setProperty("--question-dock-height", `${scrollRect.height}px`);
+      }
       // Content width is now computed in CSS via calc(100% * var(--study-page-width))
     };
 
