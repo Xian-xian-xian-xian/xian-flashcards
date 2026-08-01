@@ -1244,7 +1244,6 @@ textarea:focus {
   --study-result-size: 16px;
   --study-front-min: 21px;
   --study-front-max: 35px;
-  --study-latex-front-size: 18px;
   --study-word-content-max: 720px;
   --study-word-back-edge-space: 0px;
   --study-page-width: 1;
@@ -2010,11 +2009,6 @@ textarea:focus {
 .flip-card-face > .basic-face,
 .flip-card-face .basic-face {
   font-size: clamp(var(--study-front-min), 4.42vw, var(--study-front-max));
-}
-
-.study-panel.basic-latex-card .flip-card-face > .basic-face,
-.study-panel.basic-latex-card .flip-card-face .basic-face {
-  font-size: var(--study-latex-front-size);
 }
 
 .flip-card-face .basic-face .math-block {

@@ -83,7 +83,7 @@ declare global {
   }
 }
 
-const version = "0.9.5";
+const version = "0.9.6";
 const logExportPressCount = 6;
 const logExportKey = "a";
 const logExportResetMs = 1800;
@@ -2912,7 +2912,6 @@ function StudyView(props: {
   ].some(hasLatexFormula));
   const explanationIsLong = explanationText.length > 80 || /\n|```|\$\$/.test(explanationText);
   const isBasicCard = card?.card_type === "basic";
-  const basicCardHasLatexFormula = Boolean(isBasicCard && card && [card.front, card.back].some(hasLatexFormula));
   const showAnswerDock = Boolean(card && checked && explanationIsLong && answerDockOpen);
   const showBasicReferenceDock = Boolean(isBasicCard && flipped && answerDockOpen);
   const showReferenceDock = showAnswerDock || showBasicReferenceDock;
@@ -2949,7 +2948,6 @@ function StudyView(props: {
     "--study-font-family": studyFontStack(props.studyFontFamily),
     "--study-front-min": `${Math.round(29 * scale * 0.65)}px`,
     "--study-front-max": `${Math.round(54 * scale * 0.65)}px`,
-    "--study-latex-front-size": `${Math.round(24 * scale * 1.15 * 0.65)}px`,
     "--answer-dock-width": `${answerDockWidth}px`
   } as CSSProperties & Record<string, string>;
   const desktopQuestionDockStyle = {
@@ -3325,7 +3323,7 @@ function StudyView(props: {
               busy={busy === "session"}
             />
       ) : <EmptyState text={studyMode === "grind" ? (props.selectedStudyDeckId ? "请选择开始无尽学习。" : "请先选择一个卡组。") : studyMode === "new" ? "这个卡组暂无可新学卡片。" : "这个卡组暂无到期复习卡片。"} /> : (
-        <div ref={studyPanelRef} key={`${card.id}-${cardRevision}`} className={`study-panel ${cardMotion} align-${props.studyTextAlign} ${checked === "right" ? "celebrating" : ""} ${pronunciationXmlOpen ? "xml-open" : ""} ${basicCardHasLatexFormula ? "basic-latex-card" : ""}`} style={studyStyle}>
+        <div ref={studyPanelRef} key={`${card.id}-${cardRevision}`} className={`study-panel ${cardMotion} align-${props.studyTextAlign} ${checked === "right" ? "celebrating" : ""} ${pronunciationXmlOpen ? "xml-open" : ""}`} style={studyStyle}>
           {checked === "right" && (
             <div className="answer-celebration" key={celebrationKey} aria-hidden="true">
               <span className="celebration-ring" />
@@ -3941,6 +3939,7 @@ function AboutView(props: { syncStatus: SyncStatus | null }) {
       <div className="schedule-box"><h3>同步状态</h3><p>最近同步：{props.syncStatus ? fullDateTime(props.syncStatus.lastSyncAt) : "暂无"} · 数据更新：{props.syncStatus?.dataUpdatedAt ? fullDateTime(props.syncStatus.dataUpdatedAt) : "暂无"}</p></div>
       <div className="schedule-box changelog-box">
         <h3>更新日志</h3>
+        <div className="changelog-row"><strong>0.9.6</strong><span>2026-08-01</span><p>删除普通卡出现 LaTeX 公式时自动缩小题面字体的规则；公式与普通文字保持相同字号。</p></div>
         <div className="changelog-row"><strong>0.9.5</strong><span>2026-08-01</span><p>学习页“更多学习工具”下拉菜单现始终显示在题目参考之上，不再被遮住。</p></div>
         <div className="changelog-row"><strong>0.9.4</strong><span>2026-08-01</span><p>题目参考固定在学习窗口右侧并保持恒定高度；长内容仅在题目参考内部滚动，不再跟随学习页滚动。</p></div>
         <div className="changelog-row"><strong>0.9.3</strong><span>2026-08-01</span><p>选择题和填空题在小字号下会填满学习区域；三类题面缩小至当前字号的 65%；题目参考随内容自适应高度；修复答案含逗号时误判为多选题。</p></div>
@@ -4037,10 +4036,9 @@ function CardPreview(props: { card: Card; onClose: () => void }) {
   const [flipped, setFlipped] = useState(false);
   const choices = parseChoices(props.card.choices);
   const layout = choiceLayoutClass(props.card.card_type === "choice" ? choices : [props.card.front, props.card.example], "auto");
-  const basicCardHasLatexFormula = props.card.card_type === "basic" && [props.card.front, props.card.back].some(hasLatexFormula);
   return (
     <div className="card-preview-overlay">
-      <section className={`study-panel card-preview-panel align-center ${basicCardHasLatexFormula ? "basic-latex-card" : ""}`}>
+      <section className="study-panel card-preview-panel align-center">
         <div className="study-fixed-top">
           <div className="study-actions preview-actions">
             <span className="type-pill">{cardTypeLabels[props.card.card_type]}</span>
