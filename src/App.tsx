@@ -83,7 +83,7 @@ declare global {
   }
 }
 
-const version = "0.9.2";
+const version = "0.9.3";
 const logExportPressCount = 6;
 const logExportKey = "a";
 const logExportResetMs = 1800;
@@ -2951,13 +2951,16 @@ function StudyView(props: {
     "--study-text-align": props.studyTextAlign,
     "--study-line-height": String(props.studyLineHeight + (cardHasLatexFormula ? 0.5 : 0)),
     "--study-font-family": studyFontStack(props.studyFontFamily),
+    "--study-front-min": `${Math.round(29 * scale * 0.65)}px`,
+    "--study-front-max": `${Math.round(54 * scale * 0.65)}px`,
+    "--study-latex-front-size": `${Math.round(24 * scale * 1.15 * 0.65)}px`,
     "--answer-dock-width": `${answerDockWidth}px`
   } as CSSProperties & Record<string, string>;
   const desktopQuestionDockStyle = {
     ...studyStyle,
     "--question-dock-top": `${questionDockAnchor.top}px`,
     "--question-dock-left": `${questionDockAnchor.left}px`,
-    "--question-dock-height": `${questionDockAnchor.height}px`
+    "--question-dock-max-height": `${questionDockAnchor.height}px`
   } as CSSProperties & Record<string, string>;
   const desktopQuestionDock = !card ? null : showBasicReferenceDock ? (
     <QuestionDock
@@ -3504,7 +3507,7 @@ function StudyView(props: {
                   </button>
                 )}
                 {card.card_type === "choice" && (
-                  <div ref={answerLayoutRef} className={`answer-layout ${showAnswerDock ? "with-dock" : ""}`}>
+                  <div ref={answerLayoutRef} className={`answer-layout study-question-layout ${showAnswerDock ? "with-dock" : ""}`}>
                     <div ref={(node) => { cardFrameRef.current = node; }} className={`question-box choice-question ${choiceLayoutClass(choices, props.studyChoiceLayout)}`}>
                       <MarkdownText value={card.front} className="question-text" />
                       <ChoiceArea choices={choices} answers={correctChoiceAnswers} selected={selectedChoice} checked={checked} layout={props.studyChoiceLayout} multiple={multipleChoice} onChoose={selectChoice}>
@@ -3526,7 +3529,7 @@ function StudyView(props: {
                   </div>
                 )}
                 {card.card_type === "blank" && (
-                  <div ref={answerLayoutRef} className={`answer-layout ${showAnswerDock ? "with-dock" : ""}`}>
+                  <div ref={answerLayoutRef} className={`answer-layout study-question-layout ${showAnswerDock ? "with-dock" : ""}`}>
                     <div ref={(node) => { cardFrameRef.current = node; }} className={`question-box choice-question blank-question ${choiceLayoutClass([card.front, card.example], props.studyChoiceLayout)}`}>
                       <form className="blank-answer-form" onSubmit={submitBlankAnswer}>
                         <MarkdownText
@@ -3942,6 +3945,7 @@ function AboutView(props: { syncStatus: SyncStatus | null }) {
       <div className="schedule-box"><h3>同步状态</h3><p>最近同步：{props.syncStatus ? fullDateTime(props.syncStatus.lastSyncAt) : "暂无"} · 数据更新：{props.syncStatus?.dataUpdatedAt ? fullDateTime(props.syncStatus.dataUpdatedAt) : "暂无"}</p></div>
       <div className="schedule-box changelog-box">
         <h3>更新日志</h3>
+        <div className="changelog-row"><strong>0.9.3</strong><span>2026-08-01</span><p>选择题和填空题在小字号下会填满学习区域；三类题面缩小至当前字号的 65%；题目参考随内容自适应高度；修复答案含逗号时误判为多选题。</p></div>
         <div className="changelog-row"><strong>0.9.2</strong><span>2026-08-01</span><p>题目参考的显示状态会持续保留；全屏和普通窗口中均与学习卡片主体上下对齐。</p></div>
         <div className="changelog-row"><strong>0.9.1</strong><span>2026-07-31</span><p>选择题答案输入多个选项时自动成为多选题；需选中全部且仅选中正确选项后提交，才会判定正确。</p></div>
         <div className="changelog-row"><strong>0.8.18</strong><span>2026-07-31</span><p>普通卡正面或反面含 LaTeX 公式时，正面及翻面后的题目文字会显示为正文的约 115%。</p></div>

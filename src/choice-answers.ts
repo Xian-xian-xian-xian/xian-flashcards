@@ -12,10 +12,13 @@ export function choiceAnswersMatch(choice: string, answer: string) {
   return normalizeChoiceAnswer(choice) === normalizeChoiceAnswer(answer) || choiceOptionKey(choice) === choiceOptionKey(answer);
 }
 
-/** Correct answers accept |, commas, semicolons, Chinese enumeration commas, or newlines. */
+/**
+ * Correct answers accept explicit separators. Commas only split label-based
+ * answers (such as A,C), so normal prose remains a single answer.
+ */
 export function splitChoiceAnswers(value: string) {
   return value
-    .split(/[|\n、，,]+|[；;](?=\s*\S)/)
+    .split(/[|\n、]+|[；;](?=\s*\S)|[,，]\s*(?=[A-Ha-h](?:[\s.)、:：-]+|$))/)
     .map((item) => item.trim())
     .filter(Boolean);
 }

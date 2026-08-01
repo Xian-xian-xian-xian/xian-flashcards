@@ -1242,6 +1242,9 @@ textarea:focus {
   --study-question-size: 24px;
   --study-choice-size: 16px;
   --study-result-size: 16px;
+  --study-front-min: 21px;
+  --study-front-max: 35px;
+  --study-latex-front-size: 18px;
   --study-word-content-max: 720px;
   --study-word-back-edge-space: 0px;
   --study-page-width: 1;
@@ -2004,12 +2007,12 @@ textarea:focus {
 
 .flip-card-face > .basic-face,
 .flip-card-face .basic-face {
-  font-size: clamp(var(--study-phrase-word-min), 6.8vw, var(--study-phrase-word-max));
+  font-size: clamp(var(--study-front-min), 4.42vw, var(--study-front-max));
 }
 
 .study-panel.basic-latex-card .flip-card-face > .basic-face,
 .study-panel.basic-latex-card .flip-card-face .basic-face {
-  font-size: calc(var(--study-question-size) * 1.15);
+  font-size: var(--study-latex-front-size);
 }
 
 .flip-card-face .basic-face .math-block {
@@ -2378,6 +2381,16 @@ textarea:focus {
   min-height: 100%;
 }
 
+.study-scroll > .study-question-layout {
+  min-height: 100%;
+  align-self: stretch;
+}
+
+.study-question-layout > .question-box {
+  min-height: 100%;
+  align-self: stretch;
+}
+
 .question-dock {
   position: fixed;
   top: var(--question-dock-top, 0px);
@@ -2389,8 +2402,8 @@ textarea:focus {
   gap: 8px;
   width: var(--answer-dock-width);
   max-width: 100%;
-  height: var(--question-dock-height, auto);
-  max-height: var(--question-dock-height, 100%);
+  height: auto;
+  max-height: var(--question-dock-max-height, 100%);
   overflow: hidden;
   padding: 10px;
   border: 1px solid var(--border);
@@ -2512,7 +2525,7 @@ body.resizing-answer-dock .question-dock-resizer::after {
 .question-text {
   width: calc(100% * var(--study-page-width));
   margin: 0;
-  font-size: clamp(var(--study-phrase-word-min), 6.8vw, var(--study-phrase-word-max));
+  font-size: clamp(var(--study-front-min), 4.42vw, var(--study-front-max));
   font-weight: 650;
   line-height: var(--study-line-height);
 }

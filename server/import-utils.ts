@@ -83,7 +83,7 @@ function addAnswerChoice(choices: string[], answer: string) {
 
 function splitChoiceAnswerText(value: string) {
   return value
-    .split(/[|\n、，,]+|[；;](?=\s*\S)/)
+    .split(/[|\n、]+|[；;](?=\s*\S)|[,，]\s*(?=[A-Ha-h](?:[\s.)、:：-]+|$))/)
     .map((item) => item.trim())
     .filter(Boolean);
 }

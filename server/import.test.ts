@@ -49,6 +49,37 @@ describe("normalizeImportRows", () => {
     });
   });
 
+  it("keeps commas in a single choice answer while preserving labeled multi-select answers", () => {
+    const [single, multiple] = normalizeImportRows([
+      {
+        card_type: "choice",
+        front: "随机存储器RAM的特点是（ ）。",
+        options: "RAM中只能写入信息 | RAM中只能读出信息 | RAM中既不可写入信息，也不可读出信息 | RAM中既可写入信息，也可读出信息",
+        answer: "RAM中既可写入信息，也可读出信息"
+      },
+      {
+        card_type: "choice",
+        front: "哪些是正确的？",
+        options: "A. 选项一 | B. 选项二 | C. 选项三",
+        answer: "A,C"
+      }
+    ]);
+
+    expect(single).toMatchObject({
+      back: "RAM中既可写入信息，也可读出信息",
+      choices: [
+        "RAM中只能写入信息",
+        "RAM中只能读出信息",
+        "RAM中既不可写入信息，也不可读出信息",
+        "RAM中既可写入信息，也可读出信息"
+      ]
+    });
+    expect(multiple).toMatchObject({
+      back: "A,C",
+      choices: ["A. 选项一", "B. 选项二", "C. 选项三"]
+    });
+  });
+
   it("导入多空、每空多答案和乱序开关", () => {
     const rows = normalizeImportRows([{
       card_type: "blank",
