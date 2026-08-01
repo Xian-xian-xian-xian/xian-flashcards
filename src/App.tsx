@@ -83,7 +83,7 @@ declare global {
   }
 }
 
-const version = "0.9.3";
+const version = "0.9.4";
 const logExportPressCount = 6;
 const logExportKey = "a";
 const logExportResetMs = 1800;
@@ -2413,17 +2413,18 @@ function StudyView(props: {
     const updateAnchor = () => {
       const panelRect = panel.getBoundingClientRect();
       const cardRect = cardFrame.getBoundingClientRect();
+      const scrollRect = studyScrollRef.current?.getBoundingClientRect();
       const referenceRect = answerLayout?.classList.contains("with-dock") ? answerLayout.getBoundingClientRect() : undefined;
       const inset = 8;
       const rightEdge = referenceRect?.right ?? cardRect.right;
       panel.style.setProperty("--rating-toast-right", `${Math.max(0, panelRect.right - rightEdge + inset)}px`);
       panel.style.setProperty("--rating-toast-bottom", `${Math.max(0, panelRect.bottom - cardRect.bottom + inset)}px`);
       panel.style.setProperty("--rating-toast-max-width", `${Math.max(220, (referenceRect?.width ?? cardRect.width) - inset * 2)}px`);
-      if (referenceRect) {
+      if (referenceRect && scrollRect) {
         const nextAnchor = {
-          top: cardRect.top,
+          top: scrollRect.top,
           left: referenceRect.right - answerDockWidth,
-          height: cardRect.height
+          height: scrollRect.height
         };
         setQuestionDockAnchor((anchor) => (
           anchor.top === nextAnchor.top && anchor.left === nextAnchor.left && anchor.height === nextAnchor.height
@@ -2435,22 +2436,17 @@ function StudyView(props: {
     };
 
     updateAnchor();
-    const scrollElement = studyScrollRef.current;
     const resizeObserver = typeof ResizeObserver === "undefined" ? null : new ResizeObserver(updateAnchor);
     resizeObserver?.observe(panel);
     resizeObserver?.observe(cardFrame);
     if (answerLayout) resizeObserver?.observe(answerLayout);
     window.addEventListener("resize", updateAnchor);
-    window.addEventListener("scroll", updateAnchor, { passive: true });
     document.addEventListener("fullscreenchange", updateAnchor);
-    scrollElement?.addEventListener("scroll", updateAnchor, { passive: true });
 
     return () => {
       resizeObserver?.disconnect();
       window.removeEventListener("resize", updateAnchor);
-      window.removeEventListener("scroll", updateAnchor);
       document.removeEventListener("fullscreenchange", updateAnchor);
-      scrollElement?.removeEventListener("scroll", updateAnchor);
     };
   }, [card?.id, cardRevision, flipped, checked, answerDockOpen, answerDockWidth, immersive, props.studyChoiceLayout, props.studyTextScale, props.studyTextAlign, props.studyLineHeight, props.studyFontFamily]);
 
@@ -2960,7 +2956,7 @@ function StudyView(props: {
     ...studyStyle,
     "--question-dock-top": `${questionDockAnchor.top}px`,
     "--question-dock-left": `${questionDockAnchor.left}px`,
-    "--question-dock-max-height": `${questionDockAnchor.height}px`
+    "--question-dock-height": `${questionDockAnchor.height}px`
   } as CSSProperties & Record<string, string>;
   const desktopQuestionDock = !card ? null : showBasicReferenceDock ? (
     <QuestionDock
@@ -3945,6 +3941,7 @@ function AboutView(props: { syncStatus: SyncStatus | null }) {
       <div className="schedule-box"><h3>同步状态</h3><p>最近同步：{props.syncStatus ? fullDateTime(props.syncStatus.lastSyncAt) : "暂无"} · 数据更新：{props.syncStatus?.dataUpdatedAt ? fullDateTime(props.syncStatus.dataUpdatedAt) : "暂无"}</p></div>
       <div className="schedule-box changelog-box">
         <h3>更新日志</h3>
+        <div className="changelog-row"><strong>0.9.4</strong><span>2026-08-01</span><p>题目参考固定在学习窗口右侧并保持恒定高度；长内容仅在题目参考内部滚动，不再跟随学习页滚动。</p></div>
         <div className="changelog-row"><strong>0.9.3</strong><span>2026-08-01</span><p>选择题和填空题在小字号下会填满学习区域；三类题面缩小至当前字号的 65%；题目参考随内容自适应高度；修复答案含逗号时误判为多选题。</p></div>
         <div className="changelog-row"><strong>0.9.2</strong><span>2026-08-01</span><p>题目参考的显示状态会持续保留；全屏和普通窗口中均与学习卡片主体上下对齐。</p></div>
         <div className="changelog-row"><strong>0.9.1</strong><span>2026-07-31</span><p>选择题答案输入多个选项时自动成为多选题；需选中全部且仅选中正确选项后提交，才会判定正确。</p></div>
