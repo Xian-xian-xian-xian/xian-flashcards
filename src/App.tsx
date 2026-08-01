@@ -50,6 +50,9 @@ import Volume2 from "lucide-react/dist/esm/icons/volume-2";
 import XCircle from "lucide-react/dist/esm/icons/x-circle";
 import { CSSProperties, FormEvent, PointerEvent as ReactPointerEvent, ReactNode, TouchEvent as ReactTouchEvent, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
+import ReactMarkdown from "react-markdown";
+import remarkGfm from "remark-gfm";
+import remarkMath from "remark-math";
 import { api, type CardPayload, type ConflictError } from "./api";
 import {
   blankAnswerDisplay,
@@ -82,8 +85,7 @@ declare global {
     katex?: KatexRuntime;
   }
 }
-
-const version = "0.9.6";
+const version = "0.9.7";
 const logExportPressCount = 6;
 const logExportKey = "a";
 const logExportResetMs = 1800;
@@ -208,12 +210,6 @@ function parseChoices(value: string | string[] | undefined) {
   return splitChoiceText(value);
 }
 
-type MarkdownBlock =
-  | { type: "code"; language: string; content: string }
-  | { type: "math"; content: string }
-  | { type: "blank"; count: number }
-  | { type: "text"; content: string };
-
 function splitChoiceText(value: string) {
   return value
     .split(/[|\n]+|[；;](?=\s*\S)/)
@@ -221,227 +217,73 @@ function splitChoiceText(value: string) {
     .filter(Boolean);
 }
 
-function pushMarkdownTextBlocks(blocks: MarkdownBlock[], value: string) {
-  value.split(/(\n{2,})/).forEach((part) => {
-    if (!part) return;
-    if (/^\n{2,}$/.test(part)) {
-      blocks.push({ type: "blank", count: part.length - 1 });
-      return;
-    }
-    const content = part.replace(/^\n+|\n+$/g, "").trim();
-    if (content) blocks.push({ type: "text", content });
-  });
-}
-
-function markdownBlocks(value: string): MarkdownBlock[] {
-  const blocks: MarkdownBlock[] = [];
-  const normalized = value
-    .replace(/\r\n/g, "\n")
-    .replace(/(^|\n)([*_]{2})[ \t]*(```[\w-]*\n[\s\S]*?\n?```)[ \t]*\2(?=\n|$)/g, "$1$3");
-  const pattern = /```([\w-]*)[ \t]*\n([\s\S]*?)\n?```|\$\$\n?([\s\S]*?)\n?\$\$|\\\[\n?([\s\S]*?)\n?\\\]|\\begin\{(equation\*?|align\*?|gather\*?|multline\*?|split)\}([\s\S]*?)\\end\{(?:equation\*?|align\*?|gather\*?|multline\*?|split)\}/g;
-  let lastIndex = 0;
-
-  normalized.replace(pattern, (match, language, code, dollarMath, bracketMath, environment, environmentMath, offset) => {
-    const before = normalized.slice(lastIndex, offset);
-    pushMarkdownTextBlocks(blocks, before);
-    if (match.startsWith("```")) {
-      blocks.push({ type: "code", language: String(language || "").trim(), content: String(code ?? "").replace(/\n$/, "") });
-    } else {
-      const math = dollarMath ?? bracketMath ?? (environment ? `\\begin{${environment}}${environmentMath ?? ""}\\end{${environment}}` : "");
-      blocks.push({ type: "math", content: String(math).trim() });
-    }
-    lastIndex = offset + match.length;
-    return match;
-  });
-
-  pushMarkdownTextBlocks(blocks, normalized.slice(lastIndex));
-  return blocks;
-}
-
-const escapedMarkdownPattern = /\\([\\`*_#+\-.!|>~$])/g;
-
-function protectEscapedMarkdown(value: string) {
-  const escaped: string[] = [];
-  const text = value.replace(escapedMarkdownPattern, (_match, char) => {
-    const token = `\uE000${escaped.length}\uE001`;
-    escaped.push(char);
-    return token;
-  });
-  const restore = (part: string) => part.replace(/\uE000(\d+)\uE001/g, (_match, index) => escaped[Number(index)] ?? "");
-  return { text, restore };
-}
-
 const blankMarkerPattern = /(\[\s*\]|_{2,}|（\s*）|\(\s*\))/g;
+const blankMarkerHrefPrefix = "https://markdown-blank.invalid/";
 
-const inlineMarkdownPattern = /(!\[[^\]]*]\([^)]+\)|\\\((.*?)\\\)|\\begin\{(equation\*?|align\*?|gather\*?|multline\*?|split)\}(.+?)\\end\{(?:equation\*?|align\*?|gather\*?|multline\*?|split)\}|\$([^$\n]+)\$|\*\*[^*]+\*\*|__[^_]+__|~~[^~]+~~|`[^`]+`|\[[^\]]+\]\([^)]+\)|\*[^*]+\*|_[^_]+_)/g;
-const bareMathPattern = /((?:\\[a-zA-Z]+\s*)?[A-Za-z][A-Za-z0-9]*\s*\([^)\n]*\)\s*=\s*[A-Za-z0-9{}()[\]^_+\-\\\s]+|[A-Za-z0-9{}()[\]^_+\-\\]+\s*=\s*[A-Za-z0-9{}()[\]^_+\-\\\s]+)/g;
-
-function looksLikeBareMath(value: string) {
-  const text = value.trim();
-  if (!text || /[\u4e00-\u9fff]/.test(text)) return false;
-  if (/^\\[a-zA-Z]+/.test(text)) return true;
-  if (!/[=^_{}\\]/.test(text)) return false;
-  if (/[<>]/.test(text)) return false;
-  return /^[A-Za-z0-9\s()[\]{}.,;:+\-*/=^_\\]+$/.test(text);
+function normalizeMarkdown(value: string) {
+  return value
+    .replace(/\r\n/g, "\n")
+    .replace(/\\\(([\s\S]*?)\\\)/g, (_match, math) => `$${math}$`)
+    .replace(/\\\[([\s\S]*?)\\\]/g, (_match, math) => `$$\n${math}\n$$`)
+    .replace(/\\begin\{(?:equation\*?|align\*?|gather\*?|multline\*?|split)\}([\s\S]*?)\\end\{(?:equation\*?|align\*?|gather\*?|multline\*?|split)\}/g, (_match, math) => `$$\n${math}\n$$`);
 }
 
 function hasLatexFormula(value: string) {
-  if (!value.trim()) return false;
-  const hasDelimitedFormula = /\$\$[\s\S]*?\$\$|\\\[[\s\S]*?\\\]|\\\([\s\S]*?\\\)|\\begin\{(?:equation\*?|align\*?|gather\*?|multline\*?|split)\}[\s\S]*?\\end\{(?:equation\*?|align\*?|gather\*?|multline\*?|split)\}|\$[^$\n]+\$/.test(value);
-  if (hasDelimitedFormula) return true;
-  bareMathPattern.lastIndex = 0;
-  const hasBareFormula = Array.from(value.matchAll(bareMathPattern)).some((match) => looksLikeBareMath(match[0]));
-  bareMathPattern.lastIndex = 0;
-  return hasBareFormula;
+  return /\$\$[\s\S]*?\$\$|\$[^$\n]+\$|\\\([\s\S]*?\\\)|\\\[[\s\S]*?\\\]|\\begin\{(?:equation\*?|align\*?|gather\*?|multline\*?|split)\}/.test(value);
 }
 
 function MathText(props: { value: string; displayMode?: boolean }) {
-  const html = useMemo(() => window.katex?.renderToString(latexRenderSource(props.value, props.displayMode), {
+  const katex = typeof window === "undefined" ? undefined : window.katex;
+  const html = useMemo(() => katex?.renderToString(latexRenderSource(props.value, props.displayMode), {
     displayMode: props.displayMode,
     throwOnError: false,
     trust: false,
     strict: "ignore"
-  }), [props.value, props.displayMode]);
+  }), [katex, props.value, props.displayMode]);
   if (!html) return <span className={props.displayMode ? "math-block" : "math-inline"}>{props.value}</span>;
   return <span className={props.displayMode ? "math-block" : "math-inline"} dangerouslySetInnerHTML={{ __html: html }} />;
 }
 
-function pushPlainTextWithBareMath(nodes: ReactNode[], value: string, restore: (part: string) => string) {
-  let lastIndex = 0;
-  value.replace(bareMathPattern, (match, _formula, offset) => {
-    if (offset > lastIndex) nodes.push(restore(value.slice(lastIndex, offset)));
-    const restored = restore(match);
-    nodes.push(looksLikeBareMath(restored) ? <MathText key={nodes.length} value={restored} /> : restored);
-    lastIndex = offset + match.length;
-    return match;
-  });
-  if (lastIndex < value.length) nodes.push(restore(value.slice(lastIndex)));
+function markdownWithBlankInputs(value: string) {
+  let index = 0;
+  return value.replace(blankMarkerPattern, () => `[＿＿](${blankMarkerHrefPrefix}${index++})`);
 }
 
-function renderInlineMarkdown(value: string) {
-  const nodes: ReactNode[] = [];
-  const protectedValue = protectEscapedMarkdown(value);
-  const source = protectedValue.text;
-  let lastIndex = 0;
-  source.replace(inlineMarkdownPattern, (match, _image, parenMath, environment, environmentMath, dollarMath, offset) => {
-    if (offset > lastIndex) pushPlainTextWithBareMath(nodes, source.slice(lastIndex, offset), protectedValue.restore);
-    if (match.startsWith("![")) {
-      const image = match.match(/^!\[([^\]]*)]\(([^)]+)\)$/);
-      nodes.push(image ? <img key={nodes.length} src={protectedValue.restore(image[2]).trim()} alt={protectedValue.restore(image[1])} loading="lazy" /> : protectedValue.restore(match));
-    } else if (parenMath !== undefined) {
-      nodes.push(<MathText key={nodes.length} value={protectedValue.restore(parenMath)} />);
-    } else if (environment) {
-      nodes.push(<MathText key={nodes.length} value={protectedValue.restore(`\\begin{${environment}}${environmentMath ?? ""}\\end{${environment}}`)} />);
-    } else if (dollarMath !== undefined) {
-      nodes.push(<MathText key={nodes.length} value={protectedValue.restore(dollarMath)} />);
-    } else if (match.startsWith("**") || match.startsWith("__")) {
-      nodes.push(<strong key={nodes.length}>{protectedValue.restore(match.slice(2, -2))}</strong>);
-    } else if (match.startsWith("~~")) {
-      nodes.push(<del key={nodes.length}>{protectedValue.restore(match.slice(2, -2))}</del>);
-    } else if (match.startsWith("`")) {
-      nodes.push(<code key={nodes.length}>{protectedValue.restore(match.slice(1, -1))}</code>);
-    } else if (match.startsWith("[")) {
-      const link = match.match(/^\[([^\]]+)\]\(([^)]+)\)$/);
-      nodes.push(link ? <a key={nodes.length} href={protectedValue.restore(link[2])} target="_blank" rel="noreferrer">{protectedValue.restore(link[1])}</a> : protectedValue.restore(match));
-    } else {
-      nodes.push(<em key={nodes.length}>{protectedValue.restore(match.slice(1, -1))}</em>);
-    }
-    lastIndex = offset + match.length;
-    return match;
-  });
-  if (lastIndex < source.length) pushPlainTextWithBareMath(nodes, source.slice(lastIndex), protectedValue.restore);
-  return nodes;
-}
-
-function renderInlineMarkdownWithBlanks(value: string, renderBlank?: (key: string) => ReactNode) {
-  if (!renderBlank) return renderInlineMarkdown(value);
-  const nodes: ReactNode[] = [];
-  value.split(blankMarkerPattern).forEach((part, index) => {
-    if (!part) return;
-    if (blankMarkerPattern.test(part)) {
-      blankMarkerPattern.lastIndex = 0;
-      nodes.push(renderBlank(`blank-${index}`));
-      return;
-    }
-    blankMarkerPattern.lastIndex = 0;
-    nodes.push(...renderInlineMarkdown(part));
-  });
-  blankMarkerPattern.lastIndex = 0;
-  return nodes;
-}
-
-function renderMarkdownLines(lines: string[], renderBlank?: (key: string) => ReactNode) {
-  return lines.map((line, lineIndex) => <span key={lineIndex} className="markdown-line">{renderInlineMarkdownWithBlanks(line, renderBlank)}</span>);
-}
-
-function renderMarkdownTextBlock(content: string, index: number, renderBlank?: (key: string) => ReactNode) {
-  if (/^\s*(-{3,}|\*{3,}|_{3,})\s*$/.test(content)) return <hr key={index} className="markdown-divider" />;
-  const lines = content.split("\n");
-  if (lines.some((line) => /^\s*(-{3,}|\*{3,}|_{3,})\s*$/.test(line))) {
-    const nodes: ReactNode[] = [];
-    let paragraph: string[] = [];
-    const flushParagraph = () => {
-      if (paragraph.length === 0) return;
-      nodes.push(renderMarkdownTextBlock(paragraph.join("\n"), nodes.length, renderBlank));
-      paragraph = [];
-    };
-    lines.forEach((line) => {
-      if (/^\s*(-{3,}|\*{3,}|_{3,})\s*$/.test(line)) {
-        flushParagraph();
-        nodes.push(<hr key={nodes.length} className="markdown-divider" />);
-      } else {
-        paragraph.push(line);
-      }
-    });
-    flushParagraph();
-    return <span key={index} className="markdown-fragment">{nodes}</span>;
-  }
-  const heading = content.match(/^(#{1,6})\s+(.+)$/);
-  if (heading) {
-    const level = heading[1].length;
-    return <strong key={index} className={`markdown-heading level-${level}`}>{renderInlineMarkdownWithBlanks(heading[2], renderBlank)}</strong>;
-  }
-  if (lines.every((line) => /^\s*> ?/.test(line))) {
-    return <blockquote key={index}>{renderMarkdownLines(lines.map((line) => line.replace(/^\s*> ?/, "")), renderBlank)}</blockquote>;
-  }
-  if (lines.every((line) => /^\s*[-+*]\s+/.test(line))) {
-    return <ul key={index}>{lines.map((line, lineIndex) => <li key={lineIndex}>{renderInlineMarkdownWithBlanks(line.replace(/^\s*[-+*]\s+/, ""), renderBlank)}</li>)}</ul>;
-  }
-  if (lines.every((line) => /^\s*\d+[.)]\s+/.test(line))) {
-    return <ol key={index}>{lines.map((line, lineIndex) => <li key={lineIndex}>{renderInlineMarkdownWithBlanks(line.replace(/^\s*\d+[.)]\s+/, ""), renderBlank)}</li>)}</ol>;
-  }
-  if (lines.length >= 2 && lines.every((line) => /^\s*\|.*\|\s*$/.test(line)) && /^\s*\|?(?:\s*:?-{3,}:?\s*\|)+\s*$/.test(lines[1])) {
-    const rows = lines.filter((_, rowIndex) => rowIndex !== 1).map((line) => line.trim().replace(/^\||\|$/g, "").split("|").map((cell) => cell.trim()));
-    return (
-      <span key={index} className="markdown-table-wrap">
-        <table>
-          <thead><tr>{rows[0].map((cell, cellIndex) => <th key={cellIndex}>{renderInlineMarkdownWithBlanks(cell, renderBlank)}</th>)}</tr></thead>
-          <tbody>{rows.slice(1).map((row, rowIndex) => <tr key={rowIndex}>{row.map((cell, cellIndex) => <td key={cellIndex}>{renderInlineMarkdownWithBlanks(cell, renderBlank)}</td>)}</tr>)}</tbody>
-        </table>
-      </span>
-    );
-  }
-  return <span key={index} className="markdown-paragraph">{renderMarkdownLines(lines, renderBlank)}</span>;
-}
-
-function MarkdownText(props: { value: string; className?: string; renderBlank?: (key: string) => ReactNode }) {
-  const blocks = markdownBlocks(props.value);
-  if (blocks.length === 0) return null;
+export function MarkdownText(props: { value: string; className?: string; renderBlank?: (key: string) => ReactNode }) {
+  if (!props.value.trim()) return null;
+  const source = props.renderBlank ? markdownWithBlankInputs(normalizeMarkdown(props.value)) : normalizeMarkdown(props.value);
+  const heading = (level: number) => ({ children }: { children?: ReactNode }) => <strong className={`markdown-heading level-${level}`}>{children}</strong>;
   return (
     <span className={`markdown-text ${props.className ?? ""}`}>
-      {blocks.map((block, index) => {
-        if (block.type === "code") {
-          return (
-            <span key={index} className="code-block">
-              {block.language && <span className="code-language">{block.language}</span>}
-              <code>{block.content}</code>
-            </span>
-          );
-        }
-        if (block.type === "math") return <MathText key={index} value={block.content} displayMode />;
-        if (block.type === "blank") return <span key={index} className="markdown-blank-line" style={{ "--blank-lines": String(block.count) } as CSSProperties} />;
-        return renderMarkdownTextBlock(block.content, index, props.renderBlank);
-      })}
+      <ReactMarkdown
+        remarkPlugins={[remarkGfm, remarkMath]}
+        skipHtml
+        components={{
+          h1: heading(1), h2: heading(2), h3: heading(3), h4: heading(4), h5: heading(5), h6: heading(6),
+          p: ({ children }) => <span className="markdown-paragraph">{children}</span>,
+          pre: ({ children }) => <>{children}</>,
+          code: ({ className, children, node }) => {
+            const value = String(children).replace(/\n$/, "");
+            const isMath = Boolean(className?.includes("language-math"));
+            if (isMath) return <MathText value={value} displayMode={className?.includes("math-display")} />;
+            const isBlock = node?.position?.start.column === 1;
+            return isBlock
+              ? <span className="code-block">{className && <span className="code-language">{className.replace("language-", "")}</span>}<code className={className}>{children}</code></span>
+              : <code className={className}>{children}</code>;
+          },
+          hr: () => <hr className="markdown-divider" />,
+          table: ({ children }) => <span className="markdown-table-wrap"><table>{children}</table></span>,
+          a: ({ href, children }) => {
+            const blankIndex = href?.startsWith(blankMarkerHrefPrefix) ? Number(href.slice(blankMarkerHrefPrefix.length)) : NaN;
+            if (props.renderBlank && Number.isInteger(blankIndex) && blankIndex >= 0) return <>{props.renderBlank(`blank-${blankIndex}`)}</>;
+            return <a href={href} target="_blank" rel="noreferrer">{children}</a>;
+          },
+          img: ({ src, alt }) => <img src={src} alt={alt ?? ""} loading="lazy" />,
+          input: ({ type, checked }) => type === "checkbox" ? <input type="checkbox" checked={checked} readOnly disabled /> : <input type={type} />
+        }}
+      >
+        {source}
+      </ReactMarkdown>
     </span>
   );
 }
@@ -1987,6 +1829,7 @@ function CardEditor(props: { card?: Card; layout?: "default" | "single"; onSubmi
 
   return (
     <form className={`card-form ${props.card || props.layout === "single" ? "edit-card-form" : ""}`} onSubmit={submit}>
+      <p className="hint">题面、答案、解析、助记、备注和选项均支持 Markdown：标题、引用、列表、链接、图片、表格、任务项、代码块及 LaTeX 公式。</p>
       <EditorField label="卡片类型">
         <select value={cardType} onChange={(event) => {
           const nextType = event.target.value as CardType;
@@ -3939,6 +3782,7 @@ function AboutView(props: { syncStatus: SyncStatus | null }) {
       <div className="schedule-box"><h3>同步状态</h3><p>最近同步：{props.syncStatus ? fullDateTime(props.syncStatus.lastSyncAt) : "暂无"} · 数据更新：{props.syncStatus?.dataUpdatedAt ? fullDateTime(props.syncStatus.dataUpdatedAt) : "暂无"}</p></div>
       <div className="schedule-box changelog-box">
         <h3>更新日志</h3>
+        <div className="changelog-row"><strong>0.9.7</strong><span>2026-08-01</span><p>卡片所有内容展示统一支持 CommonMark、GFM 与 LaTeX；标题、引用、列表、链接、表格、任务项、代码块和公式在学习页、题目参考、预览与列表中一致显示。</p></div>
         <div className="changelog-row"><strong>0.9.6</strong><span>2026-08-01</span><p>删除普通卡出现 LaTeX 公式时自动缩小题面字体的规则；公式与普通文字保持相同字号。</p></div>
         <div className="changelog-row"><strong>0.9.5</strong><span>2026-08-01</span><p>学习页“更多学习工具”下拉菜单现始终显示在题目参考之上，不再被遮住。</p></div>
         <div className="changelog-row"><strong>0.9.4</strong><span>2026-08-01</span><p>题目参考固定在学习窗口右侧并保持恒定高度；长内容仅在题目参考内部滚动，不再跟随学习页滚动。</p></div>
