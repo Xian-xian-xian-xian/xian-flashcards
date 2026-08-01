@@ -260,8 +260,13 @@ function addAnswerChoice(choices: string[], answer: string) {
 
 function splitChoiceAnswerText(value: string) {
   return value
-    .split(/[|\n、]+|[；;](?=\s*\S)|[,，]\s*(?=[A-Ha-h](?:[\s.)、:：-]+|$))/)
-    .map((item) => item.trim())
+    .split(/[|\n]+|[；;](?=\s*\S)|[,，]\s*(?=[A-Ha-h](?:[\s.)、:：-]+|$))/)
+    .flatMap((item) => {
+      const answer = item.trim();
+      return /^[A-H](?:\s*、\s*[A-H])+$/i.test(answer)
+        ? answer.split(/\s*、\s*/)
+        : [answer];
+    })
     .filter(Boolean);
 }
 

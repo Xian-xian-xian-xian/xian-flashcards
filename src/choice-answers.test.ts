@@ -16,6 +16,11 @@ describe("multiple choice answers", () => {
     expect(choiceAnswerSetMatches([answer], splitChoiceAnswers(answer))).toBe(true);
   });
 
+  it("keeps enumeration commas inside a single correct answer", () => {
+    const answer = "具备甲、乙两项条件";
+    expect(splitChoiceAnswers(answer)).toEqual([answer]);
+  });
+
   it("requires the exact set of correct options", () => {
     expect(choiceAnswerSetMatches(["A. First", "C. Third"], ["A", "C"])).toBe(true);
     expect(choiceAnswerSetMatches(["A", "C", "D"], ["A", "C"])).toBe(false);

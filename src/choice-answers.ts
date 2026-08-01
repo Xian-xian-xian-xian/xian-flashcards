@@ -18,8 +18,13 @@ export function choiceAnswersMatch(choice: string, answer: string) {
  */
 export function splitChoiceAnswers(value: string) {
   return value
-    .split(/[|\n、]+|[；;](?=\s*\S)|[,，]\s*(?=[A-Ha-h](?:[\s.)、:：-]+|$))/)
-    .map((item) => item.trim())
+    .split(/[|\n]+|[；;](?=\s*\S)|[,，]\s*(?=[A-Ha-h](?:[\s.)、:：-]+|$))/)
+    .flatMap((item) => {
+      const answer = item.trim();
+      return /^[A-H](?:\s*、\s*[A-H])+$/i.test(answer)
+        ? answer.split(/\s*、\s*/)
+        : [answer];
+    })
     .filter(Boolean);
 }
 

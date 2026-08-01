@@ -80,6 +80,20 @@ describe("normalizeImportRows", () => {
     });
   });
 
+  it("keeps enumeration commas in a choice option and its answer", () => {
+    const [row] = normalizeImportRows([{
+      card_type: "choice",
+      front: "下列哪项正确？",
+      options: "具备甲、乙两项条件 | 不具备条件",
+      answer: "具备甲、乙两项条件"
+    }]);
+
+    expect(row).toMatchObject({
+      back: "具备甲、乙两项条件",
+      choices: ["具备甲、乙两项条件", "不具备条件"]
+    });
+  });
+
   it("导入多空、每空多答案和乱序开关", () => {
     const rows = normalizeImportRows([{
       card_type: "blank",
