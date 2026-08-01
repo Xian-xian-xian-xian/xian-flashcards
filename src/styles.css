@@ -2381,9 +2381,9 @@ textarea:focus {
 .question-dock {
   position: fixed;
   top: var(--question-dock-top, 0px);
-  left: var(--question-dock-left, auto);
+  left: var(--question-dock-left, 0px);
   align-self: start;
-  z-index: 1;
+  z-index: 12;
   display: grid;
   grid-template-rows: auto minmax(0, 1fr);
   gap: 8px;

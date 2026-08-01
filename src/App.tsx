@@ -49,6 +49,7 @@ import UserIcon from "lucide-react/dist/esm/icons/user";
 import Volume2 from "lucide-react/dist/esm/icons/volume-2";
 import XCircle from "lucide-react/dist/esm/icons/x-circle";
 import { CSSProperties, FormEvent, PointerEvent as ReactPointerEvent, ReactNode, TouchEvent as ReactTouchEvent, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
+import { createPortal } from "react-dom";
 import { api, type CardPayload, type ConflictError } from "./api";
 import {
   blankAnswerDisplay,
@@ -82,7 +83,7 @@ declare global {
   }
 }
 
-const version = "0.9.1";
+const version = "0.9.2";
 const logExportPressCount = 6;
 const logExportKey = "a";
 const logExportResetMs = 1800;
@@ -101,6 +102,7 @@ function shanghaiDateKey(offsetDays = 0) {
 }
 const studyDeckStoragePrefix = "xian-flashcards-study-root-deck";
 const roundStudyWordsStoragePrefix = "xian-flashcards-round-study-words";
+const answerDockOpenStoragePrefix = "xian-flashcards-answer-dock-open";
 
 function storedRoundStudyWords(userId: number) {
   try {
@@ -108,6 +110,14 @@ function storedRoundStudyWords(userId: number) {
     return Number.isFinite(value) && value > 0 ? Math.floor(value) : 0;
   } catch {
     return 0;
+  }
+}
+
+function storedAnswerDockOpen(userId: number) {
+  try {
+    return window.localStorage.getItem(`${answerDockOpenStoragePrefix}:${userId}`) !== "closed";
+  } catch {
+    return true;
   }
 }
 
@@ -2215,8 +2225,10 @@ function StudyView(props: {
   const [pausedCardsOpen, setPausedCardsOpen] = useState(false);
   const [pausedCardsLoading, setPausedCardsLoading] = useState(false);
   const [immersive, setImmersive] = useState(false);
-  const [answerDockOpen, setAnswerDockOpen] = useState(true);
+  const [answerDockOpen, setAnswerDockOpen] = useState(() => storedAnswerDockOpen(props.userId));
   const [answerDockWidth, setAnswerDockWidth] = useState(300);
+  const [narrowStudyViewport, setNarrowStudyViewport] = useState(() => window.matchMedia("(max-width: 760px)").matches);
+  const [questionDockAnchor, setQuestionDockAnchor] = useState({ top: 0, left: 0, height: 0 });
   const [cardMotion, setCardMotion] = useState<"entering" | "leaving" | "idle">("entering");
   const [cardRevision, setCardRevision] = useState(0);
   const [celebrationKey, setCelebrationKey] = useState(0);
@@ -2372,7 +2384,6 @@ function StudyView(props: {
     setSelectedChoice([]);
     setCelebrationKey(0);
     setRatingResult(null);
-    setAnswerDockOpen(true);
     setEditingStudyCard(null);
     setCardMotion("entering");
     const timer = window.setTimeout(() => setCardMotion("idle"), 220);
@@ -2396,25 +2407,29 @@ function StudyView(props: {
   useLayoutEffect(() => {
     const panel = studyPanelRef.current;
     const cardFrame = cardFrameRef.current;
+    const answerLayout = answerLayoutRef.current;
     if (!panel || !cardFrame) return;
 
     const updateAnchor = () => {
       const panelRect = panel.getBoundingClientRect();
       const cardRect = cardFrame.getBoundingClientRect();
-      const answerLayout = answerLayoutRef.current;
-      const scrollRect = studyScrollRef.current?.getBoundingClientRect();
       const referenceRect = answerLayout?.classList.contains("with-dock") ? answerLayout.getBoundingClientRect() : undefined;
       const inset = 8;
       const rightEdge = referenceRect?.right ?? cardRect.right;
       panel.style.setProperty("--rating-toast-right", `${Math.max(0, panelRect.right - rightEdge + inset)}px`);
       panel.style.setProperty("--rating-toast-bottom", `${Math.max(0, panelRect.bottom - cardRect.bottom + inset)}px`);
       panel.style.setProperty("--rating-toast-max-width", `${Math.max(220, (referenceRect?.width ?? cardRect.width) - inset * 2)}px`);
-      const questionDock = answerLayout?.querySelector<HTMLElement>(".question-dock");
-      if (referenceRect && scrollRect && questionDock) {
-        const dockWidth = questionDock.getBoundingClientRect().width;
-        panel.style.setProperty("--question-dock-left", `${referenceRect.right - dockWidth}px`);
-        panel.style.setProperty("--question-dock-top", `${scrollRect.top}px`);
-        panel.style.setProperty("--question-dock-height", `${scrollRect.height}px`);
+      if (referenceRect) {
+        const nextAnchor = {
+          top: cardRect.top,
+          left: referenceRect.right - answerDockWidth,
+          height: cardRect.height
+        };
+        setQuestionDockAnchor((anchor) => (
+          anchor.top === nextAnchor.top && anchor.left === nextAnchor.left && anchor.height === nextAnchor.height
+            ? anchor
+            : nextAnchor
+        ));
       }
       // Content width is now computed in CSS via calc(100% * var(--study-page-width))
     };
@@ -2424,13 +2439,16 @@ function StudyView(props: {
     const resizeObserver = typeof ResizeObserver === "undefined" ? null : new ResizeObserver(updateAnchor);
     resizeObserver?.observe(panel);
     resizeObserver?.observe(cardFrame);
+    if (answerLayout) resizeObserver?.observe(answerLayout);
     window.addEventListener("resize", updateAnchor);
+    window.addEventListener("scroll", updateAnchor, { passive: true });
     document.addEventListener("fullscreenchange", updateAnchor);
     scrollElement?.addEventListener("scroll", updateAnchor, { passive: true });
 
     return () => {
       resizeObserver?.disconnect();
       window.removeEventListener("resize", updateAnchor);
+      window.removeEventListener("scroll", updateAnchor);
       document.removeEventListener("fullscreenchange", updateAnchor);
       scrollElement?.removeEventListener("scroll", updateAnchor);
     };
@@ -2449,6 +2467,14 @@ function StudyView(props: {
   }, [props.userId, roundStudyWords]);
 
   useEffect(() => {
+    try {
+      window.localStorage.setItem(`${answerDockOpenStoragePrefix}:${props.userId}`, answerDockOpen ? "open" : "closed");
+    } catch {
+      // The in-memory preference still works when storage is unavailable.
+    }
+  }, [props.userId, answerDockOpen]);
+
+  useEffect(() => {
     document.documentElement.classList.toggle("study-immersive-active", immersive);
     return () => document.documentElement.classList.remove("study-immersive-active");
   }, [immersive]);
@@ -2457,6 +2483,14 @@ function StudyView(props: {
     const onFullscreen = () => setImmersive(Boolean(document.fullscreenElement));
     document.addEventListener("fullscreenchange", onFullscreen);
     return () => document.removeEventListener("fullscreenchange", onFullscreen);
+  }, []);
+
+  useEffect(() => {
+    const media = window.matchMedia("(max-width: 760px)");
+    const updateViewport = () => setNarrowStudyViewport(media.matches);
+    updateViewport();
+    media.addEventListener("change", updateViewport);
+    return () => media.removeEventListener("change", updateViewport);
   }, []);
 
   function resetSession() {
@@ -2473,7 +2507,6 @@ function StudyView(props: {
     setSelectedChoice([]);
     setCelebrationKey(0);
     setRatingResult(null);
-    setAnswerDockOpen(true);
     setCompletionPlayed(false);
     setEditingStudyCard(null);
     setCardRevision((value) => value + 1);
@@ -2509,7 +2542,6 @@ function StudyView(props: {
       setSelectedChoice([]);
       setCelebrationKey(0);
       setRatingResult(null);
-      setAnswerDockOpen(true);
       setCompletionPlayed(false);
       setEditingStudyCard(null);
       setCardRevision(0);
@@ -2889,6 +2921,7 @@ function StudyView(props: {
   const showBasicReferenceDock = Boolean(isBasicCard && flipped && answerDockOpen);
   const showReferenceDock = showAnswerDock || showBasicReferenceDock;
   const canToggleReferenceDock = Boolean(isBasicCard ? flipped : checked && explanationIsLong);
+  const hasReferenceDock = showAnswerDock || showBasicReferenceDock;
   const showManualRatings = card ? card.card_type !== "choice" && card.card_type !== "blank" || checked !== null : false;
   const currentBlankCount = card?.card_type === "blank" ? Math.max(1, blankMarkerCount(card.front)) : 1;
   const currentBlankParts = splitBlankAnswers(answer, currentBlankCount);
@@ -2920,6 +2953,42 @@ function StudyView(props: {
     "--study-font-family": studyFontStack(props.studyFontFamily),
     "--answer-dock-width": `${answerDockWidth}px`
   } as CSSProperties & Record<string, string>;
+  const desktopQuestionDockStyle = {
+    ...studyStyle,
+    "--question-dock-top": `${questionDockAnchor.top}px`,
+    "--question-dock-left": `${questionDockAnchor.left}px`,
+    "--question-dock-height": `${questionDockAnchor.height}px`
+  } as CSSProperties & Record<string, string>;
+  const desktopQuestionDock = !card ? null : showBasicReferenceDock ? (
+    <QuestionDock
+      card={card}
+      selected=""
+      answer={card.back}
+      onResize={resizeAnswerDock}
+      onClose={() => setAnswerDockOpen(false)}
+      style={desktopQuestionDockStyle}
+    />
+  ) : showAnswerDock && card.card_type === "choice" ? (
+    <QuestionDock
+      card={card}
+      choices={choices}
+      selected={selectedChoice.join("、")}
+      selectedChoices={selectedChoice}
+      answer={card.back}
+      onResize={resizeAnswerDock}
+      onClose={() => setAnswerDockOpen(false)}
+      style={desktopQuestionDockStyle}
+    />
+  ) : showAnswerDock && card.card_type === "blank" ? (
+    <QuestionDock
+      card={card}
+      selected={displayedBlankAnswer}
+      answer={correctAnswer(card)}
+      onResize={resizeAnswerDock}
+      onClose={() => setAnswerDockOpen(false)}
+      style={desktopQuestionDockStyle}
+    />
+  ) : null;
   const swipeStyle = swipePreview ? {
     "--swipe-x": `${swipePreview.x}px`,
     "--swipe-y": `${swipePreview.y}px`,
@@ -3415,7 +3484,7 @@ function StudyView(props: {
                         <span className="flip-card-face flip-card-back"><CardBack card={card} layout={props.studyChoiceLayout} showFront /></span>
                       </span>
                     </button>
-                    {showBasicReferenceDock && (
+                    {narrowStudyViewport && showBasicReferenceDock && (
                       <QuestionDock
                         card={card}
                         selected=""
@@ -3443,7 +3512,7 @@ function StudyView(props: {
                         {checked && <AnswerFeedback checked={checked} correct={displayCorrect} explanation={explanation} other={otherNote} selected={selectedChoice.join("、")} />}
                       </ChoiceArea>
                     </div>
-                    {showAnswerDock && (
+                    {narrowStudyViewport && showAnswerDock && (
                       <QuestionDock
                         card={card}
                         choices={choices}
@@ -3492,7 +3561,7 @@ function StudyView(props: {
                       </form>
                       {checked && <AnswerFeedback checked={checked} correct={correctAnswer(card)} explanation={explanation} other={otherNote} selected={displayedBlankAnswer} />}
                     </div>
-                    {showAnswerDock && (
+                    {narrowStudyViewport && showAnswerDock && (
                       <QuestionDock
                         card={card}
                         selected={displayedBlankAnswer}
@@ -3506,6 +3575,7 @@ function StudyView(props: {
               </>
             )}
           </div>
+          {!narrowStudyViewport && hasReferenceDock && desktopQuestionDock && createPortal(desktopQuestionDock, document.body)}
           {!editingStudyCard && showManualRatings && <div className="mobile-swipe-guide">左滑不会 · 右滑掌握 · 下滑模糊</div>}
           {ratingNotice && <RatingNotice feedback={ratingNotice} onClose={() => setRatingNotice(null)} />}
           {!editingStudyCard && showManualRatings && (
@@ -3566,9 +3636,9 @@ function RatingNotice(props: { feedback: RatingFeedback; onClose: () => void }) 
   );
 }
 
-function QuestionDock(props: { card: Card; choices?: string[]; selected: string; selectedChoices?: string[]; answer: string; onResize: (event: ReactPointerEvent<HTMLButtonElement>) => void; onClose: () => void }) {
+function QuestionDock(props: { card: Card; choices?: string[]; selected: string; selectedChoices?: string[]; answer: string; onResize: (event: ReactPointerEvent<HTMLButtonElement>) => void; onClose: () => void; style?: CSSProperties }) {
   return (
-    <aside className={`question-dock ${props.card.card_type}-question-dock`} aria-label="题目参考">
+    <aside className={`question-dock ${props.card.card_type}-question-dock`} aria-label="题目参考" style={props.style}>
       <button className="question-dock-resizer" type="button" aria-label="调整题目参考宽度" onPointerDown={props.onResize} />
       <div className="question-dock-title">
         <span>题目参考</span>
@@ -3872,6 +3942,7 @@ function AboutView(props: { syncStatus: SyncStatus | null }) {
       <div className="schedule-box"><h3>同步状态</h3><p>最近同步：{props.syncStatus ? fullDateTime(props.syncStatus.lastSyncAt) : "暂无"} · 数据更新：{props.syncStatus?.dataUpdatedAt ? fullDateTime(props.syncStatus.dataUpdatedAt) : "暂无"}</p></div>
       <div className="schedule-box changelog-box">
         <h3>更新日志</h3>
+        <div className="changelog-row"><strong>0.9.2</strong><span>2026-08-01</span><p>题目参考的显示状态会持续保留；全屏和普通窗口中均与学习卡片主体上下对齐。</p></div>
         <div className="changelog-row"><strong>0.9.1</strong><span>2026-07-31</span><p>选择题答案输入多个选项时自动成为多选题；需选中全部且仅选中正确选项后提交，才会判定正确。</p></div>
         <div className="changelog-row"><strong>0.8.18</strong><span>2026-07-31</span><p>普通卡正面或反面含 LaTeX 公式时，正面及翻面后的题目文字会显示为正文的约 115%。</p></div>
         <div className="changelog-row"><strong>0.8.17</strong><span>2026-07-31</span><p>普通卡正面及翻面后的题目文字字号改为与短语型单词卡一致。</p></div>
