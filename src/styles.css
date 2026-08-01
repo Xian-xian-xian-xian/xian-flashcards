@@ -2512,7 +2512,7 @@ body.resizing-answer-dock .question-dock-resizer::after {
 .question-text {
   width: calc(100% * var(--study-page-width));
   margin: 0;
-  font-size: var(--study-question-size);
+  font-size: clamp(var(--study-phrase-word-min), 6.8vw, var(--study-phrase-word-max));
   font-weight: 650;
   line-height: var(--study-line-height);
 }
