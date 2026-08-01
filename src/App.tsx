@@ -83,7 +83,7 @@ declare global {
   }
 }
 
-const version = "0.9.4";
+const version = "0.9.5";
 const logExportPressCount = 6;
 const logExportKey = "a";
 const logExportResetMs = 1800;
@@ -3941,6 +3941,7 @@ function AboutView(props: { syncStatus: SyncStatus | null }) {
       <div className="schedule-box"><h3>同步状态</h3><p>最近同步：{props.syncStatus ? fullDateTime(props.syncStatus.lastSyncAt) : "暂无"} · 数据更新：{props.syncStatus?.dataUpdatedAt ? fullDateTime(props.syncStatus.dataUpdatedAt) : "暂无"}</p></div>
       <div className="schedule-box changelog-box">
         <h3>更新日志</h3>
+        <div className="changelog-row"><strong>0.9.5</strong><span>2026-08-01</span><p>学习页“更多学习工具”下拉菜单现始终显示在题目参考之上，不再被遮住。</p></div>
         <div className="changelog-row"><strong>0.9.4</strong><span>2026-08-01</span><p>题目参考固定在学习窗口右侧并保持恒定高度；长内容仅在题目参考内部滚动，不再跟随学习页滚动。</p></div>
         <div className="changelog-row"><strong>0.9.3</strong><span>2026-08-01</span><p>选择题和填空题在小字号下会填满学习区域；三类题面缩小至当前字号的 65%；题目参考随内容自适应高度；修复答案含逗号时误判为多选题。</p></div>
         <div className="changelog-row"><strong>0.9.2</strong><span>2026-08-01</span><p>题目参考的显示状态会持续保留；全屏和普通窗口中均与学习卡片主体上下对齐。</p></div>
