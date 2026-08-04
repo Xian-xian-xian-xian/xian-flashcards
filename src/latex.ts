@@ -11,7 +11,11 @@ export function normalizeMarkdownMath(value: string) {
   const normalizedDelimiters = value
     .replace(/\r\n/g, "\n")
     .replace(/\\\(([\s\S]*?)\\\)/g, (_match, math) => `$${math}$`)
-    .replace(/\\\[([\s\S]*?)\\\]/g, (_match, math) => `$$\n${math}\n$$`);
+    .replace(/\\\[([\s\S]*?)\\\]/g, (_match, math) => `$$\n${math}\n$$`)
+    // remark-math requires block delimiters to occupy their own lines. Users
+    // often write `解：$$...$$` or continue prose immediately after `$$`.
+    .replace(/([^\n])\$\$/g, (_match, prefix) => `${prefix}\n$$`)
+    .replace(/\$\$([^\n])/g, (_match, suffix) => `$$\n${suffix}`);
 
   return normalizedDelimiters
     .split(/(\$\$[\s\S]*?\$\$)/g)

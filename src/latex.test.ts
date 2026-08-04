@@ -21,10 +21,12 @@ describe("LaTeX rendering", () => {
     expect(latexRenderSource("  x = y  ")).toBe("x = y");
   });
 
-  it("preserves nested environments already contained in a display delimiter", () => {
+  it("preserves nested environments while normalizing a display delimiter", () => {
     const formula = String.raw`$$\begin{equation}\begin{split}a&=b\\c&=d\end{split}\notag\end{equation}$$`;
 
-    expect(normalizeMarkdownMath(formula)).toBe(formula);
+    expect(normalizeMarkdownMath(formula)).toBe(String.raw`$$
+\begin{equation}\begin{split}a&=b\\c&=d\end{split}\notag\end{equation}
+$$`);
     expect(() => katex.renderToString(latexRenderSource(formula.slice(2, -2), true), { displayMode: true, throwOnError: true })).not.toThrow();
   });
 
@@ -34,5 +36,15 @@ describe("LaTeX rendering", () => {
     expect(normalizeMarkdownMath(formula)).toBe(String.raw`$$
 \begin{split}a&=b\\c&=d\end{split}
 $$`);
+  });
+
+  it("makes display delimiters adjacent to prose valid Markdown blocks", () => {
+    const formula = String.raw`解：$$\begin{equation}\begin{split}a&=b\\c&=d\end{split}\notag\end{equation}$$解：`;
+
+    expect(normalizeMarkdownMath(formula)).toBe(String.raw`解：
+$$
+\begin{equation}\begin{split}a&=b\\c&=d\end{split}\notag\end{equation}
+$$
+解：`);
   });
 });
