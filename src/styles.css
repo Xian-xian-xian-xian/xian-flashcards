@@ -1255,6 +1255,13 @@ textarea:focus {
   font-family: var(--study-font-family);
 }
 
+/* A completed entrance animation keeps a transform on the panel. Raise that
+   stacking context only while the menu is open so the portalled reference dock
+   cannot cover the interactive controls. */
+.study-panel.more-tools-open {
+  z-index: 13;
+}
+
 .study-fixed-top {
   display: grid;
   gap: 12px;
@@ -1677,9 +1684,10 @@ textarea:focus {
   pointer-events: none;
 }
 
-.pomodoro-progress-ring rect {
+.pomodoro-progress-ring path {
   fill: none;
   stroke-width: 1.4;
+  stroke-linejoin: round;
   vector-effect: non-scaling-stroke;
 }
 
@@ -2377,6 +2385,16 @@ textarea:focus {
    presentation stays anchored to the learning viewport. */
 .study-scroll > .answer-layout.with-dock {
   min-height: 100%;
+  align-items: stretch;
+}
+
+/* Keep the main card and the fixed reference dock on the same vertical span
+   in immersive mode, even when the card itself has little content. */
+.study-scroll > .answer-layout.with-dock > .flip-card,
+.study-scroll > .answer-layout.with-dock > .flip-card > .flip-card-inner,
+.study-scroll > .answer-layout.with-dock > .flip-card > .flip-card-inner > .flip-card-face {
+  height: 100%;
+  min-height: 100%;
 }
 
 .study-scroll > .study-question-layout {
@@ -2387,6 +2405,8 @@ textarea:focus {
 .study-question-layout > .question-box {
   min-height: 100%;
   align-self: stretch;
+  align-content: start;
+  overflow: auto;
 }
 
 .question-dock {

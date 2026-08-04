@@ -2098,8 +2098,6 @@ function StudyView(props: {
   const pomodoroProgress = activePomodoro ? 1 - pomodoroRemainingRatio(tomatoState, pomodoroNow) : 0;
   const pomodoroRingWidth = Math.max(0, pomodoroRingSize.width - 2);
   const pomodoroRingHeight = Math.max(0, pomodoroRingSize.height - 2);
-  const pomodoroRingRadius = Math.min(10, pomodoroRingWidth / 2, pomodoroRingHeight / 2);
-  const pomodoroRingPerimeter = Math.max(1, 2 * (pomodoroRingWidth + pomodoroRingHeight - 4 * pomodoroRingRadius) + 2 * Math.PI * pomodoroRingRadius);
 
   useEffect(() => {
     setPronunciationXmlOpen(false);
@@ -3168,7 +3166,7 @@ function StudyView(props: {
               busy={busy === "session"}
             />
       ) : <EmptyState text={studyMode === "grind" ? (props.selectedStudyDeckId ? "请选择开始无尽学习。" : "请先选择一个卡组。") : studyMode === "new" ? "这个卡组暂无可新学卡片。" : "这个卡组暂无到期复习卡片。"} /> : (
-        <div ref={studyPanelRef} key={`${card.id}-${cardRevision}`} className={`study-panel ${cardMotion} align-${props.studyTextAlign} ${checked === "right" ? "celebrating" : ""} ${pronunciationXmlOpen ? "xml-open" : ""}`} style={studyStyle}>
+        <div ref={studyPanelRef} key={`${card.id}-${cardRevision}`} className={`study-panel ${cardMotion} align-${props.studyTextAlign} ${checked === "right" ? "celebrating" : ""} ${pronunciationXmlOpen ? "xml-open" : ""} ${moreToolsOpen ? "more-tools-open" : ""}`} style={studyStyle}>
           {checked === "right" && (
             <div className="answer-celebration" key={celebrationKey} aria-hidden="true">
               <span className="celebration-ring" />
@@ -3190,14 +3188,11 @@ function StudyView(props: {
                   <span className="type-pill">番茄数量 {activePomodoro?.no ?? "—"}</span>
                   <span className="type-pill" title={activePomodoro?.taskGoal || "当前未设置任务"}>任务 {activePomodoro?.taskGoal || "未设置"}</span>
                   <svg className="pomodoro-progress-ring" viewBox={`0 0 ${pomodoroRingSize.width || 1} ${pomodoroRingSize.height || 1}`} preserveAspectRatio="none" aria-hidden="true">
-                    <rect
+                    <path
                       className="pomodoro-progress-value"
-                      x="1"
-                      y="1"
-                      width={pomodoroRingWidth}
-                      height={pomodoroRingHeight}
-                      rx={pomodoroRingRadius}
-                      strokeDasharray={`${pomodoroProgress * pomodoroRingPerimeter} ${pomodoroRingPerimeter + 1}`}
+                      d={`M 1 1 H ${pomodoroRingWidth + 1} V ${pomodoroRingHeight + 1} H 1 V 1`}
+                      pathLength="100"
+                      strokeDasharray={`${pomodoroProgress * 100} 100`}
                       opacity={pomodoroProgress > 0 ? 1 : 0}
                     />
                   </svg>
@@ -3786,6 +3781,7 @@ function AboutView(props: { syncStatus: SyncStatus | null }) {
       <div className="schedule-box"><h3>同步状态</h3><p>最近同步：{props.syncStatus ? fullDateTime(props.syncStatus.lastSyncAt) : "暂无"} · 数据更新：{props.syncStatus?.dataUpdatedAt ? fullDateTime(props.syncStatus.dataUpdatedAt) : "暂无"}</p></div>
       <div className="schedule-box changelog-box">
         <h3>更新日志</h3>
+        <div className="changelog-row"><strong>0.9.9</strong><span>2026-08-04</span><p>修复学习页题目参考遮住更多学习工具、填空题无法输入及选择/填空长内容顶部裁切；全屏时卡片与题目参考底边对齐，番茄钟进度按左上→右上→右下→左下连续环绕。</p></div>
         <div className="changelog-row"><strong>0.9.8</strong><span>2026-08-04</span><p>修复嵌套 equation/split LaTeX 公式保存后显示异常；题目参考打开时更多学习工具保持在最上层，并支持点击菜单外自动收起。</p></div>
         <div className="changelog-row"><strong>0.9.7</strong><span>2026-08-01</span><p>卡片所有内容展示统一支持 CommonMark、GFM 与 LaTeX；标题、引用、列表、链接、表格、任务项、代码块和公式在学习页、题目参考、预览与列表中一致显示。</p></div>
         <div className="changelog-row"><strong>0.9.6</strong><span>2026-08-01</span><p>删除普通卡出现 LaTeX 公式时自动缩小题面字体的规则；公式与普通文字保持相同字号。</p></div>
