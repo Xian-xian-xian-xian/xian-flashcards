@@ -66,7 +66,7 @@ import {
 } from "./blank-answers";
 import { insertImageMarkdown } from "./card-images";
 import { choiceAnswerSetMatches, choiceAnswersMatch, choiceOptionKey, dedupeChoiceAnswers, normalizeChoiceAnswer, splitChoiceAnswers } from "./choice-answers";
-import { latexRenderSource } from "./latex";
+import { latexRenderSource, normalizeMarkdownMath } from "./latex";
 import { isPhrasePartOfSpeech, ratingShortcutForKey, shouldUsePractice, studyAnswerWeight, updateGrindStudyWords } from "./study-session";
 import { resolveStudySwipe } from "./study-gestures";
 import type { Card, CardType, DailyTask, Deck, ImportBatch, ReviewRating, ReviewRemaining, ReviewSnapshot, Settings, Stats, SyncStatus, ThemeMode, TomatoState, User } from "./types";
@@ -85,7 +85,7 @@ declare global {
     katex?: KatexRuntime;
   }
 }
-const version = "0.9.7";
+const version = "0.9.8";
 const logExportPressCount = 6;
 const logExportKey = "a";
 const logExportResetMs = 1800;
@@ -220,14 +220,6 @@ function splitChoiceText(value: string) {
 const blankMarkerPattern = /(\[\s*\]|_{2,}|（\s*）|\(\s*\))/g;
 const blankMarkerHrefPrefix = "https://markdown-blank.invalid/";
 
-function normalizeMarkdown(value: string) {
-  return value
-    .replace(/\r\n/g, "\n")
-    .replace(/\\\(([\s\S]*?)\\\)/g, (_match, math) => `$${math}$`)
-    .replace(/\\\[([\s\S]*?)\\\]/g, (_match, math) => `$$\n${math}\n$$`)
-    .replace(/\\begin\{(?:equation\*?|align\*?|gather\*?|multline\*?|split)\}([\s\S]*?)\\end\{(?:equation\*?|align\*?|gather\*?|multline\*?|split)\}/g, (_match, math) => `$$\n${math}\n$$`);
-}
-
 function hasLatexFormula(value: string) {
   return /\$\$[\s\S]*?\$\$|\$[^$\n]+\$|\\\([\s\S]*?\\\)|\\\[[\s\S]*?\\\]|\\begin\{(?:equation\*?|align\*?|gather\*?|multline\*?|split)\}/.test(value);
 }
@@ -251,7 +243,7 @@ function markdownWithBlankInputs(value: string) {
 
 export function MarkdownText(props: { value: string; className?: string; renderBlank?: (key: string) => ReactNode }) {
   if (!props.value.trim()) return null;
-  const source = props.renderBlank ? markdownWithBlankInputs(normalizeMarkdown(props.value)) : normalizeMarkdown(props.value);
+  const source = props.renderBlank ? markdownWithBlankInputs(normalizeMarkdownMath(props.value)) : normalizeMarkdownMath(props.value);
   const heading = (level: number) => ({ children }: { children?: ReactNode }) => <strong className={`markdown-heading level-${level}`}>{children}</strong>;
   return (
     <span className={`markdown-text ${props.className ?? ""}`}>
@@ -2093,6 +2085,7 @@ function StudyView(props: {
   const [pomodoroNow, setPomodoroNow] = useState(() => Date.now());
   const [pomodoroRingSize, setPomodoroRingSize] = useState({ width: 0, height: 0 });
   const studyPanelRef = useRef<HTMLDivElement | null>(null);
+  const moreToolsRef = useRef<HTMLDivElement | null>(null);
   const pomodoroMetaRef = useRef<HTMLDivElement | null>(null);
   const cardFrameRef = useRef<HTMLElement | null>(null);
   const answerLayoutRef = useRef<HTMLDivElement | null>(null);
@@ -2120,6 +2113,15 @@ function StudyView(props: {
     setSwipePreview(null);
     swipeStartRef.current = null;
   }, [card?.id]);
+
+  useEffect(() => {
+    if (!moreToolsOpen) return;
+    const closeWhenClickingAway = (event: PointerEvent) => {
+      if (!moreToolsRef.current?.contains(event.target as Node)) setMoreToolsOpen(false);
+    };
+    document.addEventListener("pointerdown", closeWhenClickingAway);
+    return () => document.removeEventListener("pointerdown", closeWhenClickingAway);
+  }, [moreToolsOpen]);
 
   async function togglePronunciationXml() {
     if (pronunciationXmlOpen) {
@@ -3212,6 +3214,7 @@ function StudyView(props: {
                 <button className="mini-button" title={immersive ? "退出沉浸学习" : "沉浸学习"} onClick={toggleImmersive}>{immersive ? <Minimize2 /> : <Maximize2 />}</button>
                 <button className="mini-button" title="暂停当前卡片" disabled={Boolean(busy)} onClick={pauseCurrentCard}><Pause /></button>
                 <button className="mini-button" title="编辑当前卡片" onClick={editCurrentStudyCard}><Edit3 /></button>
+                <div ref={moreToolsRef}>
                 <TextToolButton icon={<MoreHorizontal />} title="更多学习工具" active={moreToolsOpen} onClick={() => setMoreToolsOpen((open) => !open)}>
                   {moreToolsOpen && (
                     <div className="text-tool-popover study-more-popover">
@@ -3252,6 +3255,7 @@ function StudyView(props: {
                     </div>
                   )}
                 </TextToolButton>
+                </div>
               </div>
             </div>
           </div>
@@ -3782,6 +3786,7 @@ function AboutView(props: { syncStatus: SyncStatus | null }) {
       <div className="schedule-box"><h3>同步状态</h3><p>最近同步：{props.syncStatus ? fullDateTime(props.syncStatus.lastSyncAt) : "暂无"} · 数据更新：{props.syncStatus?.dataUpdatedAt ? fullDateTime(props.syncStatus.dataUpdatedAt) : "暂无"}</p></div>
       <div className="schedule-box changelog-box">
         <h3>更新日志</h3>
+        <div className="changelog-row"><strong>0.9.8</strong><span>2026-08-04</span><p>修复嵌套 equation/split LaTeX 公式保存后显示异常；题目参考打开时更多学习工具保持在最上层，并支持点击菜单外自动收起。</p></div>
         <div className="changelog-row"><strong>0.9.7</strong><span>2026-08-01</span><p>卡片所有内容展示统一支持 CommonMark、GFM 与 LaTeX；标题、引用、列表、链接、表格、任务项、代码块和公式在学习页、题目参考、预览与列表中一致显示。</p></div>
         <div className="changelog-row"><strong>0.9.6</strong><span>2026-08-01</span><p>删除普通卡出现 LaTeX 公式时自动缩小题面字体的规则；公式与普通文字保持相同字号。</p></div>
         <div className="changelog-row"><strong>0.9.5</strong><span>2026-08-01</span><p>学习页“更多学习工具”下拉菜单现始终显示在题目参考之上，不再被遮住。</p></div>

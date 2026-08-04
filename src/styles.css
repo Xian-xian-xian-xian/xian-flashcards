@@ -1637,6 +1637,8 @@ textarea:focus {
 }
 
 .study-actions {
+  position: relative;
+  z-index: 21;
   display: grid;
   grid-template-columns: minmax(0, 1fr) auto;
   align-items: center;
