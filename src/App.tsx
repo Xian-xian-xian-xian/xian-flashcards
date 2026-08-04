@@ -85,7 +85,7 @@ declare global {
     katex?: KatexRuntime;
   }
 }
-const version = "0.9.8";
+const version = "0.9.9";
 const logExportPressCount = 6;
 const logExportKey = "a";
 const logExportResetMs = 1800;
