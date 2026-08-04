@@ -85,7 +85,7 @@ declare global {
     katex?: KatexRuntime;
   }
 }
-const version = "0.9.9";
+const version = "0.9.10";
 const logExportPressCount = 6;
 const logExportKey = "a";
 const logExportResetMs = 1800;
@@ -2098,6 +2098,11 @@ function StudyView(props: {
   const pomodoroProgress = activePomodoro ? 1 - pomodoroRemainingRatio(tomatoState, pomodoroNow) : 0;
   const pomodoroRingWidth = Math.max(0, pomodoroRingSize.width - 2);
   const pomodoroRingHeight = Math.max(0, pomodoroRingSize.height - 2);
+  const pomodoroTravelled = pomodoroProgress * (pomodoroRingWidth * 2 + pomodoroRingHeight * 2);
+  const pomodoroTopProgress = Math.min(pomodoroRingWidth, pomodoroTravelled);
+  const pomodoroRightProgress = Math.min(pomodoroRingHeight, Math.max(0, pomodoroTravelled - pomodoroRingWidth));
+  const pomodoroBottomProgress = Math.min(pomodoroRingWidth, Math.max(0, pomodoroTravelled - pomodoroRingWidth - pomodoroRingHeight));
+  const pomodoroLeftProgress = Math.min(pomodoroRingHeight, Math.max(0, pomodoroTravelled - pomodoroRingWidth * 2 - pomodoroRingHeight));
 
   useEffect(() => {
     setPronunciationXmlOpen(false);
@@ -3188,13 +3193,10 @@ function StudyView(props: {
                   <span className="type-pill">番茄数量 {activePomodoro?.no ?? "—"}</span>
                   <span className="type-pill" title={activePomodoro?.taskGoal || "当前未设置任务"}>任务 {activePomodoro?.taskGoal || "未设置"}</span>
                   <svg className="pomodoro-progress-ring" viewBox={`0 0 ${pomodoroRingSize.width || 1} ${pomodoroRingSize.height || 1}`} preserveAspectRatio="none" aria-hidden="true">
-                    <path
-                      className="pomodoro-progress-value"
-                      d={`M 1 1 H ${pomodoroRingWidth + 1} V ${pomodoroRingHeight + 1} H 1 V 1`}
-                      pathLength="100"
-                      strokeDasharray={`${pomodoroProgress * 100} 100`}
-                      opacity={pomodoroProgress > 0 ? 1 : 0}
-                    />
+                    {pomodoroTopProgress > 0 && <line className="pomodoro-progress-value" x1="1" y1="1" x2={pomodoroTopProgress + 1} y2="1" />}
+                    {pomodoroRightProgress > 0 && <line className="pomodoro-progress-value" x1={pomodoroRingWidth + 1} y1="1" x2={pomodoroRingWidth + 1} y2={pomodoroRightProgress + 1} />}
+                    {pomodoroBottomProgress > 0 && <line className="pomodoro-progress-value" x1={pomodoroRingWidth + 1} y1={pomodoroRingHeight + 1} x2={pomodoroRingWidth - pomodoroBottomProgress + 1} y2={pomodoroRingHeight + 1} />}
+                    {pomodoroLeftProgress > 0 && <line className="pomodoro-progress-value" x1="1" y1={pomodoroRingHeight + 1} x2="1" y2={pomodoroRingHeight - pomodoroLeftProgress + 1} />}
                   </svg>
                 </div>
                 {<button type="button" className="type-pill study-round-count-pill" title="重置本轮学习数量" disabled={Boolean(busy)} onClick={() => setRoundResetOpen(true)}>本轮学习 {roundStudyWords}</button>}
@@ -3781,6 +3783,7 @@ function AboutView(props: { syncStatus: SyncStatus | null }) {
       <div className="schedule-box"><h3>同步状态</h3><p>最近同步：{props.syncStatus ? fullDateTime(props.syncStatus.lastSyncAt) : "暂无"} · 数据更新：{props.syncStatus?.dataUpdatedAt ? fullDateTime(props.syncStatus.dataUpdatedAt) : "暂无"}</p></div>
       <div className="schedule-box changelog-box">
         <h3>更新日志</h3>
+        <div className="changelog-row"><strong>0.9.10</strong><span>2026-08-04</span><p>番茄钟进度改为逐边精确绘制：倒计时从左上角起笔，依次经过右上、右下、左下，结束时闭合一整圈。</p></div>
         <div className="changelog-row"><strong>0.9.9</strong><span>2026-08-04</span><p>修复学习页题目参考遮住更多学习工具、填空题无法输入及选择/填空长内容顶部裁切；全屏时卡片与题目参考底边对齐，番茄钟进度按左上→右上→右下→左下连续环绕。</p></div>
         <div className="changelog-row"><strong>0.9.8</strong><span>2026-08-04</span><p>修复嵌套 equation/split LaTeX 公式保存后显示异常；题目参考打开时更多学习工具保持在最上层，并支持点击菜单外自动收起。</p></div>
         <div className="changelog-row"><strong>0.9.7</strong><span>2026-08-01</span><p>卡片所有内容展示统一支持 CommonMark、GFM 与 LaTeX；标题、引用、列表、链接、表格、任务项、代码块和公式在学习页、题目参考、预览与列表中一致显示。</p></div>

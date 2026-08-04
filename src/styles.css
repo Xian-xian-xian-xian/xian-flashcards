@@ -1684,18 +1684,16 @@ textarea:focus {
   pointer-events: none;
 }
 
-.pomodoro-progress-ring path {
+.pomodoro-progress-ring line {
   fill: none;
   stroke-width: 1.4;
-  stroke-linejoin: round;
   vector-effect: non-scaling-stroke;
 }
 
 .pomodoro-progress-value {
   stroke: var(--primary);
-  stroke-dashoffset: 0;
   stroke-linecap: round;
-  transition: stroke-dasharray 900ms linear;
+  transition: x2 900ms linear, y2 900ms linear;
 }
 
 .pomodoro-meta .type-pill:nth-child(3) {
