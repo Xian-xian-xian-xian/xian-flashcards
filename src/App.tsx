@@ -48,9 +48,9 @@ import Type from "lucide-react/dist/esm/icons/type";
 import UserIcon from "lucide-react/dist/esm/icons/user";
 import Volume2 from "lucide-react/dist/esm/icons/volume-2";
 import XCircle from "lucide-react/dist/esm/icons/x-circle";
-import { CSSProperties, FormEvent, PointerEvent as ReactPointerEvent, ReactNode, TouchEvent as ReactTouchEvent, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
+import { CSSProperties, createContext, FormEvent, PointerEvent as ReactPointerEvent, ReactNode, TouchEvent as ReactTouchEvent, useContext, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
-import ReactMarkdown from "react-markdown";
+import ReactMarkdown, { type Components } from "react-markdown";
 import remarkGfm from "remark-gfm";
 import remarkMath from "remark-math";
 import { api, type CardPayload, type ConflictError } from "./api";
@@ -85,7 +85,7 @@ declare global {
     katex?: KatexRuntime;
   }
 }
-const version = "0.9.12";
+const version = "0.9.13";
 const logExportPressCount = 6;
 const logExportKey = "a";
 const logExportResetMs = 1800;
@@ -241,42 +241,55 @@ function markdownWithBlankInputs(value: string) {
   return value.replace(blankMarkerPattern, () => `[＿＿](${blankMarkerHrefPrefix}${index++})`);
 }
 
+type MarkdownBlankRenderer = (key: string) => ReactNode;
+
+const MarkdownBlankRendererContext = createContext<MarkdownBlankRenderer | undefined>(undefined);
+
+function MarkdownHeading({ level, children }: { level: number; children?: ReactNode }) {
+  return <strong className={`markdown-heading level-${level}`}>{children}</strong>;
+}
+
+function MarkdownLink({ href, children }: { href?: string; children?: ReactNode }) {
+  const renderBlank = useContext(MarkdownBlankRendererContext);
+  const blankIndex = href?.startsWith(blankMarkerHrefPrefix) ? Number(href.slice(blankMarkerHrefPrefix.length)) : NaN;
+  if (renderBlank && Number.isInteger(blankIndex) && blankIndex >= 0) return <>{renderBlank(`blank-${blankIndex}`)}</>;
+  return <a href={href} target="_blank" rel="noreferrer">{children}</a>;
+}
+
+const markdownComponents = {
+  h1: ({ children }) => <MarkdownHeading level={1}>{children}</MarkdownHeading>,
+  h2: ({ children }) => <MarkdownHeading level={2}>{children}</MarkdownHeading>,
+  h3: ({ children }) => <MarkdownHeading level={3}>{children}</MarkdownHeading>,
+  h4: ({ children }) => <MarkdownHeading level={4}>{children}</MarkdownHeading>,
+  h5: ({ children }) => <MarkdownHeading level={5}>{children}</MarkdownHeading>,
+  h6: ({ children }) => <MarkdownHeading level={6}>{children}</MarkdownHeading>,
+  p: ({ children }) => <span className="markdown-paragraph">{children}</span>,
+  pre: ({ children }) => <>{children}</>,
+  code: ({ className, children, node }) => {
+    const value = String(children).replace(/\n$/, "");
+    const isMath = Boolean(className?.includes("language-math"));
+    if (isMath) return <MathText value={value} displayMode={className?.includes("math-display")} />;
+    const isBlock = node?.position?.start.column === 1;
+    return isBlock
+      ? <span className="code-block">{className && <span className="code-language">{className.replace("language-", "")}</span>}<code className={className}>{children}</code></span>
+      : <code className={className}>{children}</code>;
+  },
+  hr: () => <hr className="markdown-divider" />,
+  table: ({ children }) => <span className="markdown-table-wrap"><table>{children}</table></span>,
+  a: MarkdownLink,
+  img: ({ src, alt }) => <img src={src} alt={alt ?? ""} loading="lazy" />,
+  input: ({ type, checked }) => type === "checkbox" ? <input type="checkbox" checked={checked} readOnly disabled /> : <input type={type} />
+} satisfies Components;
+
 export function MarkdownText(props: { value: string; className?: string; renderBlank?: (key: string) => ReactNode }) {
   if (!props.value.trim()) return null;
   const source = props.renderBlank ? markdownWithBlankInputs(normalizeMarkdownMath(props.value)) : normalizeMarkdownMath(props.value);
-  const heading = (level: number) => ({ children }: { children?: ReactNode }) => <strong className={`markdown-heading level-${level}`}>{children}</strong>;
   return (
-    <span className={`markdown-text ${props.className ?? ""}`}>
-      <ReactMarkdown
-        remarkPlugins={[remarkGfm, remarkMath]}
-        skipHtml
-        components={{
-          h1: heading(1), h2: heading(2), h3: heading(3), h4: heading(4), h5: heading(5), h6: heading(6),
-          p: ({ children }) => <span className="markdown-paragraph">{children}</span>,
-          pre: ({ children }) => <>{children}</>,
-          code: ({ className, children, node }) => {
-            const value = String(children).replace(/\n$/, "");
-            const isMath = Boolean(className?.includes("language-math"));
-            if (isMath) return <MathText value={value} displayMode={className?.includes("math-display")} />;
-            const isBlock = node?.position?.start.column === 1;
-            return isBlock
-              ? <span className="code-block">{className && <span className="code-language">{className.replace("language-", "")}</span>}<code className={className}>{children}</code></span>
-              : <code className={className}>{children}</code>;
-          },
-          hr: () => <hr className="markdown-divider" />,
-          table: ({ children }) => <span className="markdown-table-wrap"><table>{children}</table></span>,
-          a: ({ href, children }) => {
-            const blankIndex = href?.startsWith(blankMarkerHrefPrefix) ? Number(href.slice(blankMarkerHrefPrefix.length)) : NaN;
-            if (props.renderBlank && Number.isInteger(blankIndex) && blankIndex >= 0) return <>{props.renderBlank(`blank-${blankIndex}`)}</>;
-            return <a href={href} target="_blank" rel="noreferrer">{children}</a>;
-          },
-          img: ({ src, alt }) => <img src={src} alt={alt ?? ""} loading="lazy" />,
-          input: ({ type, checked }) => type === "checkbox" ? <input type="checkbox" checked={checked} readOnly disabled /> : <input type={type} />
-        }}
-      >
-        {source}
-      </ReactMarkdown>
-    </span>
+    <MarkdownBlankRendererContext.Provider value={props.renderBlank}>
+      <span className={`markdown-text ${props.className ?? ""}`}>
+        <ReactMarkdown remarkPlugins={[remarkGfm, remarkMath]} skipHtml components={markdownComponents}>{source}</ReactMarkdown>
+      </span>
+    </MarkdownBlankRendererContext.Provider>
   );
 }
 
@@ -3785,6 +3798,7 @@ function AboutView(props: { syncStatus: SyncStatus | null }) {
       <div className="schedule-box"><h3>同步状态</h3><p>最近同步：{props.syncStatus ? fullDateTime(props.syncStatus.lastSyncAt) : "暂无"} · 数据更新：{props.syncStatus?.dataUpdatedAt ? fullDateTime(props.syncStatus.dataUpdatedAt) : "暂无"}</p></div>
       <div className="schedule-box changelog-box">
         <h3>更新日志</h3>
+        <div className="changelog-row"><strong>0.9.13</strong><span>2026-08-05</span><p>修复全屏学习时番茄钟刷新导致文字选区自动取消、填空题输入框失去焦点而无法连续输入的问题。</p></div>
         <div className="changelog-row"><strong>0.9.12</strong><span>2026-08-05</span><p>选择题和填空题的短内容在卡片中垂直居中，长内容仍可从顶部完整滚动；放大选择题选项文字，并使题目参考与选项字号一致。</p></div>
         <div className="changelog-row"><strong>0.9.11</strong><span>2026-08-05</span><p>修复全屏学习时左侧卡片与题目参考的底边错位；恢复单词卡中文释义的手动换行显示。</p></div>
         <div className="changelog-row"><strong>0.9.10</strong><span>2026-08-04</span><p>番茄钟进度改为逐边精确绘制：倒计时从左上角起笔，依次经过右上、右下、左下，结束时闭合一整圈。</p></div>
