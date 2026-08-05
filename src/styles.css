@@ -2341,6 +2341,13 @@ textarea:focus {
   font-weight: 650;
 }
 
+/* Word definitions are commonly entered as one Chinese meaning per line.
+   React Markdown keeps those soft line breaks in the text node, so retain
+   them visually here without changing the Markdown rules for other fields. */
+.flip-card .word-meaning .markdown-text {
+  white-space: pre-line;
+}
+
 .flip-card .word-back small {
   width: 100%;
   max-width: none;

@@ -85,7 +85,7 @@ declare global {
     katex?: KatexRuntime;
   }
 }
-const version = "0.9.10";
+const version = "0.9.11";
 const logExportPressCount = 6;
 const logExportKey = "a";
 const logExportResetMs = 1800;
@@ -2261,18 +2261,20 @@ function StudyView(props: {
     const updateAnchor = () => {
       const panelRect = panel.getBoundingClientRect();
       const cardRect = cardFrame.getBoundingClientRect();
-      const scrollRect = studyScrollRef.current?.getBoundingClientRect();
       const referenceRect = answerLayout?.classList.contains("with-dock") ? answerLayout.getBoundingClientRect() : undefined;
       const inset = 8;
       const rightEdge = referenceRect?.right ?? cardRect.right;
       panel.style.setProperty("--rating-toast-right", `${Math.max(0, panelRect.right - rightEdge + inset)}px`);
       panel.style.setProperty("--rating-toast-bottom", `${Math.max(0, panelRect.bottom - cardRect.bottom + inset)}px`);
       panel.style.setProperty("--rating-toast-max-width", `${Math.max(220, (referenceRect?.width ?? cardRect.width) - inset * 2)}px`);
-      if (referenceRect && scrollRect) {
+      if (referenceRect) {
         const nextAnchor = {
-          top: scrollRect.top,
+          // Match the reference dock to the card layout itself. The scroll
+          // container includes bottom padding for the rating controls, which
+          // otherwise makes the dock extend below the card in fullscreen.
+          top: referenceRect.top,
           left: referenceRect.right - answerDockWidth,
-          height: scrollRect.height
+          height: referenceRect.height
         };
         setQuestionDockAnchor((anchor) => (
           anchor.top === nextAnchor.top && anchor.left === nextAnchor.left && anchor.height === nextAnchor.height
@@ -3783,6 +3785,7 @@ function AboutView(props: { syncStatus: SyncStatus | null }) {
       <div className="schedule-box"><h3>同步状态</h3><p>最近同步：{props.syncStatus ? fullDateTime(props.syncStatus.lastSyncAt) : "暂无"} · 数据更新：{props.syncStatus?.dataUpdatedAt ? fullDateTime(props.syncStatus.dataUpdatedAt) : "暂无"}</p></div>
       <div className="schedule-box changelog-box">
         <h3>更新日志</h3>
+        <div className="changelog-row"><strong>0.9.11</strong><span>2026-08-05</span><p>修复全屏学习时左侧卡片与题目参考的底边错位；恢复单词卡中文释义的手动换行显示。</p></div>
         <div className="changelog-row"><strong>0.9.10</strong><span>2026-08-04</span><p>番茄钟进度改为逐边精确绘制：倒计时从左上角起笔，依次经过右上、右下、左下，结束时闭合一整圈。</p></div>
         <div className="changelog-row"><strong>0.9.9</strong><span>2026-08-04</span><p>修复学习页题目参考遮住更多学习工具、填空题无法输入及选择/填空长内容顶部裁切；全屏时卡片与题目参考底边对齐，番茄钟进度按左上→右上→右下→左下连续环绕。</p></div>
         <div className="changelog-row"><strong>0.9.8</strong><span>2026-08-04</span><p>修复嵌套 equation/split LaTeX 公式保存后显示异常；题目参考打开时更多学习工具保持在最上层，并支持点击菜单外自动收起。</p></div>
