@@ -1240,7 +1240,7 @@ textarea:focus {
   --study-small-size: 16px;
   --study-detail-size: 16px;
   --study-question-size: 24px;
-  --study-choice-size: 16px;
+  --study-choice-size: 18px;
   --study-result-size: 16px;
   --study-front-min: 21px;
   --study-front-max: 35px;
@@ -2410,7 +2410,7 @@ textarea:focus {
 .study-question-layout > .question-box {
   min-height: 100%;
   align-self: stretch;
-  align-content: start;
+  align-content: safe center;
   overflow: auto;
 }
 
@@ -2490,6 +2490,10 @@ body.resizing-answer-dock .question-dock-resizer::after {
   overscroll-behavior: contain;
   font-size: var(--study-question-size);
   line-height: var(--study-line-height);
+}
+
+.choice-question-dock .question-dock-body {
+  font-size: var(--study-choice-size);
 }
 
 .question-dock-prompt {

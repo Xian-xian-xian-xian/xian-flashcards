@@ -85,7 +85,7 @@ declare global {
     katex?: KatexRuntime;
   }
 }
-const version = "0.9.11";
+const version = "0.9.12";
 const logExportPressCount = 6;
 const logExportKey = "a";
 const logExportResetMs = 1800;
@@ -2788,7 +2788,7 @@ function StudyView(props: {
     "--study-small-size": `${Math.round(16 * scale)}px`,
     "--study-detail-size": `${Math.round(16 * scale)}px`,
     "--study-question-size": `${Math.round(24 * scale)}px`,
-    "--study-choice-size": `${Math.round(16 * scale)}px`,
+    "--study-choice-size": `${Math.round(18 * scale)}px`,
     "--study-result-size": `${Math.round(16 * scale)}px`,
     "--study-word-content-max": `${Math.round(720 * Math.max(1, scale))}px`,
     "--study-word-back-edge-space": `${Math.round(80 * Math.max(0, scale - 1))}px`,
@@ -3785,6 +3785,7 @@ function AboutView(props: { syncStatus: SyncStatus | null }) {
       <div className="schedule-box"><h3>同步状态</h3><p>最近同步：{props.syncStatus ? fullDateTime(props.syncStatus.lastSyncAt) : "暂无"} · 数据更新：{props.syncStatus?.dataUpdatedAt ? fullDateTime(props.syncStatus.dataUpdatedAt) : "暂无"}</p></div>
       <div className="schedule-box changelog-box">
         <h3>更新日志</h3>
+        <div className="changelog-row"><strong>0.9.12</strong><span>2026-08-05</span><p>选择题和填空题的短内容在卡片中垂直居中，长内容仍可从顶部完整滚动；放大选择题选项文字，并使题目参考与选项字号一致。</p></div>
         <div className="changelog-row"><strong>0.9.11</strong><span>2026-08-05</span><p>修复全屏学习时左侧卡片与题目参考的底边错位；恢复单词卡中文释义的手动换行显示。</p></div>
         <div className="changelog-row"><strong>0.9.10</strong><span>2026-08-04</span><p>番茄钟进度改为逐边精确绘制：倒计时从左上角起笔，依次经过右上、右下、左下，结束时闭合一整圈。</p></div>
         <div className="changelog-row"><strong>0.9.9</strong><span>2026-08-04</span><p>修复学习页题目参考遮住更多学习工具、填空题无法输入及选择/填空长内容顶部裁切；全屏时卡片与题目参考底边对齐，番茄钟进度按左上→右上→右下→左下连续环绕。</p></div>
