@@ -2389,17 +2389,9 @@ textarea:focus {
 /* Reserve a right column for the reference dock while its fixed desktop
    presentation stays anchored to the learning viewport. */
 .study-scroll > .answer-layout.with-dock {
+  height: max-content;
   min-height: 100%;
   align-items: stretch;
-}
-
-/* Keep the main card and the fixed reference dock on the same vertical span
-   in immersive mode, even when the card itself has little content. */
-.study-scroll > .answer-layout.with-dock > .flip-card,
-.study-scroll > .answer-layout.with-dock > .flip-card > .flip-card-inner,
-.study-scroll > .answer-layout.with-dock > .flip-card > .flip-card-inner > .flip-card-face {
-  height: 100%;
-  min-height: 100%;
 }
 
 .study-scroll > .study-question-layout {
@@ -2499,6 +2491,17 @@ body.resizing-answer-dock .question-dock-resizer::after {
 .question-dock-prompt {
   gap: 0.72em;
   font-weight: 400;
+}
+
+.question-dock-answer {
+  padding-top: 8px;
+  border-top: 1px solid color-mix(in srgb, var(--border), transparent 20%);
+  font-size: var(--study-small-size);
+  font-weight: 400;
+}
+
+.basic-question-dock .question-dock-answer {
+  font-size: var(--study-question-size);
 }
 
 .paused-card-pill {

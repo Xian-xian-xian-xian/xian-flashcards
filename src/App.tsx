@@ -85,7 +85,7 @@ declare global {
     katex?: KatexRuntime;
   }
 }
-const version = "0.9.13";
+const version = "0.9.14";
 const logExportPressCount = 6;
 const logExportKey = "a";
 const logExportResetMs = 1800;
@@ -2274,20 +2274,22 @@ function StudyView(props: {
     const updateAnchor = () => {
       const panelRect = panel.getBoundingClientRect();
       const cardRect = cardFrame.getBoundingClientRect();
+      const studyScroll = studyScrollRef.current;
+      const scrollRect = studyScroll?.getBoundingClientRect();
       const referenceRect = answerLayout?.classList.contains("with-dock") ? answerLayout.getBoundingClientRect() : undefined;
       const inset = 8;
       const rightEdge = referenceRect?.right ?? cardRect.right;
       panel.style.setProperty("--rating-toast-right", `${Math.max(0, panelRect.right - rightEdge + inset)}px`);
       panel.style.setProperty("--rating-toast-bottom", `${Math.max(0, panelRect.bottom - cardRect.bottom + inset)}px`);
       panel.style.setProperty("--rating-toast-max-width", `${Math.max(220, (referenceRect?.width ?? cardRect.width) - inset * 2)}px`);
-      if (referenceRect) {
+      if (referenceRect && studyScroll && scrollRect) {
+        const scrollStyle = window.getComputedStyle(studyScroll);
+        const scrollPaddingTop = Number.parseFloat(scrollStyle.paddingTop) || 0;
+        const scrollPaddingBottom = Number.parseFloat(scrollStyle.paddingBottom) || 0;
         const nextAnchor = {
-          // Match the reference dock to the card layout itself. The scroll
-          // container includes bottom padding for the rating controls, which
-          // otherwise makes the dock extend below the card in fullscreen.
-          top: referenceRect.top,
+          top: scrollRect.top + scrollPaddingTop,
           left: referenceRect.right - answerDockWidth,
-          height: referenceRect.height
+          height: Math.max(0, scrollRect.height - scrollPaddingTop - scrollPaddingBottom)
         };
         setQuestionDockAnchor((anchor) => (
           anchor.top === nextAnchor.top && anchor.left === nextAnchor.left && anchor.height === nextAnchor.height
@@ -3506,6 +3508,9 @@ function QuestionDock(props: { card: Card; choices?: string[]; selected: string;
           className="question-dock-prompt"
           renderBlank={props.card.card_type === "blank" ? (key) => <span key={key} className="blank-dock-gap" /> : undefined}
         />
+        <div className="question-dock-answer">
+          <MarkdownText value={props.answer} />
+        </div>
         {props.choices && props.choices.length > 0 && (
           <div className="question-dock-options">
             {props.choices.map((choice, index) => (
@@ -3798,6 +3803,7 @@ function AboutView(props: { syncStatus: SyncStatus | null }) {
       <div className="schedule-box"><h3>同步状态</h3><p>最近同步：{props.syncStatus ? fullDateTime(props.syncStatus.lastSyncAt) : "暂无"} · 数据更新：{props.syncStatus?.dataUpdatedAt ? fullDateTime(props.syncStatus.dataUpdatedAt) : "暂无"}</p></div>
       <div className="schedule-box changelog-box">
         <h3>更新日志</h3>
+        <div className="changelog-row"><strong>0.9.14</strong><span>2026-08-07</span><p>题目参考新增答案并与左侧答案字号一致；修复长内容滚动时卡片边框未随内容延伸、底边无法与题目参考齐平的问题。</p></div>
         <div className="changelog-row"><strong>0.9.13</strong><span>2026-08-05</span><p>修复全屏学习时番茄钟刷新导致文字选区自动取消、填空题输入框失去焦点而无法连续输入的问题。</p></div>
         <div className="changelog-row"><strong>0.9.12</strong><span>2026-08-05</span><p>选择题和填空题的短内容在卡片中垂直居中，长内容仍可从顶部完整滚动；放大选择题选项文字，并使题目参考与选项字号一致。</p></div>
         <div className="changelog-row"><strong>0.9.11</strong><span>2026-08-05</span><p>修复全屏学习时左侧卡片与题目参考的底边错位；恢复单词卡中文释义的手动换行显示。</p></div>
