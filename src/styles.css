@@ -1643,6 +1643,32 @@ textarea:focus {
   will-change: transform;
 }
 
+.daily-makeup {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+  margin-top: 10px;
+  color: var(--muted);
+  font-size: 13px;
+  font-weight: 650;
+}
+
+.daily-makeup-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.daily-makeup select {
+  min-height: 38px;
+  padding: 7px 10px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--surface);
+  color: var(--text);
+}
+
 .study-actions {
   position: relative;
   z-index: 21;

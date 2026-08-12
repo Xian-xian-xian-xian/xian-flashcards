@@ -102,6 +102,10 @@ export type DailyTask = {
   completed: boolean;
   completed_at: string;
   streak: number;
+  checkin_makeup_week: string;
+  checkin_makeup_used: number;
+  checkin_makeup_remaining: number;
+  checkin_makeup_dates: string[];
 };
 
 export type DailyTaskSnapshot = {

@@ -133,6 +133,18 @@ export async function initDb() {
       FOREIGN KEY(user_id) REFERENCES users(id) ON DELETE CASCADE
     );
 
+    CREATE TABLE IF NOT EXISTS daily_checkin_makeups (
+      user_id INTEGER NOT NULL,
+      week_id TEXT NOT NULL,
+      date TEXT NOT NULL,
+      created_at TEXT NOT NULL,
+      PRIMARY KEY(user_id, date),
+      FOREIGN KEY(user_id) REFERENCES users(id) ON DELETE CASCADE
+    );
+
+    CREATE INDEX IF NOT EXISTS idx_daily_checkin_makeups_user_week
+      ON daily_checkin_makeups(user_id, week_id, date);
+
     CREATE TABLE IF NOT EXISTS users (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
       username TEXT NOT NULL UNIQUE,

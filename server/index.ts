@@ -16,6 +16,7 @@ import { nextReviewState, type ReviewRating } from "./ebbinghaus.js";
 import { normalizeImportRows } from "./import-utils.js";
 import { buildDailyStudyMarkdown, isAllowedStudyExportDate, type StudyEventKind, type StudyExportEvent } from "./study-export.js";
 import { buildDoubaoRequestBody, buildDoubaoTtsPrompt, buildPlainTextSsml, doubaoTtsEndpoint, doubaoTtsPromptCandidates, doubaoTtsResourceId, doubaoTtsVoice, maxDoubaoPromptLength, maxDoubaoSsmlLength, normalizeCustomSsml, normalizeDoubaoPrompt, parseDoubaoAudioChunks } from "./doubao-tts.js";
+import { currentWeekMakeupDates, dailyStreak, isDateKey, isoWeekIdForDateKey } from "./daily-checkin.js";
 
 const app = express();
 const upload = multer({ storage: multer.memoryStorage() });
@@ -68,7 +69,7 @@ type BlankAnswerConfig = { version: 1; orderless: boolean; answers: string[][] }
 const maxDeckDepth = 5;
 const sessionCookieName = "flashcards_session";
 const sessionDays = 30;
-const appVersion = "0.9.16";
+const appVersion = "0.10.1";
 const timeZone = "Asia/Shanghai";
 const pronunciationCacheDir = process.env.PRONUNCIATION_CACHE_DIR ?? path.resolve(process.cwd(), "runtime/pronunciations");
 const doubaoTtsApiKey = process.env.DOUBAO_TTS_API_KEY ?? "";
@@ -4918,13 +4919,15 @@ function dailyTaskSummary(userId: number) {
     "SELECT date FROM daily_tasks WHERE user_id = ? AND completed_at <> '' ORDER BY date DESC",
     [userId]
   ).map((row) => String(row.date));
-  let streak = 0;
-  let cursor = new Date(`${shanghaiDateKey()}T00:00:00+08:00`);
-  const completedSet = new Set(completedDates);
-  while (completedSet.has(shanghaiDateKey(cursor))) {
-    streak += 1;
-    cursor = new Date(cursor.getTime() - 24 * 60 * 60 * 1000);
-  }
+  const today = shanghaiDateKey();
+  const weekId = shanghaiWeekId();
+  const makeupDates = currentWeekMakeupDates(completedDates, today);
+  const makeupUsed = all<{ date: string }>(
+    "SELECT date FROM daily_checkin_makeups WHERE user_id = ? AND week_id = ? ORDER BY date",
+    [userId, weekId]
+  ).map((row) => String(row.date));
+  const makeupRemaining = Math.max(0, 2 - makeupUsed.length);
+  const streak = dailyStreak(completedDates, today);
   return {
     date,
     daily_word_goal: Number(task.daily_new_goal),
@@ -4936,7 +4939,11 @@ function dailyTaskSummary(userId: number) {
     review_mastered: reviewMasteredIds.length,
     completed,
     completed_at: String(task.completed_at ?? ""),
-    streak
+    streak,
+    checkin_makeup_week: weekId,
+    checkin_makeup_used: makeupUsed.length,
+    checkin_makeup_remaining: makeupRemaining,
+    checkin_makeup_dates: makeupDates
   };
 }
 
@@ -7034,6 +7041,67 @@ app.post("/api/reviews/:cardId/restore", (req, res) => {
 
 app.get("/api/daily-task", (_req, res) => {
   res.json(dailyTaskSummary(currentUserId(res)));
+});
+
+app.post("/api/daily-task/makeup", (req, res) => {
+  const userId = currentUserId(res);
+  const targetDate = String(req.body?.date ?? "");
+  const today = shanghaiDateKey();
+  const currentWeek = shanghaiWeekId();
+  if (!isDateKey(targetDate) || targetDate >= today || isoWeekIdForDateKey(targetDate) !== currentWeek) {
+    res.status(400).json({ error: "只能补打卡本周今天之前的日期" });
+    return;
+  }
+
+  const completed = all<{ date: string }>(
+    "SELECT date FROM daily_tasks WHERE user_id = ? AND completed_at <> ''",
+    [userId]
+  ).map((row) => String(row.date));
+  if (!currentWeekMakeupDates(completed, today).includes(targetDate)) {
+    res.status(409).json({ error: "这一天已经完成打卡，或暂不可补打卡" });
+    return;
+  }
+
+  const used = get<{ count: number }>(
+    "SELECT COUNT(*) AS count FROM daily_checkin_makeups WHERE user_id = ? AND week_id = ?",
+    [userId, currentWeek]
+  );
+  if (Number(used?.count ?? 0) >= 2) {
+    res.status(409).json({ error: "本周补打卡机会已用完" });
+    return;
+  }
+
+  const existingMakeup = get<{ date: string }>(
+    "SELECT date FROM daily_checkin_makeups WHERE user_id = ? AND date = ?",
+    [userId, targetDate]
+  );
+  if (existingMakeup) {
+    res.status(409).json({ error: "这一天已经补打卡" });
+    return;
+  }
+
+  const task = get<{ date: string }>(
+    "SELECT date FROM daily_tasks WHERE user_id = ? AND date = ?",
+    [userId, targetDate]
+  );
+  const now = nowIso();
+  if (!task) {
+    run(
+      `INSERT INTO daily_tasks (
+         user_id, date, daily_new_goal, review_card_ids, new_card_ids,
+         new_mastered_card_ids, review_mastered_card_ids, new_study_count, review_study_count, completed_at, created_at, updated_at
+       )
+       VALUES (?, ?, ?, '[]', '[]', '[]', '[]', 0, 0, ?, ?, ?)`,
+      [userId, targetDate, getDailyGoal(userId), now, now, now]
+    );
+  } else {
+    run("UPDATE daily_tasks SET completed_at = ?, updated_at = ? WHERE user_id = ? AND date = ?", [now, now, userId, targetDate]);
+  }
+  run(
+    "INSERT INTO daily_checkin_makeups (user_id, week_id, date, created_at) VALUES (?, ?, ?, ?)",
+    [userId, currentWeek, targetDate, now]
+  );
+  res.json(dailyTaskSummary(userId));
 });
 
 app.put("/api/daily-task/settings", (req, res) => {

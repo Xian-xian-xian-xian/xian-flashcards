@@ -108,6 +108,8 @@ export const api = {
   saveSettings: (settings: Partial<Settings>) =>
     request<{ ok: true }>("/api/settings", { method: "PUT", body: JSON.stringify(settings) }),
   dailyTask: () => request<DailyTask>("/api/daily-task"),
+  makeupDailyTask: (date: string) =>
+    request<DailyTask>("/api/daily-task/makeup", { method: "POST", body: JSON.stringify({ date }) }),
   saveDailyTaskSettings: (payload: { dailyWordGoal: number }) =>
     request<{ ok: true }>("/api/daily-task/settings", { method: "PUT", body: JSON.stringify(payload) }),
   syncStatus: () => request<SyncStatus>("/api/sync/status"),

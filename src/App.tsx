@@ -85,7 +85,7 @@ declare global {
     katex?: KatexRuntime;
   }
 }
-const version = "0.9.16";
+const version = "0.10.1";
 const logExportPressCount = 6;
 const logExportKey = "a";
 const logExportResetMs = 1800;
@@ -141,7 +141,11 @@ const emptyDailyTask: DailyTask = {
   review_mastered: 0,
   completed: false,
   completed_at: "",
-  streak: 0
+  streak: 0,
+  checkin_makeup_week: "",
+  checkin_makeup_used: 0,
+  checkin_makeup_remaining: 2,
+  checkin_makeup_dates: []
 };
 
 function normalizeAnswer(value: string) {
@@ -951,6 +955,15 @@ export default function App() {
     }
   }
 
+  async function makeUpDailyCheckin(date: string) {
+    if (!window.confirm(`确认补打卡 ${date}？本周剩余补打卡机会会减少 1 次。`)) return;
+    await withPending(`makeup-${date}`, async () => {
+      const nextTask = await api.makeupDailyTask(date);
+      setDailyTask(nextTask);
+      showToast(`${date} 已补打卡`);
+    });
+  }
+
   if (!authChecked) {
     return <div className="auth-shell"><div className="auth-panel"><p className="eyebrow">闪记</p><h1>正在检查登录状态</h1></div></div>;
   }
@@ -1024,6 +1037,8 @@ export default function App() {
             dueCards={dueCards}
             dailyTask={dailyTask}
             stats={stats}
+            onMakeup={makeUpDailyCheckin}
+            makeupPending={Boolean(dailyTask.checkin_makeup_dates.some((date) => pending[`makeup-${date}`]))}
             onOpenDeck={(id) => {
               setSelectedDeckId(id);
               setView("deck");
@@ -1368,6 +1383,8 @@ function HomeView(props: {
   dueCards: Card[];
   dailyTask: DailyTask;
   stats: Stats;
+  onMakeup: (date: string) => Promise<void>;
+  makeupPending: boolean;
   onOpenDeck: (id: number) => void;
   onStudy: (id: number) => void;
 }) {
@@ -1375,6 +1392,14 @@ function HomeView(props: {
   const dailyTarget = Math.max(props.dailyTask.daily_word_goal, 1);
   const dailyDone = props.dailyTask.progress_words;
   const dailyProgress = props.dailyTask.completed ? 100 : Math.min(100, Math.round((dailyDone / dailyTarget) * 100));
+  const [makeupDate, setMakeupDate] = useState(props.dailyTask.checkin_makeup_dates[0] ?? "");
+
+  useEffect(() => {
+    if (!props.dailyTask.checkin_makeup_dates.includes(makeupDate)) {
+      setMakeupDate(props.dailyTask.checkin_makeup_dates[0] ?? "");
+    }
+  }, [props.dailyTask.checkin_makeup_dates, makeupDate]);
+
   return (
     <section className="stack">
       <div className={`hero-panel daily-hero ${props.dailyTask.completed ? "complete" : ""}`}>
@@ -1382,7 +1407,7 @@ function HomeView(props: {
         <div>
           <p className="eyebrow">今日打卡</p>
           <div className="streak-heading">
-            <h2>{props.dailyTask.completed ? "已完成" : `${dailyDone}/${dailyTarget} 单词`}</h2>
+            <h2>{props.dailyTask.completed ? "已完成" : `${dailyDone}/${dailyTarget} 卡片`}</h2>
             <span className={`streak-badge ${props.dailyTask.completed ? "done" : ""}`}><CheckCircle2 />连续 {props.dailyTask.streak} 天</span>
           </div>
           <p>复习 {props.dailyTask.review_completed} × 1 · 新学 {props.dailyTask.new_completed} × 5</p>
@@ -1390,6 +1415,19 @@ function HomeView(props: {
             <span>{dailyDone}</span>
             <div><i /></div>
             <span>{dailyTarget}</span>
+          </div>
+          <div className="daily-makeup">
+            <span>本周补打卡：剩余 {props.dailyTask.checkin_makeup_remaining} 次</span>
+            {props.dailyTask.checkin_makeup_dates.length > 0 && props.dailyTask.checkin_makeup_remaining > 0 && (
+              <div className="daily-makeup-actions">
+                <select value={makeupDate} onChange={(event) => setMakeupDate(event.target.value)} disabled={props.makeupPending} aria-label="选择补打卡日期">
+                  {props.dailyTask.checkin_makeup_dates.map((date) => <option key={date} value={date}>{date}</option>)}
+                </select>
+                <button className="primary-button secondary-button" type="button" disabled={props.makeupPending || !makeupDate} onClick={() => props.onMakeup(makeupDate)}>
+                  {props.makeupPending ? "补打卡中" : "补打卡"}
+                </button>
+              </div>
+            )}
           </div>
         </div>
         <div className="daily-medal" aria-hidden="true">
@@ -1408,7 +1446,7 @@ function HomeView(props: {
       </div>
 
       <div className="task-strip">
-        <TaskItem icon={<Target />} label="每日目标" value={`${dailyDone}/${dailyTarget} 单词`} done={props.dailyTask.completed} />
+        <TaskItem icon={<Target />} label="每日目标" value={`${dailyDone}/${dailyTarget} 卡片`} done={props.dailyTask.completed} />
         <TaskItem icon={<ListChecks />} label="今日学习" value={`复习 ${props.dailyTask.review_completed} × 1 · 新学 ${props.dailyTask.new_completed} × 5`} done={props.dailyTask.completed} />
         <TaskItem icon={<CheckCircle2 />} label="连续打卡" value={`${props.dailyTask.streak} 天`} done={props.dailyTask.completed} />
       </div>
@@ -3810,7 +3848,7 @@ function SettingsView(props: { settings: Settings; onThemeChange: (theme: ThemeM
     <form className="panel settings-panel" onSubmit={save}>
       <label>主题<select value={draft.theme} onChange={(event) => changeTheme(event.target.value as ThemeMode)}><option value="system">跟随系统</option><option value="light">浅色</option><option value="dark">暗黑</option></select></label>
       <label>自动发音<select value={draft.autoSpeak} onChange={(event) => updateDraft({ autoSpeak: event.target.value as Settings["autoSpeak"] })}><option value="off">关闭</option><option value="on">开启</option></select></label>
-      <label>每日目标（单词）<input type="number" min={1} value={draft.dailyWordGoal} onChange={(event) => updateDraft({ dailyWordGoal: Number(event.target.value) })} /></label>
+      <label>每日目标（卡片）<input type="number" min={1} value={draft.dailyWordGoal} onChange={(event) => updateDraft({ dailyWordGoal: Number(event.target.value) })} /></label>
       <div className="settings-actions">
         <button className="primary-button" disabled={props.saving}><Save />{props.saving ? "保存中" : "保存设置"}</button>
         <button className="primary-button secondary-button" type="button" disabled={props.notifying} onClick={props.onNotify}><Bell />{props.notifying ? "授权中" : "开启浏览器通知"}</button>
@@ -3839,6 +3877,7 @@ function AboutView(props: { syncStatus: SyncStatus | null }) {
       <div className="schedule-box"><h3>同步状态</h3><p>最近同步：{props.syncStatus ? fullDateTime(props.syncStatus.lastSyncAt) : "暂无"} · 数据更新：{props.syncStatus?.dataUpdatedAt ? fullDateTime(props.syncStatus.dataUpdatedAt) : "暂无"}</p></div>
       <div className="schedule-box changelog-box">
         <h3>更新日志</h3>
+        <div className="changelog-row"><strong>0.10.1</strong><span>2026-08-12</span><p>晚上打卡改用卡片计量；未完成当天时连续打卡保留昨日天数；每个自然周新增 2 次补打卡机会。</p></div>
         <div className="changelog-row"><strong>0.9.16</strong><span>2026-08-12</span><p>修复填空题卡页宽设置被重复计算的问题；75% 页宽现在实际显示为约 75%，不再缩小到约一半。</p></div>
         <div className="changelog-row"><strong>0.9.15</strong><span>2026-08-12</span><p>选择题卡支持按 7/8/9/6 快捷选择前四个选项并提交单选题；右键选项可置灰排除，再次右键恢复。</p></div>
         <div className="changelog-row"><strong>0.9.14</strong><span>2026-08-07</span><p>题目参考新增答案并与左侧答案字号一致；修复长内容滚动时卡片边框未随内容延伸、底边无法与题目参考齐平的问题。</p></div>
