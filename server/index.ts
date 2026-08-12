@@ -17,8 +17,10 @@ import { normalizeImportRows } from "./import-utils.js";
 import { buildDailyStudyMarkdown, isAllowedStudyExportDate, type StudyEventKind, type StudyExportEvent } from "./study-export.js";
 import { buildDoubaoRequestBody, buildDoubaoTtsPrompt, buildPlainTextSsml, doubaoTtsEndpoint, doubaoTtsPromptCandidates, doubaoTtsResourceId, doubaoTtsVoice, maxDoubaoPromptLength, maxDoubaoSsmlLength, normalizeCustomSsml, normalizeDoubaoPrompt, parseDoubaoAudioChunks } from "./doubao-tts.js";
 import { currentWeekMakeupDates, dailyStreak, isDailyTaskComplete, isDateKey, isoWeekIdForDateKey, taskProgressCount, withoutTaskCardIds } from "./daily-checkin.js";
-import { FixedWindowRateLimiter, normalizeCookieDomain } from "./http-security.js";
+import { FixedWindowRateLimiter, isAllowedCorsOrigin, normalizeCookieDomain } from "./http-security.js";
 import { createHarvestLedger, normalizeHarvestLedger, trustedTomatoWeight, updateHarvestLedger, type HarvestLedger, type TomatoRecord } from "./tomato-harvest.js";
+import { isReviewDue, reviewUndoExpiresAt } from "./review-security.js";
+import { isTaskClaimEventType } from "./game-events.js";
 
 const app = express();
 const maxImportBytes = 10 * 1024 * 1024;
@@ -35,7 +37,18 @@ const templateDir = path.resolve(process.cwd(), "模版");
 const cardImagesDir = process.env.CARD_IMAGES_DIR ?? path.resolve(process.cwd(), "data/card-images");
 
 app.set("trust proxy", "loopback");
-app.use(cors({ origin: true, credentials: true }));
+const corsOriginOptions = { nodeEnv: process.env.NODE_ENV, configuredOrigins: process.env.CORS_ORIGINS };
+app.use((req, res, next) => {
+  if (!isAllowedCorsOrigin(req.headers.origin, corsOriginOptions)) {
+    res.status(403).json({ error: "不允许的跨域来源" });
+    return;
+  }
+  next();
+});
+app.use(cors({
+  origin: (origin, callback) => callback(null, isAllowedCorsOrigin(origin, corsOriginOptions)),
+  credentials: true
+}));
 app.use(express.json({ limit: "10mb" }));
 app.use((req, res, next) => {
   const startedAt = Date.now();
@@ -76,7 +89,7 @@ type BlankAnswerConfig = { version: 1; orderless: boolean; answers: string[][] }
 const maxDeckDepth = 5;
 const sessionCookieName = "flashcards_session";
 const sessionDays = 30;
-const appVersion = "0.10.3";
+const appVersion = "0.10.4";
 const timeZone = "Asia/Shanghai";
 const cookieDomain = normalizeCookieDomain(process.env.COOKIE_DOMAIN);
 const pronunciationCacheDir = process.env.PRONUNCIATION_CACHE_DIR ?? path.resolve(process.cwd(), "runtime/pronunciations");
@@ -3643,7 +3656,7 @@ function memoryBookPayload(userId: number, state: GameState | null) {
       description: "你第一次把称号挂到了基地资料卡上。",
       icon: "title"
     }),
-    firstEventMilestone(state, (event) => event.type === "task_claimed", {
+    firstEventMilestone(state, (event) => isTaskClaimEventType(event.type), {
       id: "first_task_claim",
       type: "task",
       title: "第一次完成每日任务",
@@ -4541,7 +4554,8 @@ function reviewRemainingCounts(userId: number, deckId?: number) {
 
 function cardRow(userId: number, cardId: number) {
   return get<Record<string, SqlValue>>(
-    `SELECT c.*, d.name AS deck_name, d.language, r.stage, r.due_at, r.last_rating, r.known_count, r.fuzzy_count, r.unknown_count
+    `SELECT c.*, d.name AS deck_name, d.language, r.stage, r.due_at, r.last_rating, r.known_count, r.fuzzy_count, r.unknown_count,
+            r.updated_at AS review_updated_at
      FROM cards c
      JOIN decks d ON d.id = c.deck_id
      JOIN reviews r ON r.card_id = c.id
@@ -4715,6 +4729,30 @@ type DailyTaskRow = Record<string, unknown> & {
 
 type DailyTaskSnapshot = Pick<DailyTaskRow, "new_card_ids" | "new_mastered_card_ids" | "review_mastered_card_ids" | "new_study_count" | "review_study_count" | "completed_at">;
 
+type ReviewStateSnapshot = {
+  stage: number;
+  due_at: string;
+  last_rating: string;
+  known_count: number;
+  fuzzy_count: number;
+  unknown_count: number;
+  updated_at: string;
+};
+
+type ReviewUndoKind = "answer" | "practice";
+
+type ReviewUndoPayload = {
+  review: ReviewStateSnapshot | null;
+  dailyTaskPrevious: DailyTaskSnapshot;
+  studyEventId: number;
+};
+
+type ReviewUndoRow = {
+  token: string;
+  snapshot: string;
+  expected_review_updated_at: string;
+};
+
 function normalizeDailyStudyCounts(userId: number, task: DailyTaskRow) {
   if (Number(task.new_study_count) >= 0 && Number(task.review_study_count) >= 0) return task;
   const reviewIds = parseJsonArray(task.review_card_ids);
@@ -4794,6 +4832,83 @@ function restoreDailyTaskSnapshot(userId: number, snapshot: unknown) {
   return true;
 }
 
+function reviewStateSnapshot(review: Record<string, SqlValue>): ReviewStateSnapshot {
+  return {
+    stage: Math.max(0, Number(review.stage) || 0),
+    due_at: String(review.due_at ?? ""),
+    last_rating: String(review.last_rating ?? ""),
+    known_count: Math.max(0, Number(review.known_count) || 0),
+    fuzzy_count: Math.max(0, Number(review.fuzzy_count) || 0),
+    unknown_count: Math.max(0, Number(review.unknown_count) || 0),
+    updated_at: String(review.review_updated_at ?? review.updated_at ?? "")
+  };
+}
+
+function createReviewUndoState(
+  userId: number,
+  cardId: number,
+  kind: ReviewUndoKind,
+  payload: ReviewUndoPayload,
+  expectedReviewUpdatedAt: string,
+  createdAt: string
+) {
+  const token = crypto.randomUUID();
+  run("DELETE FROM review_undo_states WHERE expires_at <= ? OR consumed_at <> ''", [createdAt]);
+  run(
+    `INSERT INTO review_undo_states (
+       token, user_id, card_id, kind, snapshot, expected_review_updated_at, created_at, expires_at, consumed_at
+     ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, '')`,
+    [token, userId, cardId, kind, JSON.stringify(payload), expectedReviewUpdatedAt, createdAt, reviewUndoExpiresAt(new Date(createdAt))]
+  );
+  return token;
+}
+
+function pendingReviewUndoState(userId: number, cardId: number, kind: ReviewUndoKind, token: unknown) {
+  const normalizedToken = typeof token === "string" ? token.trim() : "";
+  if (!normalizedToken) return null;
+  const now = nowIso();
+  const row = get<ReviewUndoRow>(
+    `SELECT token, snapshot, expected_review_updated_at
+     FROM review_undo_states
+     WHERE token = ? AND user_id = ? AND card_id = ? AND kind = ? AND consumed_at = '' AND expires_at > ?`,
+    [normalizedToken, userId, cardId, kind, now]
+  );
+  if (!row) return null;
+  const latest = get<{ token: string }>(
+    `SELECT token
+     FROM review_undo_states
+     WHERE user_id = ? AND card_id = ? AND consumed_at = '' AND expires_at > ?
+     ORDER BY created_at DESC, rowid DESC
+     LIMIT 1`,
+    [userId, cardId, now]
+  );
+  if (!latest || latest.token !== normalizedToken) return null;
+  const review = get<{ updated_at: string }>(
+    `SELECT r.updated_at
+     FROM reviews r
+     JOIN cards c ON c.id = r.card_id
+     WHERE r.card_id = ? AND c.user_id = ?`,
+    [cardId, userId]
+  );
+  if (!review || review.updated_at !== row.expected_review_updated_at) return null;
+  try {
+    return { row, payload: JSON.parse(row.snapshot) as ReviewUndoPayload };
+  } catch {
+    return null;
+  }
+}
+
+function consumeReviewUndoState(token: string) {
+  run("UPDATE review_undo_states SET consumed_at = ? WHERE token = ? AND consumed_at = ''", [nowIso(), token]);
+}
+
+function hasStudyEventToday(userId: number, cardId: number) {
+  return Boolean(get<{ id: number }>(
+    "SELECT id FROM study_events WHERE user_id = ? AND card_id = ? AND study_date = ? LIMIT 1",
+    [userId, cardId, shanghaiDateKey()]
+  ));
+}
+
 function dailyReviewCompletedCount(userId: number, date: string, reviewIds: number[]) {
   const uniqueReviewIds = Array.from(new Set(reviewIds));
   if (uniqueReviewIds.length === 0) return 0;
@@ -4845,30 +4960,6 @@ function updateDailyTaskProgress(userId: number, cardId: number, rating: ReviewR
       JSON.stringify([...reviewMasteredIds]),
       newStudyCount,
       reviewStudyCount,
-      now,
-      userId,
-      task.date
-    ]
-  );
-}
-
-function removeDailyNewCard(userId: number, cardId: number) {
-  const task = ensureDailyTask(userId);
-  const newIds = new Set(parseJsonArray(task.new_card_ids));
-  const newMasteredIds = new Set(parseJsonArray(task.new_mastered_card_ids));
-  newIds.delete(cardId);
-  newMasteredIds.delete(cardId);
-  const now = nowIso();
-  run(
-    `UPDATE daily_tasks
-     SET new_card_ids = ?,
-         new_mastered_card_ids = ?,
-         completed_at = '',
-         updated_at = ?
-     WHERE user_id = ? AND date = ?`,
-    [
-      JSON.stringify([...newIds]),
-      JSON.stringify([...newMasteredIds]),
       now,
       userId,
       task.date
@@ -7039,7 +7130,8 @@ app.post("/api/reviews/:cardId/answer", (req, res) => {
   }
 
   const current = get<Record<string, SqlValue>>(
-    `SELECT c.*, d.name AS deck_name, r.stage, r.due_at, r.last_rating, r.known_count, r.fuzzy_count, r.unknown_count, r.updated_at
+    `SELECT c.*, d.name AS deck_name, r.stage, r.due_at, r.last_rating, r.known_count, r.fuzzy_count, r.unknown_count,
+            r.updated_at AS review_updated_at
      FROM reviews r
      JOIN cards c ON c.id = r.card_id
      JOIN decks d ON d.id = c.deck_id
@@ -7050,7 +7142,12 @@ app.post("/api/reviews/:cardId/answer", (req, res) => {
     res.status(404).json({ error: "复习记录不存在" });
     return;
   }
+  if (!isReviewDue(current.due_at)) {
+    res.status(409).json({ error: "这张卡片尚未到复习时间" });
+    return;
+  }
 
+  const previousReview = reviewStateSnapshot(current);
   const next = nextReviewState(Number(current.stage), rating, new Date(), {
     known_count: Number(current.known_count),
     fuzzy_count: Number(current.fuzzy_count),
@@ -7059,33 +7156,54 @@ app.post("/api/reviews/:cardId/answer", (req, res) => {
   const cardId = Number(req.params.cardId);
   const previousDailyTask = dailyTaskSnapshot(ensureDailyTask(userId));
   const answeredAt = nowIso();
-  run(
-    `UPDATE reviews
-     SET stage = ?,
-         due_at = ?,
-         last_rating = ?,
-         known_count = known_count + ?,
-         fuzzy_count = fuzzy_count + ?,
-         unknown_count = unknown_count + ?,
-         updated_at = ?
-     WHERE card_id IN (SELECT id FROM cards WHERE id = ? AND user_id = ?)`,
-    [
-      next.stage,
-      next.dueAt,
+  const result = transaction(() => {
+    run(
+      `UPDATE reviews
+       SET stage = ?,
+           due_at = ?,
+           last_rating = ?,
+           known_count = known_count + ?,
+           fuzzy_count = fuzzy_count + ?,
+           unknown_count = unknown_count + ?,
+           updated_at = ?
+       WHERE card_id IN (SELECT id FROM cards WHERE id = ? AND user_id = ?)`,
+      [
+        next.stage,
+        next.dueAt,
+        rating,
+        rating === "known" ? 1 : 0,
+        rating === "fuzzy" ? 1 : 0,
+        rating === "unknown" ? 1 : 0,
+        answeredAt,
+        cardId,
+        userId
+      ]
+    );
+    updateDailyTaskProgress(userId, cardId, rating, Number(current.stage));
+    dailyTaskSummary(userId);
+    const studyEventId = recordStudyEvent(
+      userId,
+      current,
+      Number(current.stage) === 0 ? "new" : "review",
       rating,
-      rating === "known" ? 1 : 0,
-      rating === "fuzzy" ? 1 : 0,
-      rating === "unknown" ? 1 : 0,
-      answeredAt,
+      Number(current.stage),
+      next.stage,
+      answeredAt
+    );
+    const undoToken = createReviewUndoState(
+      userId,
       cardId,
-      userId
-    ]
-  );
-
-  updateDailyTaskProgress(userId, cardId, rating, Number(current.stage));
-  dailyTaskSummary(userId);
-  const studyEventId = recordStudyEvent(userId, current, Number(current.stage) === 0 ? "new" : "review", rating, Number(current.stage), next.stage, answeredAt);
-  res.json({ ...next, previous: { ...current, studyEventId, dailyTaskPrevious: previousDailyTask } });
+      "answer",
+      { review: previousReview, dailyTaskPrevious: previousDailyTask, studyEventId },
+      answeredAt,
+      answeredAt
+    );
+    return { studyEventId, undoToken };
+  });
+  res.json({
+    ...next,
+    previous: { ...previousReview, ...result, dailyTaskPrevious: previousDailyTask }
+  });
 });
 
 app.post("/api/reviews/:cardId/practice", (req, res) => {
@@ -7101,15 +7219,30 @@ app.post("/api/reviews/:cardId/practice", (req, res) => {
     res.status(404).json({ error: "复习记录不存在" });
     return;
   }
+  if (!hasStudyEventToday(userId, cardId)) {
+    res.status(409).json({ error: "请先完成这张卡片的首次评分" });
+    return;
+  }
   const previousDailyTask = dailyTaskSnapshot(ensureDailyTask(userId));
-  updateDailyPracticeMastery(userId, cardId, rating);
-  dailyTaskSummary(userId);
   const answeredAt = nowIso();
-  const studyEventId = recordStudyEvent(userId, card, "review", rating, Number(card.stage), Number(card.stage), answeredAt);
+  const result = transaction(() => {
+    updateDailyPracticeMastery(userId, cardId, rating);
+    dailyTaskSummary(userId);
+    const studyEventId = recordStudyEvent(userId, card, "review", rating, Number(card.stage), Number(card.stage), answeredAt);
+    const undoToken = createReviewUndoState(
+      userId,
+      cardId,
+      "practice",
+      { review: null, dailyTaskPrevious: previousDailyTask, studyEventId },
+      String(card.review_updated_at ?? ""),
+      answeredAt
+    );
+    return { studyEventId, undoToken };
+  });
   res.json({
     stage: Number(card.stage),
     dueAt: String(card.due_at),
-    previous: { studyEventId, dailyTaskPrevious: previousDailyTask }
+    previous: { ...result, dailyTaskPrevious: previousDailyTask }
   });
 });
 
@@ -7121,9 +7254,17 @@ app.post("/api/reviews/:cardId/practice/restore", (req, res) => {
     res.status(404).json({ error: "复习记录不存在" });
     return;
   }
-  restoreDailyTaskSnapshot(userId, req.body.dailyTaskPrevious ?? req.body);
-  deleteStudyEvent(userId, req.body.studyEventId);
-  dailyTaskSummary(userId);
+  const undo = pendingReviewUndoState(userId, cardId, "practice", req.body.undoToken);
+  if (!undo) {
+    res.status(409).json({ error: "撤销凭证无效、已过期或不是最近一次操作" });
+    return;
+  }
+  transaction(() => {
+    restoreDailyTaskSnapshot(userId, undo.payload.dailyTaskPrevious);
+    deleteStudyEvent(userId, undo.payload.studyEventId);
+    consumeReviewUndoState(undo.row.token);
+    dailyTaskSummary(userId);
+  });
   res.json({ ok: true });
 });
 
@@ -7135,31 +7276,39 @@ app.post("/api/reviews/:cardId/restore", (req, res) => {
     res.status(404).json({ error: "复习记录不存在" });
     return;
   }
-  const restoredDailyTask = restoreDailyTaskSnapshot(userId, req.body.dailyTaskPrevious);
-  deleteStudyEvent(userId, req.body.studyEventId);
-  if (!restoredDailyTask && Math.max(0, Number(req.body.stage ?? 0)) === 0) removeDailyNewCard(userId, cardId);
-  run(
-    `UPDATE reviews
-     SET stage = ?,
-         due_at = ?,
-         last_rating = ?,
-         known_count = ?,
-         fuzzy_count = ?,
-         unknown_count = ?,
-         updated_at = ?
-     WHERE card_id = ?`,
-    [
-      Math.max(0, Number(req.body.stage ?? 0)),
-      String(req.body.due_at ?? nowIso()),
-      String(req.body.last_rating ?? ""),
-      Math.max(0, Number(req.body.known_count ?? 0)),
-      Math.max(0, Number(req.body.fuzzy_count ?? 0)),
-      Math.max(0, Number(req.body.unknown_count ?? 0)),
-      String(req.body.updated_at ?? nowIso()),
-      cardId
-    ]
-  );
-  dailyTaskSummary(userId);
+  const undo = pendingReviewUndoState(userId, cardId, "answer", req.body.undoToken);
+  const review = undo?.payload.review;
+  if (!undo || !review) {
+    res.status(409).json({ error: "撤销凭证无效、已过期或不是最近一次操作" });
+    return;
+  }
+  transaction(() => {
+    restoreDailyTaskSnapshot(userId, undo.payload.dailyTaskPrevious);
+    deleteStudyEvent(userId, undo.payload.studyEventId);
+    run(
+      `UPDATE reviews
+       SET stage = ?,
+           due_at = ?,
+           last_rating = ?,
+           known_count = ?,
+           fuzzy_count = ?,
+           unknown_count = ?,
+           updated_at = ?
+       WHERE card_id = ?`,
+      [
+        review.stage,
+        review.due_at,
+        review.last_rating,
+        review.known_count,
+        review.fuzzy_count,
+        review.unknown_count,
+        review.updated_at,
+        cardId
+      ]
+    );
+    consumeReviewUndoState(undo.row.token);
+    dailyTaskSummary(userId);
+  });
   res.json({ ok: true });
 });
 

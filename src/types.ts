@@ -49,6 +49,7 @@ export type Card = {
 };
 
 export type ReviewSnapshot = {
+  undoToken: string;
   stage: number;
   due_at: string;
   last_rating: string;

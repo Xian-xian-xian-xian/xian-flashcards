@@ -107,6 +107,23 @@ export async function initDb() {
     CREATE INDEX IF NOT EXISTS idx_study_events_user_date
       ON study_events(user_id, study_date, answered_at);
 
+    CREATE TABLE IF NOT EXISTS review_undo_states (
+      token TEXT PRIMARY KEY,
+      user_id INTEGER NOT NULL,
+      card_id INTEGER NOT NULL,
+      kind TEXT NOT NULL,
+      snapshot TEXT NOT NULL,
+      expected_review_updated_at TEXT NOT NULL,
+      created_at TEXT NOT NULL,
+      expires_at TEXT NOT NULL,
+      consumed_at TEXT DEFAULT '',
+      FOREIGN KEY(user_id) REFERENCES users(id) ON DELETE CASCADE,
+      FOREIGN KEY(card_id) REFERENCES cards(id) ON DELETE CASCADE
+    );
+
+    CREATE INDEX IF NOT EXISTS idx_review_undo_user_card
+      ON review_undo_states(user_id, card_id, consumed_at, created_at);
+
     CREATE TABLE IF NOT EXISTS settings (
       key TEXT PRIMARY KEY,
       value TEXT NOT NULL

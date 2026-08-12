@@ -76,7 +76,7 @@ type View = "home" | "deck" | "create-card" | "study" | "import" | "settings" | 
 type SyncState = "idle" | "syncing" | "success" | "error" | "conflict";
 type StudyMode = "review" | "new" | "grind";
 type ReviewResult = { stage: number; dueAt: string; previous: ReviewSnapshot };
-type PracticeResult = { stage: number; dueAt: string; previous: Pick<ReviewSnapshot, "dailyTaskPrevious" | "studyEventId"> };
+type PracticeResult = { stage: number; dueAt: string; previous: Pick<ReviewSnapshot, "dailyTaskPrevious" | "studyEventId" | "undoToken"> };
 type RatingFeedback = { key: number; rating: ReviewRating; title: string; stageText: string; dueText: string };
 type PronunciationSettings = { ssml: string; prompt: string; customized: boolean; promptCustomized: boolean; maxSsmlLength: number; maxPromptLength: number };
 type KatexRuntime = { renderToString: (value: string, options: { displayMode?: boolean; throwOnError: boolean; trust: boolean; strict: "ignore" }) => string };
@@ -86,7 +86,7 @@ declare global {
     katex?: KatexRuntime;
   }
 }
-const version = "0.10.3";
+const version = "0.10.4";
 const logExportPressCount = 6;
 const logExportKey = "a";
 const logExportResetMs = 1800;
@@ -1283,7 +1283,7 @@ export default function App() {
       setCards([]);
       setDueCards([]);
       setSelectedDeckId(null);
-      setStudyRootDeckId(null);
+      setStudyDeckId(null);
       setView("home");
     });
   }
@@ -2054,7 +2054,7 @@ function StudyView(props: {
   onAnswer: (card: Card, rating: ReviewRating) => Promise<ReviewResult>;
   onPractice: (card: Card, rating: ReviewRating) => Promise<PracticeResult>;
   onUndoAnswer: (card: Card, snapshot: ReviewSnapshot) => Promise<void>;
-  onUndoPractice: (card: Card, snapshot: Pick<ReviewSnapshot, "dailyTaskPrevious" | "studyEventId">) => Promise<void>;
+  onUndoPractice: (card: Card, snapshot: Pick<ReviewSnapshot, "dailyTaskPrevious" | "studyEventId" | "undoToken">) => Promise<void>;
   onUpdateCard: (id: number, payload: CardPayload) => Promise<Card | null | undefined>;
   onSpeak: (text: string, language?: string, fallback?: string) => void;
   onLoadPronunciationXml: (payload: { text: string; fallback: string }) => Promise<PronunciationSettings>;
@@ -2075,7 +2075,7 @@ function StudyView(props: {
   const [roundResetOpen, setRoundResetOpen] = useState(false);
   const [history, setHistory] = useState<Array<{
     card: Card;
-    previous: ReviewSnapshot | Pick<ReviewSnapshot, "dailyTaskPrevious" | "studyEventId">;
+    previous: ReviewSnapshot | Pick<ReviewSnapshot, "dailyTaskPrevious" | "studyEventId" | "undoToken">;
     practice: boolean;
     sessionCards: Card[];
     queue: Card[];
@@ -2712,7 +2712,7 @@ function StudyView(props: {
     setBusy("undo");
     try {
       if (previous.practice) {
-        await props.onUndoPractice(previous.card, previous.previous as Pick<ReviewSnapshot, "dailyTaskPrevious" | "studyEventId">);
+        await props.onUndoPractice(previous.card, previous.previous as Pick<ReviewSnapshot, "dailyTaskPrevious" | "studyEventId" | "undoToken">);
       } else {
         await props.onUndoAnswer(previous.card, previous.previous as ReviewSnapshot);
       }
@@ -3873,6 +3873,7 @@ function AboutView(props: { syncStatus: SyncStatus | null }) {
       <div className="schedule-box"><h3>同步状态</h3><p>最近同步：{props.syncStatus ? fullDateTime(props.syncStatus.lastSyncAt) : "暂无"} · 数据更新：{props.syncStatus?.dataUpdatedAt ? fullDateTime(props.syncStatus.dataUpdatedAt) : "暂无"}</p></div>
       <div className="schedule-box changelog-box">
         <h3>更新日志</h3>
+        <div className="changelog-row"><strong>0.10.4</strong><span>2026-08-12</span><p>修复退出登录异常和首次任务成就；生产构建新增前端类型检查；复习撤销改为服务端一次性令牌并限制提前作答；跨域请求改为可信来源白名单。</p></div>
         <div className="changelog-row"><strong>0.10.3</strong><span>2026-08-12</span><p>经营奖励改用服务端不可变番茄记录并限制奖励字段；导入增加 10 MB 限制和原子回滚；登录、注册及远程语音合成增加限流；修复跨子域登录 Cookie。</p></div>
         <div className="changelog-row"><strong>0.10.2</strong><span>2026-08-12</span><p>修复多空填空题答案互相覆盖；每日任务按已掌握新卡和已处理到期卡完成，并避免重复或任务外作答污染进度；删除卡片后同步清理当日任务。</p></div>
         <div className="changelog-row"><strong>0.10.1</strong><span>2026-08-12</span><p>晚上打卡按卡片张数计数；未完成当天时连续打卡保留昨日天数；每个自然周新增 2 次补打卡机会。</p></div>

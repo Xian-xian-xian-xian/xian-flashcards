@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { FixedWindowRateLimiter, normalizeCookieDomain } from "./http-security.js";
+import { FixedWindowRateLimiter, isAllowedCorsOrigin, normalizeCookieDomain } from "./http-security.js";
 
 describe("HTTP security helpers", () => {
   it("enforces a fixed request window and resets after expiry", () => {
@@ -14,5 +14,16 @@ describe("HTTP security helpers", () => {
     expect(normalizeCookieDomain(" .beyour.top ")).toBe(".beyour.top");
     expect(normalizeCookieDomain(undefined)).toBeUndefined();
     expect(() => normalizeCookieDomain("https://beyour.top")).toThrow("COOKIE_DOMAIN 配置无效");
+  });
+
+  it("allows only trusted production origins and supports local development", () => {
+    expect(isAllowedCorsOrigin("https://card.beyour.top", { nodeEnv: "production" })).toBe(true);
+    expect(isAllowedCorsOrigin("https://tomato.beyour.top", { nodeEnv: "production" })).toBe(true);
+    expect(isAllowedCorsOrigin("https://evil.example", { nodeEnv: "production" })).toBe(false);
+    expect(isAllowedCorsOrigin("http://192.168.1.20:5173", { nodeEnv: "development" })).toBe(true);
+    expect(isAllowedCorsOrigin("https://preview.example", {
+      nodeEnv: "production",
+      configuredOrigins: "https://preview.example"
+    })).toBe(true);
   });
 });

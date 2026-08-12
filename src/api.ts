@@ -95,13 +95,13 @@ export const api = {
       body: JSON.stringify({ rating })
     }),
   practice: (cardId: number, rating: ReviewRating) =>
-    request<{ stage: number; dueAt: string; previous: Pick<ReviewSnapshot, "dailyTaskPrevious" | "studyEventId"> }>(`/api/reviews/${cardId}/practice`, {
+    request<{ stage: number; dueAt: string; previous: Pick<ReviewSnapshot, "dailyTaskPrevious" | "studyEventId" | "undoToken"> }>(`/api/reviews/${cardId}/practice`, {
       method: "POST",
       body: JSON.stringify({ rating })
     }),
   restoreReview: (cardId: number, snapshot: ReviewSnapshot) =>
     request<{ ok: true }>(`/api/reviews/${cardId}/restore`, { method: "POST", body: JSON.stringify(snapshot) }),
-  restorePractice: (cardId: number, snapshot: Pick<ReviewSnapshot, "dailyTaskPrevious" | "studyEventId">) =>
+  restorePractice: (cardId: number, snapshot: Pick<ReviewSnapshot, "dailyTaskPrevious" | "studyEventId" | "undoToken">) =>
     request<{ ok: true }>(`/api/reviews/${cardId}/practice/restore`, { method: "POST", body: JSON.stringify(snapshot) }),
   stats: () => request<Stats>("/api/stats"),
   settings: () => request<Settings>("/api/settings"),
