@@ -4903,8 +4903,8 @@ function dailyTaskSummary(userId: number) {
   const { newMasteredIds, reviewMasteredIds } = normalizeDailyMasteryLists(userId, task);
   const reviewCompleted = Math.max(0, Number(task.review_study_count) || 0);
   const newCompleted = Math.max(0, Number(task.new_study_count) || 0);
-  const progressWords = reviewCompleted + newCompleted * 5;
-  const completed = progressWords >= Math.max(1, Number(task.daily_new_goal));
+  const progressCards = reviewCompleted + newCompleted;
+  const completed = progressCards >= Math.max(1, Number(task.daily_new_goal));
   if (completed && !task.completed_at) {
     const now = nowIso();
     run("UPDATE daily_tasks SET completed_at = ?, updated_at = ? WHERE user_id = ? AND date = ?", [now, now, userId, date]);
@@ -4931,7 +4931,7 @@ function dailyTaskSummary(userId: number) {
   return {
     date,
     daily_word_goal: Number(task.daily_new_goal),
-    progress_words: progressWords,
+    progress_words: progressCards,
     new_completed: newCompleted,
     new_mastered: newMasteredIds.length,
     review_total: reviewIds.length,

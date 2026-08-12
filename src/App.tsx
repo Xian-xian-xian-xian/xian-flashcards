@@ -1410,7 +1410,7 @@ function HomeView(props: {
             <h2>{props.dailyTask.completed ? "已完成" : `${dailyDone}/${dailyTarget} 卡片`}</h2>
             <span className={`streak-badge ${props.dailyTask.completed ? "done" : ""}`}><CheckCircle2 />连续 {props.dailyTask.streak} 天</span>
           </div>
-          <p>复习 {props.dailyTask.review_completed} × 1 · 新学 {props.dailyTask.new_completed} × 5</p>
+          <p>复习 {props.dailyTask.review_completed} 张 · 新学 {props.dailyTask.new_completed} 张</p>
           <div className="progress-line" aria-label={`今日进度 ${dailyProgress}%`} style={{ "--progress-ratio": String(dailyProgress / 100) } as CSSProperties}>
             <span>{dailyDone}</span>
             <div><i /></div>
@@ -1447,7 +1447,7 @@ function HomeView(props: {
 
       <div className="task-strip">
         <TaskItem icon={<Target />} label="每日目标" value={`${dailyDone}/${dailyTarget} 卡片`} done={props.dailyTask.completed} />
-        <TaskItem icon={<ListChecks />} label="今日学习" value={`复习 ${props.dailyTask.review_completed} × 1 · 新学 ${props.dailyTask.new_completed} × 5`} done={props.dailyTask.completed} />
+        <TaskItem icon={<ListChecks />} label="今日学习" value={`复习 ${props.dailyTask.review_completed} 张 · 新学 ${props.dailyTask.new_completed} 张`} done={props.dailyTask.completed} />
         <TaskItem icon={<CheckCircle2 />} label="连续打卡" value={`${props.dailyTask.streak} 天`} done={props.dailyTask.completed} />
       </div>
 
@@ -3877,7 +3877,7 @@ function AboutView(props: { syncStatus: SyncStatus | null }) {
       <div className="schedule-box"><h3>同步状态</h3><p>最近同步：{props.syncStatus ? fullDateTime(props.syncStatus.lastSyncAt) : "暂无"} · 数据更新：{props.syncStatus?.dataUpdatedAt ? fullDateTime(props.syncStatus.dataUpdatedAt) : "暂无"}</p></div>
       <div className="schedule-box changelog-box">
         <h3>更新日志</h3>
-        <div className="changelog-row"><strong>0.10.1</strong><span>2026-08-12</span><p>晚上打卡改用卡片计量；未完成当天时连续打卡保留昨日天数；每个自然周新增 2 次补打卡机会。</p></div>
+        <div className="changelog-row"><strong>0.10.1</strong><span>2026-08-12</span><p>晚上打卡按卡片张数计数；未完成当天时连续打卡保留昨日天数；每个自然周新增 2 次补打卡机会。</p></div>
         <div className="changelog-row"><strong>0.9.16</strong><span>2026-08-12</span><p>修复填空题卡页宽设置被重复计算的问题；75% 页宽现在实际显示为约 75%，不再缩小到约一半。</p></div>
         <div className="changelog-row"><strong>0.9.15</strong><span>2026-08-12</span><p>选择题卡支持按 7/8/9/6 快捷选择前四个选项并提交单选题；右键选项可置灰排除，再次右键恢复。</p></div>
         <div className="changelog-row"><strong>0.9.14</strong><span>2026-08-07</span><p>题目参考新增答案并与左侧答案字号一致；修复长内容滚动时卡片边框未随内容延伸、底边无法与题目参考齐平的问题。</p></div>
