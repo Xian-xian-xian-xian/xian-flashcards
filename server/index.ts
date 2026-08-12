@@ -9,7 +9,7 @@ import { fileURLToPath } from "node:url";
 import { parse } from "csv-parse/sync";
 import * as XLSX from "xlsx";
 import type { SqlValue } from "sql.js";
-import { all, get, getUserSetting, initDb, lastTableId, nowIso, run, setUserSetting } from "./db.js";
+import { all, get, getUserSetting, initDb, lastTableId, nowIso, run, setUserSetting, transaction } from "./db.js";
 import { isSuperuserUsername, publicAuthUser, type AuthUser } from "./auth.js";
 import { cardImagePath, cardImageTypeFromFilename, maxCardImageBytes, storeCardImage } from "./card-images.js";
 import { nextReviewState, type ReviewRating } from "./ebbinghaus.js";
@@ -17,9 +17,15 @@ import { normalizeImportRows } from "./import-utils.js";
 import { buildDailyStudyMarkdown, isAllowedStudyExportDate, type StudyEventKind, type StudyExportEvent } from "./study-export.js";
 import { buildDoubaoRequestBody, buildDoubaoTtsPrompt, buildPlainTextSsml, doubaoTtsEndpoint, doubaoTtsPromptCandidates, doubaoTtsResourceId, doubaoTtsVoice, maxDoubaoPromptLength, maxDoubaoSsmlLength, normalizeCustomSsml, normalizeDoubaoPrompt, parseDoubaoAudioChunks } from "./doubao-tts.js";
 import { currentWeekMakeupDates, dailyStreak, isDailyTaskComplete, isDateKey, isoWeekIdForDateKey, taskProgressCount, withoutTaskCardIds } from "./daily-checkin.js";
+import { FixedWindowRateLimiter, normalizeCookieDomain } from "./http-security.js";
+import { createHarvestLedger, normalizeHarvestLedger, trustedTomatoWeight, updateHarvestLedger, type HarvestLedger, type TomatoRecord } from "./tomato-harvest.js";
 
 const app = express();
-const upload = multer({ storage: multer.memoryStorage() });
+const maxImportBytes = 10 * 1024 * 1024;
+const importUpload = multer({
+  storage: multer.memoryStorage(),
+  limits: { fileSize: maxImportBytes, files: 1, fields: 4, parts: 5, fieldSize: maxImportBytes }
+});
 const cardImageUpload = multer({ storage: multer.memoryStorage(), limits: { fileSize: maxCardImageBytes, files: 1 } });
 const port = Number(process.env.PORT ?? 4174);
 const host = process.env.HOST ?? "0.0.0.0";
@@ -28,6 +34,7 @@ const publicDir = path.resolve(__dirname, "../../dist");
 const templateDir = path.resolve(process.cwd(), "模版");
 const cardImagesDir = process.env.CARD_IMAGES_DIR ?? path.resolve(process.cwd(), "data/card-images");
 
+app.set("trust proxy", "loopback");
 app.use(cors({ origin: true, credentials: true }));
 app.use(express.json({ limit: "10mb" }));
 app.use((req, res, next) => {
@@ -69,8 +76,9 @@ type BlankAnswerConfig = { version: 1; orderless: boolean; answers: string[][] }
 const maxDeckDepth = 5;
 const sessionCookieName = "flashcards_session";
 const sessionDays = 30;
-const appVersion = "0.10.2";
+const appVersion = "0.10.3";
 const timeZone = "Asia/Shanghai";
+const cookieDomain = normalizeCookieDomain(process.env.COOKIE_DOMAIN);
 const pronunciationCacheDir = process.env.PRONUNCIATION_CACHE_DIR ?? path.resolve(process.cwd(), "runtime/pronunciations");
 const doubaoTtsApiKey = process.env.DOUBAO_TTS_API_KEY ?? "";
 const normalizedUsers = new Set<number>();
@@ -566,22 +574,48 @@ function verifyPassword(password: string, stored: string) {
   return actual.length === expectedBuffer.length && crypto.timingSafeEqual(actual, expectedBuffer);
 }
 
+const loginRateLimiter = new FixedWindowRateLimiter({ limit: 20, windowMs: 15 * 60 * 1000 });
+const registrationRateLimiter = new FixedWindowRateLimiter({ limit: 5, windowMs: 60 * 60 * 1000 });
+const ttsSynthesisRateLimiter = new FixedWindowRateLimiter({ limit: 120, windowMs: 60 * 60 * 1000 });
+
+function enforceRateLimit(res: express.Response, result: ReturnType<FixedWindowRateLimiter["consume"]>, message: string) {
+  res.setHeader("X-RateLimit-Limit", String(result.limit));
+  res.setHeader("X-RateLimit-Remaining", String(result.remaining));
+  if (result.allowed) return true;
+  res.setHeader("Retry-After", String(result.retryAfterSeconds));
+  res.status(429).json({ error: message, retryAfterSeconds: result.retryAfterSeconds });
+  return false;
+}
+
+function requestRateLimit(limiter: FixedWindowRateLimiter, message: string) {
+  return (req: express.Request, res: express.Response, next: express.NextFunction) => {
+    if (enforceRateLimit(res, limiter.consume(req.ip || req.socket.remoteAddress || "unknown"), message)) next();
+  };
+}
+
+function sessionCookieOptions() {
+  return {
+    httpOnly: true,
+    sameSite: "lax" as const,
+    secure: process.env.COOKIE_SECURE === "true",
+    path: "/",
+    ...(cookieDomain ? { domain: cookieDomain } : {})
+  };
+}
+
 function createSession(res: express.Response, userId: number) {
   const id = crypto.randomBytes(32).toString("hex");
   const createdAt = nowIso();
   const expiresAt = new Date(Date.now() + sessionDays * 24 * 60 * 60 * 1000).toISOString();
   run("INSERT INTO sessions (id, user_id, expires_at, created_at) VALUES (?, ?, ?, ?)", [id, userId, expiresAt, createdAt]);
   res.cookie(sessionCookieName, id, {
-    httpOnly: true,
-    sameSite: "lax",
-    secure: process.env.COOKIE_SECURE === "true",
-    maxAge: sessionDays * 24 * 60 * 60 * 1000,
-    path: "/"
+    ...sessionCookieOptions(),
+    maxAge: sessionDays * 24 * 60 * 60 * 1000
   });
 }
 
 function clearSession(res: express.Response) {
-  res.clearCookie(sessionCookieName, { path: "/" });
+  res.clearCookie(sessionCookieName, sessionCookieOptions());
 }
 
 function userFromRequest(req: express.Request) {
@@ -698,8 +732,6 @@ type GameState = {
     supplyOpenIds: string[];
   };
 };
-
-type TomatoRecord = Record<string, unknown>;
 
 type PlantingPlot = {
   plotId: string;
@@ -1139,14 +1171,6 @@ const collectionMeta: Record<string, { description: string; source: string }> = 
     source: "补给中心"
   }
 };
-const tomatoWeights: Record<string, number> = {
-  "完美的🍅": 1,
-  "有小瑕疵🍅": 0.9,
-  "有大瑕疵🍅": 0.8,
-  "被啃了一口🍅": 0.7,
-  "半个🍅": 0.5
-};
-
 function finiteNumber(value: unknown, fallback: number, min = 0) {
   const number = Number(value);
   if (!Number.isFinite(number)) return fallback;
@@ -1956,9 +1980,28 @@ function readTomatoState(userId: number) {
   return parsed && typeof parsed === "object" && !Array.isArray(parsed) ? parsed as Record<string, unknown> : null;
 }
 
+const harvestLedgerKey = "tomatoes.harvest-ledger.v1";
+
+function readHarvestLedger(userId: number) {
+  const row = get<{ value: string }>("SELECT value FROM user_settings WHERE user_id = ? AND key = ?", [userId, harvestLedgerKey]);
+  if (!row?.value) return null;
+  try {
+    return normalizeHarvestLedger(JSON.parse(row.value));
+  } catch {
+    return null;
+  }
+}
+
+function ensureHarvestLedger(userId: number): HarvestLedger {
+  const existing = readHarvestLedger(userId);
+  if (existing) return existing;
+  const ledger = createHarvestLedger(readTomatoState(userId));
+  setUserSetting(userId, harvestLedgerKey, JSON.stringify(ledger));
+  return ledger;
+}
+
 function tomatoRecords(userId: number) {
-  const state = readTomatoState(userId);
-  return Array.isArray(state?.records) ? state.records.filter((record): record is TomatoRecord => Boolean(record && typeof record === "object" && !Array.isArray(record))) : [];
+  return ensureHarvestLedger(userId).records;
 }
 
 function stableRecordId(record: TomatoRecord, index: number) {
@@ -1976,10 +2019,7 @@ function stableRecordId(record: TomatoRecord, index: number) {
 }
 
 function recordWeight(record: TomatoRecord) {
-  const explicit = Number(record.tomatoWeight);
-  if (Number.isFinite(explicit) && explicit >= 0) return Math.round(explicit * 100) / 100;
-  const status = String(record.tomatoStatus ?? "");
-  return tomatoWeights[status] ?? 1;
+  return trustedTomatoWeight(record);
 }
 
 function completionMultiplier(record: TomatoRecord) {
@@ -5055,7 +5095,7 @@ app.get("/api/auth/gate", (req, res) => {
   res.status(204).end();
 });
 
-app.post("/api/auth/register", (req, res) => {
+app.post("/api/auth/register", requestRateLimit(registrationRateLimiter, "注册请求过于频繁，请稍后再试"), (req, res) => {
   try {
     const username = requireText(req.body.username, "username");
     const password = requireText(req.body.password, "password");
@@ -5081,7 +5121,7 @@ app.post("/api/auth/register", (req, res) => {
   }
 });
 
-app.post("/api/auth/login", (req, res) => {
+app.post("/api/auth/login", requestRateLimit(loginRateLimiter, "登录尝试过于频繁，请稍后再试"), (req, res) => {
   const username = String(req.body.username ?? "").trim();
   const password = String(req.body.password ?? "");
   const user = get<{ id: number; username: string; password_hash: string }>("SELECT * FROM users WHERE username = ?", [username]);
@@ -6502,7 +6542,12 @@ app.put("/api/tomatoes/state", (req, res) => {
     res.status(400).json({ error: "state must be an object" });
     return;
   }
-  setUserSetting(userId, "tomatoes.state.v1", JSON.stringify(req.body.state));
+  const previousState = readTomatoState(userId);
+  const ledger = updateHarvestLedger(ensureHarvestLedger(userId), previousState, req.body.state);
+  transaction(() => {
+    setUserSetting(userId, "tomatoes.state.v1", JSON.stringify(req.body.state));
+    setUserSetting(userId, harvestLedgerKey, JSON.stringify(ledger));
+  });
   res.json({ ok: true, updatedAt: nowIso() });
 });
 
@@ -6548,6 +6593,12 @@ app.put("/api/tts/xml", requireSuperuser, async (req, res) => {
     return;
   }
 
+  if (!enforceRateLimit(
+    res,
+    ttsSynthesisRateLimiter.consume(String(currentUserId(res))),
+    "语音合成请求已达到每小时上限，请稍后再试"
+  )) return;
+
   try {
     const audio = await synthesizeWithDoubao(phoneme, fallback, ssml, prompt);
     const previous = pronunciationXmlOverride(phoneme, fallback);
@@ -6586,10 +6637,18 @@ app.post("/api/tts", async (req, res) => {
     const promptCandidates = doubaoTtsPromptCandidates(cachePhoneme || fallback, override?.prompt);
     const prompt = promptCandidates[0];
     const cachedPath = await cachedDoubaoTtsPath(cachePhoneme, fallback, promptCandidates);
-    const audio = cachedPath
-      ? await fs.promises.readFile(cachedPath)
-      : await synthesizeWithDoubao(cachePhoneme, fallback, override?.ssml, prompt)
-          .then((result) => writeDoubaoTtsCache(cachePhoneme, fallback, result, prompt).then(() => result));
+    let audio: Buffer;
+    if (cachedPath) {
+      audio = await fs.promises.readFile(cachedPath);
+    } else {
+      if (!enforceRateLimit(
+        res,
+        ttsSynthesisRateLimiter.consume(String(currentUserId(res))),
+        "语音合成请求已达到每小时上限，请稍后再试"
+      )) return;
+      audio = await synthesizeWithDoubao(cachePhoneme, fallback, override?.ssml, prompt)
+        .then((result) => writeDoubaoTtsCache(cachePhoneme, fallback, result, prompt).then(() => result));
+    }
 
     res.setHeader("Content-Type", "audio/mpeg");
     res.setHeader("Cache-Control", "no-store");
@@ -6842,47 +6901,60 @@ app.post("/api/cards/batch", (req, res) => {
   }
 });
 
-app.post("/api/import", upload.single("file"), (req, res) => {
-  try {
-    const userId = currentUserId(res);
-    const deckId = Number(req.body.deckId);
-    const deck = get<{ id: number }>("SELECT id FROM decks WHERE id = ? AND user_id = ?", [deckId, userId]);
-    if (!deck) throw new Error("卡组不存在");
-    const text = req.body.text as string | undefined;
-    let rows: Record<string, unknown>[] = [];
+app.post("/api/import", (req, res) => {
+  importUpload.single("file")(req, res, (uploadError) => {
+    if (uploadError) {
+      const tooLarge = uploadError instanceof multer.MulterError
+        && ["LIMIT_FILE_SIZE", "LIMIT_FIELD_VALUE"].includes(uploadError.code);
+      res.status(tooLarge ? 413 : 400).json({
+        error: tooLarge ? "导入文件或粘贴内容不能超过 10 MB" : "导入上传格式无效"
+      });
+      return;
+    }
+    try {
+      const userId = currentUserId(res);
+      const deckId = Number(req.body.deckId);
+      const deck = get<{ id: number }>("SELECT id FROM decks WHERE id = ? AND user_id = ?", [deckId, userId]);
+      if (!deck) throw new Error("卡组不存在");
+      const text = req.body.text as string | undefined;
+      let rows: Record<string, unknown>[] = [];
 
-    let source = "粘贴表格";
-    if (req.file) {
-      source = req.file.originalname || "上传文件";
-      if (req.file.originalname.endsWith(".xlsx") || req.file.originalname.endsWith(".xls")) {
-        const workbook = XLSX.read(req.file.buffer);
-        const sheet = workbook.Sheets[workbook.SheetNames[0]];
-        rows = XLSX.utils.sheet_to_json(sheet, { defval: "" });
-      } else {
-        rows = parse(req.file.buffer, {
+      let source = "粘贴表格";
+      if (req.file) {
+        source = req.file.originalname || "上传文件";
+        const filename = req.file.originalname.toLowerCase();
+        if (filename.endsWith(".xlsx") || filename.endsWith(".xls")) {
+          const workbook = XLSX.read(req.file.buffer);
+          const sheet = workbook.Sheets[workbook.SheetNames[0]];
+          rows = XLSX.utils.sheet_to_json(sheet, { defval: "" });
+        } else {
+          rows = parse(req.file.buffer, {
+            columns: true,
+            skip_empty_lines: true,
+            bom: true,
+            relax_column_count: true
+          });
+        }
+      } else if (text) {
+        rows = parse(text, {
           columns: true,
           skip_empty_lines: true,
           bom: true,
+          delimiter: text.includes("\t") ? "\t" : ",",
           relax_column_count: true
         });
       }
-    } else if (text) {
-      rows = parse(text, {
-        columns: true,
-        skip_empty_lines: true,
-        bom: true,
-        delimiter: text.includes("\t") ? "\t" : ",",
-        relax_column_count: true
-      });
-    }
 
-    const cards = normalizeImportRows(rows);
-    const cardIds = cards.map((card) => createCard(userId, deckId, card));
-    const batch = createImportBatch(userId, deckId, cards.length, rows.length - cards.length, source, cardIds);
-    res.json({ imported: cards.length, skipped: rows.length - cards.length, batchId: batch.id, createdAt: batch.createdAt });
-  } catch (error) {
-    res.status(400).json({ error: (error as Error).message });
-  }
+      const cards = normalizeImportRows(rows);
+      const batch = transaction(() => {
+        const cardIds = cards.map((card) => createCard(userId, deckId, card));
+        return createImportBatch(userId, deckId, cards.length, rows.length - cards.length, source, cardIds);
+      });
+      res.json({ imported: cards.length, skipped: rows.length - cards.length, batchId: batch.id, createdAt: batch.createdAt });
+    } catch (error) {
+      res.status(400).json({ error: (error as Error).message });
+    }
+  });
 });
 
 app.get("/api/import/recent", (req, res) => {

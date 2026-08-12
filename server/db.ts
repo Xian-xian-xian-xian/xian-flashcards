@@ -2,11 +2,13 @@ import fs from "node:fs";
 import path from "node:path";
 import initSqlJs, { type Database, type SqlValue } from "sql.js";
 
-const dataDir = path.resolve(process.cwd(), "data");
+const dataDir = process.env.FLASHCARDS_DATA_DIR ?? path.resolve(process.cwd(), "data");
 const dbPath = path.join(dataDir, "flashcards.sqlite");
 fs.mkdirSync(dataDir, { recursive: true });
 
 let db: Database;
+let transactionActive = false;
+let transactionDirty = false;
 
 function persist() {
   fs.writeFileSync(dbPath, Buffer.from(db.export()));
@@ -255,7 +257,33 @@ export function run(sql: string, params: SqlValue[] = []) {
   } finally {
     statement.free();
   }
-  persist();
+  if (transactionActive) transactionDirty = true;
+  else persist();
+}
+
+export function transaction<T>(action: () => T) {
+  if (transactionActive) throw new Error("不支持嵌套数据库事务");
+  db.exec("BEGIN");
+  transactionActive = true;
+  transactionDirty = false;
+  let result: T;
+  try {
+    result = action();
+    db.exec("COMMIT");
+  } catch (error) {
+    try {
+      db.exec("ROLLBACK");
+    } finally {
+      transactionActive = false;
+      transactionDirty = false;
+    }
+    throw error;
+  }
+  const shouldPersist = transactionDirty;
+  transactionActive = false;
+  transactionDirty = false;
+  if (shouldPersist) persist();
+  return result;
 }
 
 export function all<T extends Record<string, unknown>>(sql: string, params: SqlValue[] = []): T[] {
