@@ -65,3 +65,28 @@ export function currentWeekMakeupDates(completedDates: Iterable<string>, today: 
   }
   return dates;
 }
+
+function cardIdSet(values: Iterable<number>) {
+  return new Set(Array.from(values).filter((value) => Number.isInteger(value) && value > 0));
+}
+
+export function taskProgressCount(taskCardIds: Iterable<number>, completedCardIds: Iterable<number>) {
+  const taskIds = cardIdSet(taskCardIds);
+  return Array.from(cardIdSet(completedCardIds)).filter((cardId) => taskIds.has(cardId)).length;
+}
+
+export function withoutTaskCardIds(taskCardIds: Iterable<number>, removedCardIds: Iterable<number>) {
+  const removed = cardIdSet(removedCardIds);
+  return Array.from(cardIdSet(taskCardIds)).filter((cardId) => !removed.has(cardId));
+}
+
+export function isDailyTaskComplete(input: {
+  dailyNewGoal: number;
+  newMastered: number;
+  reviewTotal: number;
+  reviewCompleted: number;
+}) {
+  const dailyNewGoal = Math.max(1, Math.floor(Number(input.dailyNewGoal) || 0));
+  return Math.max(0, input.newMastered) >= dailyNewGoal
+    && Math.max(0, input.reviewCompleted) >= Math.max(0, input.reviewTotal);
+}

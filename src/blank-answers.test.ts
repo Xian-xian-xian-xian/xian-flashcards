@@ -3,6 +3,7 @@ import {
   blankAnswerDisplay,
   blankAnswerSeparator,
   blankAnswersMatch,
+  blankInputIndex,
   normalizeBlankAnswerConfig,
   structuredBlankAnswersMatch
 } from "./blank-answers";
@@ -14,6 +15,11 @@ const config = {
 };
 
 describe("填空题结构化答案", () => {
+  it("每个内联空格映射到独立答案位置", () => {
+    expect(["blank-0", "blank-1", "blank-2"].map(blankInputIndex)).toEqual([0, 1, 2]);
+    expect(blankInputIndex("invalid")).toBe(0);
+  });
+
   it("每个空可命中任一备选答案并归一化大小写和空格", () => {
     expect(structuredBlankAnswersMatch(["  AN   APPLE ", "BANANA"], config)).toBe(true);
     expect(structuredBlankAnswersMatch(["banana", "apple"], config)).toBe(false);

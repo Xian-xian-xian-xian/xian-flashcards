@@ -60,6 +60,7 @@ import {
   blankAnswerSeparator,
   blankAnswerSummary,
   blankAnswersMatch,
+  blankInputIndex,
   legacyBlankAnswerConfig,
   maxBlankAlternatives,
   normalizeBlankAnswerConfig
@@ -85,7 +86,7 @@ declare global {
     katex?: KatexRuntime;
   }
 }
-const version = "0.10.1";
+const version = "0.10.2";
 const logExportPressCount = 6;
 const logExportKey = "a";
 const logExportResetMs = 1800;
@@ -333,11 +334,6 @@ function blankMarkerCount(value: string) {
   const count = Array.from(value.matchAll(blankMarkerPattern)).length;
   blankMarkerPattern.lastIndex = 0;
   return count;
-}
-
-function blankIndexFromKey(key: string) {
-  const sourceIndex = Number(key.replace("blank-", ""));
-  return Number.isFinite(sourceIndex) ? Math.floor(sourceIndex / 2) : 0;
 }
 
 function splitBlankAnswers(value: string, count: number) {
@@ -3458,9 +3454,9 @@ function StudyView(props: {
                             <input
                               key={key}
                               className={`blank-inline-input ${checked ?? ""}`}
-                              value={splitBlankAnswers(answer, currentBlankCount)[blankIndexFromKey(key)] ?? ""}
+                              value={splitBlankAnswers(answer, currentBlankCount)[blankInputIndex(key)] ?? ""}
                               onChange={(event) => {
-                                setAnswer(setBlankAnswerPart(answer, currentBlankCount, blankIndexFromKey(key), event.target.value));
+                                setAnswer(setBlankAnswerPart(answer, currentBlankCount, blankInputIndex(key), event.target.value));
                                 setChecked(null);
                               }}
                               aria-label="填空答案"
@@ -3877,6 +3873,7 @@ function AboutView(props: { syncStatus: SyncStatus | null }) {
       <div className="schedule-box"><h3>同步状态</h3><p>最近同步：{props.syncStatus ? fullDateTime(props.syncStatus.lastSyncAt) : "暂无"} · 数据更新：{props.syncStatus?.dataUpdatedAt ? fullDateTime(props.syncStatus.dataUpdatedAt) : "暂无"}</p></div>
       <div className="schedule-box changelog-box">
         <h3>更新日志</h3>
+        <div className="changelog-row"><strong>0.10.2</strong><span>2026-08-12</span><p>修复多空填空题答案互相覆盖；每日任务按已掌握新卡和已处理到期卡完成，并避免重复或任务外作答污染进度；删除卡片后同步清理当日任务。</p></div>
         <div className="changelog-row"><strong>0.10.1</strong><span>2026-08-12</span><p>晚上打卡按卡片张数计数；未完成当天时连续打卡保留昨日天数；每个自然周新增 2 次补打卡机会。</p></div>
         <div className="changelog-row"><strong>0.9.16</strong><span>2026-08-12</span><p>修复填空题卡页宽设置被重复计算的问题；75% 页宽现在实际显示为约 75%，不再缩小到约一半。</p></div>
         <div className="changelog-row"><strong>0.9.15</strong><span>2026-08-12</span><p>选择题卡支持按 7/8/9/6 快捷选择前四个选项并提交单选题；右键选项可置灰排除，再次右键恢复。</p></div>

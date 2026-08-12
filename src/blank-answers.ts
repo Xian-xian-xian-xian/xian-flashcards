@@ -17,6 +17,11 @@ export function effectiveBlankCount(value: string) {
   return Math.max(1, blankMarkerCount(value));
 }
 
+export function blankInputIndex(key: string) {
+  const match = /^blank-(\d+)$/.exec(key);
+  return match ? Number(match[1]) : 0;
+}
+
 export function splitAlternativeAnswers(value: string) {
   return value
     .split(/\s*(?:或者|或|\bor\b)\s*/i)
