@@ -2576,7 +2576,8 @@ body.resizing-answer-dock .question-dock-resizer::after {
 .blank-answer-form {
   display: grid;
   justify-items: center;
-  width: calc(100% * var(--study-page-width));
+  /* The form contains the question text, which applies the page width once. */
+  width: 100%;
   gap: 16px;
 }
 
