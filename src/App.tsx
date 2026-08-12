@@ -85,7 +85,7 @@ declare global {
     katex?: KatexRuntime;
   }
 }
-const version = "0.9.14";
+const version = "0.9.15";
 const logExportPressCount = 6;
 const logExportKey = "a";
 const logExportResetMs = 1800;
@@ -2060,6 +2060,7 @@ function StudyView(props: {
   const [answer, setAnswer] = useState("");
   const [checked, setChecked] = useState<"right" | "wrong" | null>(null);
   const [selectedChoice, setSelectedChoice] = useState<string[]>([]);
+  const [excludedChoices, setExcludedChoices] = useState<string[]>([]);
   const [editingStudyCard, setEditingStudyCard] = useState<Card | null>(null);
   const [busy, setBusy] = useState("");
   const [scaleDraft, setScaleDraft] = useState(props.studyTextScale);
@@ -2243,6 +2244,7 @@ function StudyView(props: {
     setAnswer("");
     setChecked(null);
     setSelectedChoice([]);
+    setExcludedChoices([]);
     setCelebrationKey(0);
     setRatingResult(null);
     setEditingStudyCard(null);
@@ -2366,6 +2368,7 @@ function StudyView(props: {
     setAnswer("");
     setChecked(null);
     setSelectedChoice([]);
+    setExcludedChoices([]);
     setCelebrationKey(0);
     setRatingResult(null);
     setCompletionPlayed(false);
@@ -2401,6 +2404,7 @@ function StudyView(props: {
       setAnswer("");
       setChecked(null);
       setSelectedChoice([]);
+      setExcludedChoices([]);
       setCelebrationKey(0);
       setRatingResult(null);
       setCompletionPlayed(false);
@@ -2719,7 +2723,7 @@ function StudyView(props: {
   }
 
   function checkChoice(choice: string) {
-    if (!card || checked) return;
+    if (!card || checked || excludedChoices.some((item) => answersMatch(item, choice))) return;
     setSelectedChoice([choice]);
     const result = answersMatch(choice, card.back) ? "right" : "wrong";
     playAnswerSound(result);
@@ -2728,7 +2732,7 @@ function StudyView(props: {
   }
 
   function selectChoice(choice: string) {
-    if (!card || checked) return;
+    if (!card || checked || excludedChoices.some((item) => answersMatch(item, choice))) return;
     if (splitChoiceAnswers(card.back).length <= 1) {
       checkChoice(choice);
       return;
@@ -2736,6 +2740,17 @@ function StudyView(props: {
     setSelectedChoice((current) => current.some((item) => answersMatch(item, choice))
       ? current.filter((item) => !answersMatch(item, choice))
       : [...current, choice]);
+  }
+
+  function toggleExcludedChoice(choice: string) {
+    if (!card || checked) return;
+    const alreadyExcluded = excludedChoices.some((item) => answersMatch(item, choice));
+    setExcludedChoices((current) => alreadyExcluded
+      ? current.filter((item) => !answersMatch(item, choice))
+      : [...current, choice]);
+    if (!alreadyExcluded) {
+      setSelectedChoice((current) => current.filter((item) => !answersMatch(item, choice)));
+    }
   }
 
   function submitMultipleChoice() {
@@ -3096,6 +3111,17 @@ function StudyView(props: {
         return;
       }
 
+      const choiceShortcutIndex: Record<string, number> = { "7": 0, "8": 1, "9": 2, "6": 3 };
+      const choiceIndex = choiceShortcutIndex[event.key];
+      if (card.card_type === "choice" && !checked && !multipleChoice && choiceIndex !== undefined) {
+        const choice = choices[choiceIndex];
+        if (choice && !excludedChoices.some((item) => answersMatch(item, choice))) {
+          event.preventDefault();
+          checkChoice(choice);
+        }
+        return;
+      }
+
       if (!showManualRatings || !ratingShortcut) return;
       event.preventDefault();
       rate(ratingShortcut);
@@ -3103,7 +3129,7 @@ function StudyView(props: {
 
     window.addEventListener("keydown", onKeyDown);
     return () => window.removeEventListener("keydown", onKeyDown);
-  }, [card?.id, card?.card_type, editingStudyCard, pronunciationXmlOpen, roundResetOpen, total, studyMode, grindMessage, showManualRatings, history.length, checked]);
+  }, [card?.id, card?.card_type, editingStudyCard, pronunciationXmlOpen, roundResetOpen, total, studyMode, grindMessage, showManualRatings, history.length, checked, choices, multipleChoice, excludedChoices]);
 
   return (
     <section className={`stack study-view ${immersive ? "immersive" : ""}`}>
@@ -3365,7 +3391,7 @@ function StudyView(props: {
                   <div ref={answerLayoutRef} className={`answer-layout study-question-layout ${showAnswerDock ? "with-dock" : ""}`}>
                     <div ref={(node) => { cardFrameRef.current = node; }} className={`question-box choice-question ${choiceLayoutClass(choices, props.studyChoiceLayout)}`}>
                       <MarkdownText value={card.front} className="question-text" />
-                      <ChoiceArea choices={choices} answers={correctChoiceAnswers} selected={selectedChoice} checked={checked} layout={props.studyChoiceLayout} multiple={multipleChoice} onChoose={selectChoice}>
+                      <ChoiceArea choices={choices} answers={correctChoiceAnswers} selected={selectedChoice} excluded={excludedChoices} checked={checked} layout={props.studyChoiceLayout} multiple={multipleChoice} onChoose={selectChoice} onToggleExclude={toggleExcludedChoice}>
                         {multipleChoice && !checked && <button className="primary-button choice-submit-button" type="button" disabled={selectedChoice.length === 0 || Boolean(busy)} onClick={submitMultipleChoice}>提交答案</button>}
                         {checked && <AnswerFeedback checked={checked} correct={displayCorrect} explanation={explanation} other={otherNote} selected={selectedChoice.join("、")} />}
                       </ChoiceArea>
@@ -3604,10 +3630,12 @@ function ChoiceArea(props: {
   choices: string[];
   answers: string[];
   selected: string[];
+  excluded: string[];
   checked: "right" | "wrong" | null;
   layout: Settings["studyChoiceLayout"];
   multiple: boolean;
   onChoose: (choice: string) => void;
+  onToggleExclude: (choice: string) => void;
   children: ReactNode;
 }) {
   const layoutClass = choiceLayoutClass(props.choices, props.layout);
@@ -3616,15 +3644,23 @@ function ChoiceArea(props: {
       <div className={`choice-grid ${layoutClass}`}>
         {props.choices.map((choice, index) => {
           const isSelected = props.selected.some((selected) => answersMatch(choice, selected));
+          const isExcluded = props.excluded.some((excluded) => answersMatch(choice, excluded));
           const isAnswer = props.answers.some((answer) => answersMatch(choice, answer));
           const state = props.checked ? (isAnswer ? "correct" : isSelected ? "wrong" : "") : isSelected ? "selected" : undefined;
           return (
             <button
-              className={state}
+              className={[state, isExcluded ? "excluded" : ""].filter(Boolean).join(" ") || undefined}
               type="button"
               disabled={props.checked !== null}
               key={`${choice}-${index}`}
-              onClick={() => props.onChoose(choice)}
+              onClick={() => { if (!isExcluded) props.onChoose(choice); }}
+              onContextMenu={(event) => {
+                event.preventDefault();
+                props.onToggleExclude(choice);
+              }}
+              title={isExcluded ? "再次右键点击恢复选项" : "右键点击排除选项"}
+              aria-label={`第${index + 1}个选项${isExcluded ? "，已排除" : ""}`}
+              aria-keyshortcuts={["7", "8", "9", "6"][index]}
               aria-pressed={props.multiple ? isSelected : undefined}
             >
               <MarkdownText value={choice} />
@@ -3803,6 +3839,7 @@ function AboutView(props: { syncStatus: SyncStatus | null }) {
       <div className="schedule-box"><h3>同步状态</h3><p>最近同步：{props.syncStatus ? fullDateTime(props.syncStatus.lastSyncAt) : "暂无"} · 数据更新：{props.syncStatus?.dataUpdatedAt ? fullDateTime(props.syncStatus.dataUpdatedAt) : "暂无"}</p></div>
       <div className="schedule-box changelog-box">
         <h3>更新日志</h3>
+        <div className="changelog-row"><strong>0.9.15</strong><span>2026-08-12</span><p>选择题卡支持按 7/8/9/6 快捷选择前四个选项并提交单选题；右键选项可置灰排除，再次右键恢复。</p></div>
         <div className="changelog-row"><strong>0.9.14</strong><span>2026-08-07</span><p>题目参考新增答案并与左侧答案字号一致；修复长内容滚动时卡片边框未随内容延伸、底边无法与题目参考齐平的问题。</p></div>
         <div className="changelog-row"><strong>0.9.13</strong><span>2026-08-05</span><p>修复全屏学习时番茄钟刷新导致文字选区自动取消、填空题输入框失去焦点而无法连续输入的问题。</p></div>
         <div className="changelog-row"><strong>0.9.12</strong><span>2026-08-05</span><p>选择题和填空题的短内容在卡片中垂直居中，长内容仍可从顶部完整滚动；放大选择题选项文字，并使题目参考与选项字号一致。</p></div>
