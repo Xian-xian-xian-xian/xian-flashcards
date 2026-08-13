@@ -50,6 +50,10 @@ app.use(cors({
   credentials: true
 }));
 app.use(express.json({ limit: "10mb" }));
+app.use("/api/reviews", (_req, res, next) => {
+  res.setHeader("Cache-Control", "no-store");
+  next();
+});
 app.use((req, res, next) => {
   const startedAt = Date.now();
   res.on("finish", () => {
@@ -89,7 +93,7 @@ type BlankAnswerConfig = { version: 1; orderless: boolean; answers: string[][] }
 const maxDeckDepth = 5;
 const sessionCookieName = "flashcards_session";
 const sessionDays = 30;
-const appVersion = "0.10.4";
+const appVersion = "0.10.5";
 const timeZone = "Asia/Shanghai";
 const cookieDomain = normalizeCookieDomain(process.env.COOKIE_DOMAIN);
 const pronunciationCacheDir = process.env.PRONUNCIATION_CACHE_DIR ?? path.resolve(process.cwd(), "runtime/pronunciations");

@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { isPhrasePartOfSpeech, ratingShortcutForKey, shouldUsePractice, studyAnswerWeight, updateGrindStudyWords } from "./study-session";
+import { isPhrasePartOfSpeech, ratingShortcutForKey, removeStudyCardFromQueue, shouldUsePractice, studyAnswerWeight, updateGrindStudyWords } from "./study-session";
 
 describe("学习会话评分路由", () => {
   it("新卡先模糊再掌握时重新提交长期排程", () => {
@@ -84,5 +84,18 @@ describe("短语词性识别", () => {
   it("不会把其他文本误判为短语词性", () => {
     expect(isPhrasePartOfSpeech("n. 照料")).toBe(false);
     expect(isPhrasePartOfSpeech("ephrata")).toBe(false);
+  });
+});
+
+describe("过期学习队列清理", () => {
+  it("移除服务端已更新的卡片及其本轮重复项", () => {
+    const result = removeStudyCardFromQueue(
+      [{ id: 1478 }, { id: 1490 }, { id: 1478 }],
+      [{ id: 1478 }, { id: 1490 }, { id: 1478 }, { id: 1500 }],
+      1478
+    );
+
+    expect(result.sessionCards).toEqual([{ id: 1490 }]);
+    expect(result.queue).toEqual([{ id: 1490 }, { id: 1500 }]);
   });
 });

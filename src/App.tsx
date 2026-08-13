@@ -68,7 +68,7 @@ import {
 import { insertImageMarkdown } from "./card-images";
 import { choiceAnswerSetMatches, choiceAnswersMatch, choiceOptionKey, dedupeChoiceAnswers, normalizeChoiceAnswer, splitChoiceAnswers } from "./choice-answers";
 import { latexRenderSource, normalizeMarkdownMath } from "./latex";
-import { isPhrasePartOfSpeech, ratingShortcutForKey, shouldUsePractice, studyAnswerWeight, updateGrindStudyWords } from "./study-session";
+import { isPhrasePartOfSpeech, ratingShortcutForKey, removeStudyCardFromQueue, shouldUsePractice, studyAnswerWeight, updateGrindStudyWords } from "./study-session";
 import { resolveStudySwipe } from "./study-gestures";
 import type { Card, CardType, DailyTask, Deck, ImportBatch, ReviewRating, ReviewRemaining, ReviewSnapshot, Settings, Stats, SyncStatus, ThemeMode, TomatoState, User } from "./types";
 
@@ -86,7 +86,7 @@ declare global {
     katex?: KatexRuntime;
   }
 }
-const version = "0.10.4";
+const version = "0.10.5";
 const logExportPressCount = 6;
 const logExportKey = "a";
 const logExportResetMs = 1800;
@@ -2634,6 +2634,24 @@ function StudyView(props: {
       setCardRevision((value) => value + 1);
       setCardMotion("entering");
       await loadRemaining();
+    } catch (error) {
+      if ((error as ConflictError).status === 409) {
+        const reconciled = removeStudyCardFromQueue(beforeSessionCards, beforeQueue, card.id);
+        setSessionCards(reconciled.sessionCards);
+        setQueue(reconciled.queue);
+        setMasteredIds(beforeMasteredIds.filter((id) => id !== card.id));
+        setLongTermSubmittedIds(beforeLongTermSubmittedIds.filter((id) => id !== card.id));
+        setFlipped(false);
+        setAnswer("");
+        setChecked(null);
+        setSelectedChoice([]);
+        setExcludedChoices([]);
+        setRatingResult(null);
+        setCardRevision((value) => value + 1);
+        await loadRemaining();
+        return;
+      }
+      throw error;
     } finally {
       busyRef.current = false;
       setBusy("");
@@ -3873,6 +3891,7 @@ function AboutView(props: { syncStatus: SyncStatus | null }) {
       <div className="schedule-box"><h3>同步状态</h3><p>最近同步：{props.syncStatus ? fullDateTime(props.syncStatus.lastSyncAt) : "暂无"} · 数据更新：{props.syncStatus?.dataUpdatedAt ? fullDateTime(props.syncStatus.dataUpdatedAt) : "暂无"}</p></div>
       <div className="schedule-box changelog-box">
         <h3>更新日志</h3>
+        <div className="changelog-row"><strong>0.10.5</strong><span>2026-08-13</span><p>修复复习队列与服务端状态不同步时重复提示“尚未到复习时间”；动态复习请求禁止缓存，过期卡片会自动从本轮队列移除。</p></div>
         <div className="changelog-row"><strong>0.10.4</strong><span>2026-08-12</span><p>修复退出登录异常和首次任务成就；生产构建新增前端类型检查；复习撤销改为服务端一次性令牌并限制提前作答；跨域请求改为可信来源白名单。</p></div>
         <div className="changelog-row"><strong>0.10.3</strong><span>2026-08-12</span><p>经营奖励改用服务端不可变番茄记录并限制奖励字段；导入增加 10 MB 限制和原子回滚；登录、注册及远程语音合成增加限流；修复跨子域登录 Cookie。</p></div>
         <div className="changelog-row"><strong>0.10.2</strong><span>2026-08-12</span><p>修复多空填空题答案互相覆盖；每日任务按已掌握新卡和已处理到期卡完成，并避免重复或任务外作答污染进度；删除卡片后同步清理当日任务。</p></div>

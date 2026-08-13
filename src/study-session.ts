@@ -35,6 +35,15 @@ export function updateGrindStudyWords(current: number, action: GrindStudyWordsAc
   return Math.max(0, current);
 }
 
+type CardLike = { id: number };
+
+export function removeStudyCardFromQueue<T extends CardLike>(sessionCards: T[], queue: T[], cardId: number) {
+  return {
+    sessionCards: sessionCards.filter((item) => item.id !== cardId),
+    queue: queue.filter((item) => item.id !== cardId)
+  };
+}
+
 export function isPhrasePartOfSpeech(value: string) {
   return /(?:^|[^a-z])phr\.(?=$|[^a-z])/i.test(value);
 }
