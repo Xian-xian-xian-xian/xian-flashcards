@@ -1,6 +1,6 @@
 import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it } from "vitest";
-import { MarkdownText } from "./App";
+import { MarkdownText, PlainText } from "./App";
 
 describe("MarkdownText", () => {
   it("renders the mixed Markdown structure used in card content", () => {
@@ -49,5 +49,13 @@ $$`} />
 
     expect(html).toContain("<strong>I</strong>");
     expect(html).toContain('data-blank="blank-0"');
+  });
+
+  it("renders plain text without interpreting Markdown syntax", () => {
+    const html = renderToStaticMarkup(<PlainText value="**I** learn [words](https://example.com)" />);
+
+    expect(html).toContain("**I** learn [words](https://example.com)");
+    expect(html).not.toContain("<strong>");
+    expect(html).not.toContain("<a ");
   });
 });

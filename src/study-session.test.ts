@@ -32,6 +32,30 @@ describe("学习会话评分路由", () => {
     })).toBe(true);
   });
 
+  it("新卡在首次复习间隔未到时继续掌握，仍使用短期练习", () => {
+    const now = Date.parse("2026-08-16T00:00:00.000Z");
+    expect(shouldUsePractice({
+      alreadySubmitted: true,
+      alreadyMastered: false,
+      startedAsNew: true,
+      rating: "known",
+      dueAt: new Date(now + 5 * 60 * 1000).toISOString(),
+      now
+    })).toBe(true);
+  });
+
+  it("新卡的首次复习间隔到期后，掌握可以重新提交长期排程", () => {
+    const now = Date.parse("2026-08-16T00:05:00.000Z");
+    expect(shouldUsePractice({
+      alreadySubmitted: true,
+      alreadyMastered: false,
+      startedAsNew: true,
+      rating: "known",
+      dueAt: "2026-08-16T00:05:00.000Z",
+      now
+    })).toBe(false);
+  });
+
   it("本轮第一次评分始终提交长期排程", () => {
     expect(shouldUsePractice({
       alreadySubmitted: false,

@@ -5,12 +5,20 @@ type PracticeDecision = {
   alreadyMastered: boolean;
   startedAsNew: boolean;
   rating: ReviewRating;
+  dueAt?: string;
+  now?: number;
 };
 
-export function shouldUsePractice({ alreadySubmitted, alreadyMastered, startedAsNew, rating }: PracticeDecision) {
+export function shouldUsePractice({ alreadySubmitted, alreadyMastered, startedAsNew, rating, dueAt, now = Date.now() }: PracticeDecision) {
   if (!alreadySubmitted) return false;
   const isFirstNewCardMastery = startedAsNew && !alreadyMastered && rating === "known";
-  return !isFirstNewCardMastery;
+  if (!isFirstNewCardMastery) return true;
+
+  // A new card can be repeated in the same session before its first review
+  // interval expires. Keep that retry as practice until the server says it is
+  // due, otherwise the long-term answer endpoint correctly rejects it.
+  const dueTime = dueAt ? Date.parse(dueAt) : NaN;
+  return Number.isFinite(dueTime) && dueTime > now;
 }
 
 export function studyAnswerWeight({ startedAsNew, alreadySubmitted }: Pick<PracticeDecision, "startedAsNew" | "alreadySubmitted">) {

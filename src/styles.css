@@ -1180,6 +1180,19 @@ textarea:focus {
   color: inherit;
 }
 
+.plain-text {
+  white-space: pre-line;
+}
+
+.card-summary-plain {
+  flex: 1 1 auto;
+  min-width: 0;
+  max-height: 132px;
+  overflow: auto;
+  color: inherit;
+  line-height: 1.5;
+}
+
 .card-summary-markdown img {
   max-height: 120px;
 }

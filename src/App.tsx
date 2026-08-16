@@ -86,7 +86,7 @@ declare global {
     katex?: KatexRuntime;
   }
 }
-const version = "0.10.5";
+const version = "0.10.6";
 const logExportPressCount = 6;
 const logExportKey = "a";
 const logExportResetMs = 1800;
@@ -296,6 +296,11 @@ export function MarkdownText(props: { value: string; className?: string; renderB
       </span>
     </MarkdownBlankRendererContext.Provider>
   );
+}
+
+export function PlainText(props: { value: string; className?: string }) {
+  if (!props.value.trim()) return null;
+  return <span className={`plain-text ${props.className ?? ""}`}>{props.value}</span>;
 }
 
 function scrollToPageTop() {
@@ -1747,7 +1752,7 @@ function DeckView(props: {
                   <button className="mini-button" title="编辑" onClick={() => { setEditingCard(card); scrollToPageTop(); }}><Edit3 /></button>
                 </div>
                 <MarkdownText value={card.card_type === "blank" ? correctAnswer(card) : card.back} className="card-summary-markdown card-summary-answer" />
-                {card.example && <span className="card-summary-field"><span>说明：</span><MarkdownText value={card.example} className="card-summary-markdown" /></span>}
+                {card.example && <span className="card-summary-field"><span>说明：</span>{isWordCard(card) ? <PlainText value={card.example} className="card-summary-plain" /> : <MarkdownText value={card.example} className="card-summary-markdown" />}</span>}
                 {parseChoices(card.choices).length > 0 && <span className="card-summary-field"><span>选项：</span><MarkdownText value={parseChoices(card.choices).join(" / ")} className="card-summary-markdown" /></span>}
                 {isWordCard(card) && card.mnemonic && <span className="card-summary-field"><span>助记：</span><MarkdownText value={card.mnemonic} className="card-summary-markdown" /></span>}
               </div>
@@ -1868,7 +1873,7 @@ function CardEditor(props: { card?: Card; layout?: "default" | "single"; onSubmi
 
   return (
     <form className={`card-form ${props.card || props.layout === "single" ? "edit-card-form" : ""}`} onSubmit={submit}>
-      <p className="hint">题面、答案、解析、助记、备注和选项均支持 Markdown：标题、引用、列表、链接、图片、表格、任务项、代码块及 LaTeX 公式。</p>
+      <p className="hint">题面、答案、解析、助记、备注和选项均支持 Markdown：标题、引用、列表、链接、图片、表格、任务项、代码块及 LaTeX 公式；单词卡例句按纯文本显示。</p>
       <EditorField label="卡片类型">
         <select value={cardType} onChange={(event) => {
           const nextType = event.target.value as CardType;
@@ -1946,7 +1951,7 @@ function CardEditor(props: { card?: Card; layout?: "default" | "single"; onSubmi
         </EditorField>
       )}
       <EditorField label={cardType === "choice" || cardType === "blank" ? "解析 / 说明" : cardType === "word" ? "例句 / 说明" : "说明 / 例子"}>
-        <SmartTextField value={example} onChange={setExample} placeholder="可选" allowImageInsert />
+        <SmartTextField value={example} onChange={setExample} placeholder="可选" allowImageInsert={cardType !== "word"} />
       </EditorField>
       {cardType === "word" && (
         <EditorField label="助记">
@@ -2559,7 +2564,8 @@ function StudyView(props: {
         alreadySubmitted,
         alreadyMastered: beforeMasteredIds.includes(card.id),
         startedAsNew,
-        rating
+        rating,
+        dueAt: card.due_at
       });
       const answerWeight = studyAnswerWeight({ startedAsNew, alreadySubmitted });
       const result = practice ? await props.onPractice(card, rating) : await props.onAnswer(card, rating);
@@ -3659,7 +3665,7 @@ function CardBack(props: { card: Card; layout: Settings["studyChoiceLayout"]; sh
       <span className="word-text"><MarkdownText value={props.card.front} /></span>
       {props.card.phonetic && <em>{props.card.phonetic}</em>}
       <span className="word-meaning"><MarkdownText value={props.card.back} /></span>
-      {props.card.example && <small><MarkdownText value={props.card.example} /></small>}
+      {props.card.example && <small><PlainText value={props.card.example} /></small>}
       <LabeledMarkdown label="助记" value={props.card.mnemonic} />
       <LabeledMarkdown label="备注" value={props.card.note} />
     </span>
@@ -3891,6 +3897,7 @@ function AboutView(props: { syncStatus: SyncStatus | null }) {
       <div className="schedule-box"><h3>同步状态</h3><p>最近同步：{props.syncStatus ? fullDateTime(props.syncStatus.lastSyncAt) : "暂无"} · 数据更新：{props.syncStatus?.dataUpdatedAt ? fullDateTime(props.syncStatus.dataUpdatedAt) : "暂无"}</p></div>
       <div className="schedule-box changelog-box">
         <h3>更新日志</h3>
+        <div className="changelog-row"><strong>0.10.6</strong><span>2026-08-16</span><p>单词卡例句改为纯文本展示；修复新卡首次“不认识”后尚未到 5 分钟复习时间时再次评分出现“尚未到复习时间”的问题。</p></div>
         <div className="changelog-row"><strong>0.10.5</strong><span>2026-08-13</span><p>修复复习队列与服务端状态不同步时重复提示“尚未到复习时间”；动态复习请求禁止缓存，过期卡片会自动从本轮队列移除。</p></div>
         <div className="changelog-row"><strong>0.10.4</strong><span>2026-08-12</span><p>修复退出登录异常和首次任务成就；生产构建新增前端类型检查；复习撤销改为服务端一次性令牌并限制提前作答；跨域请求改为可信来源白名单。</p></div>
         <div className="changelog-row"><strong>0.10.3</strong><span>2026-08-12</span><p>经营奖励改用服务端不可变番茄记录并限制奖励字段；导入增加 10 MB 限制和原子回滚；登录、注册及远程语音合成增加限流；修复跨子域登录 Cookie。</p></div>
