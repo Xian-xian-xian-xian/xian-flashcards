@@ -86,7 +86,7 @@ declare global {
     katex?: KatexRuntime;
   }
 }
-const version = "0.10.7";
+const version = "0.10.8";
 const logExportPressCount = 6;
 const logExportKey = "a";
 const logExportResetMs = 1800;
@@ -106,6 +106,18 @@ function shanghaiDateKey(offsetDays = 0) {
 const studyDeckStoragePrefix = "xian-flashcards-study-root-deck";
 const roundStudyWordsStoragePrefix = "xian-flashcards-round-study-words";
 const answerDockOpenStoragePrefix = "xian-flashcards-answer-dock-open";
+
+type CardSearchField = "front" | "back" | "explanation" | "example" | "mnemonic" | "note" | "phonetic" | "choices";
+const cardSearchFields: { value: CardSearchField; label: string }[] = [
+  { value: "front", label: "正面" },
+  { value: "back", label: "反面" },
+  { value: "explanation", label: "解析 / 说明" },
+  { value: "example", label: "例句" },
+  { value: "mnemonic", label: "助记" },
+  { value: "note", label: "备注" },
+  { value: "phonetic", label: "音标" },
+  { value: "choices", label: "选项" }
+];
 
 function storedRoundStudyWords(userId: number) {
   try {
@@ -213,6 +225,19 @@ function parseChoices(value: string | string[] | undefined) {
     // Fall through to separator parsing.
   }
   return splitChoiceText(value);
+}
+
+function cardSearchText(card: Card, field: CardSearchField) {
+  switch (field) {
+    case "front": return card.front;
+    case "back": return card.card_type === "blank" ? `${card.back} ${blankAnswerSearchText(card.choices)}` : card.back;
+    case "explanation": return card.card_type === "word" ? "" : card.example;
+    case "example": return card.card_type === "word" ? card.example : "";
+    case "mnemonic": return card.mnemonic;
+    case "note": return card.note;
+    case "phonetic": return card.phonetic;
+    case "choices": return card.card_type === "choice" ? parseChoices(card.choices).join(" ") : "";
+  }
 }
 
 function splitChoiceText(value: string) {
@@ -654,6 +679,7 @@ export default function App() {
   const [syncStatus, setSyncStatus] = useState<SyncStatus | null>(null);
   const [syncState, setSyncState] = useState<SyncState>("idle");
   const [search, setSearch] = useState("");
+  const [searchFields, setSearchFields] = useState<CardSearchField[]>(["front", "back"]);
   const [toast, setToast] = useState<{ message: string; kind: "success" | "error" } | null>(null);
   const [pending, setPending] = useState<Record<string, boolean>>({});
   const [conflict, setConflict] = useState<{ id: number; payload: CardPayload; serverCard: Card } | null>(null);
@@ -669,11 +695,9 @@ export default function App() {
   const studyDeck = decks.find((deck) => deck.id === studyDeckId) ?? rootDecks[0] ?? decks[0];
   const filteredCards = useMemo(() => {
     const query = normalizeAnswer(search);
-    return cards.filter((card) => {
-      if (!query) return true;
-      return normalizeAnswer(`${card.front} ${card.phonetic} ${card.back} ${card.example} ${card.mnemonic} ${card.note} ${parseChoices(card.choices).join(" ")} ${blankAnswerSearchText(card.choices)}`).includes(query);
-    });
-  }, [cards, search]);
+    if (!query) return cards;
+    return cards.filter((card) => searchFields.some((field) => normalizeAnswer(cardSearchText(card, field)).includes(query)));
+  }, [cards, search, searchFields]);
 
   async function refresh(options: { silent?: boolean; notifySuccess?: boolean } = {}) {
     if (!options.silent) setSyncState("syncing");
@@ -1069,6 +1093,10 @@ export default function App() {
             cards={filteredCards}
             search={search}
             onSearch={setSearch}
+            searchFields={searchFields}
+            onToggleSearchField={(field) => setSearchFields((current) => current.includes(field)
+              ? current.length > 1 ? current.filter((item) => item !== field) : current
+              : [...current, field])}
             onSelectDeck={setSelectedDeckId}
             onCreateDeck={async (name, parentId) => {
               try {
@@ -1533,6 +1561,8 @@ function DeckView(props: {
   cards: Card[];
   search: string;
   onSearch: (value: string) => void;
+  searchFields: CardSearchField[];
+  onToggleSearchField: (field: CardSearchField) => void;
   onSelectDeck: (id: number) => void;
   onCreateDeck: (name: string, parentId?: number | null) => Promise<void>;
   onUpdateDeck: (id: number, name: string) => Promise<void>;
@@ -1718,7 +1748,7 @@ function DeckView(props: {
           {deckPanelCollapsed && (
             <button className="mini-button" title="显示卡组列表" onClick={() => setDeckPanelCollapsed(false)}><PanelLeftOpen /></button>
           )}
-          <div className="search"><Search /><input value={props.search} onChange={(event) => props.onSearch(event.target.value)} placeholder="搜索题目、答案、选项、例句" /></div>
+          <div className="search"><Search /><input aria-label="搜索闪记卡" value={props.search} onChange={(event) => props.onSearch(event.target.value)} placeholder="搜索所选范围" /></div>
           <div className="deck-sort-controls" aria-label="卡片排序">
             <select aria-label="排列顺序" value={sortField} onChange={(event) => setSortField(event.target.value as "created" | "due" | "studied")}>
               <option value="created">加入时间</option>
@@ -1732,6 +1762,15 @@ function DeckView(props: {
           </div>
           <button className={`primary-button secondary-button ${showPausedOnly ? "active" : ""}`} onClick={() => setShowPausedOnly((value) => !value)}><Eye />{showPausedOnly ? "显示全部" : "显示已暂停"}</button>
           <button className="primary-button toolbar-create-card" disabled={!props.selectedDeckId} onClick={props.onOpenCreateCard}><Plus />新建卡片</button>
+        </div>
+        <div className="card-search-scopes" role="group" aria-label="搜索范围">
+          <strong>搜索范围</strong>
+          {cardSearchFields.map(({ value, label }) => (
+            <label key={value} className={props.searchFields.includes(value) ? "selected" : ""}>
+              <input type="checkbox" checked={props.searchFields.includes(value)} disabled={props.searchFields.length === 1 && props.searchFields.includes(value)} onChange={() => props.onToggleSearchField(value)} />
+              {label}
+            </label>
+          ))}
         </div>
         {editingCard && <CardEditor card={editingCard} onCancel={() => setEditingCard(null)} onSubmit={async (payload) => { await props.onUpdateCard(editingCard.id, { ...payload, baseUpdatedAt: editingCard.updated_at }); setEditingCard(null); }} />}
         <div className="batch-toolbar">
@@ -1775,7 +1814,7 @@ function DeckView(props: {
               </div>
             </article>
           ))}
-          {visibleCards.length === 0 && <EmptyState text={showPausedOnly ? "这个卡组没有已暂停卡片。" : "这个卡组还没有卡片。"} />}
+          {visibleCards.length === 0 && <EmptyState text={props.search.trim() ? "没有匹配的卡片，请调整关键词或搜索范围。" : showPausedOnly ? "这个卡组没有已暂停卡片。" : "这个卡组还没有卡片。"} />}
         </div>
       </div>
       {detailCard && <CardPreview card={detailCard} onClose={() => setDetailCard(null)} />}
@@ -3916,6 +3955,7 @@ function AboutView(props: { syncStatus: SyncStatus | null }) {
       <div className="schedule-box"><h3>同步状态</h3><p>最近同步：{props.syncStatus ? fullDateTime(props.syncStatus.lastSyncAt) : "暂无"} · 数据更新：{props.syncStatus?.dataUpdatedAt ? fullDateTime(props.syncStatus.dataUpdatedAt) : "暂无"}</p></div>
       <div className="schedule-box changelog-box">
         <h3>更新日志</h3>
+        <div className="changelog-row"><strong>0.10.8</strong><span>2026-09-26</span><p>卡片搜索新增可多选的搜索范围，默认搜索正面和反面，并可单独选择解析、例句、助记、备注、音标和选项。</p></div>
         <div className="changelog-row"><strong>0.10.7</strong><span>2026-09-26</span><p>支持分别调节发音和音效音量；修复长卡片回答后的提示遮挡“认识”按钮。</p></div>
         <div className="changelog-row"><strong>0.10.6</strong><span>2026-08-16</span><p>单词卡例句改为纯文本展示；修复新卡首次“不认识”后尚未到 5 分钟复习时间时再次评分出现“尚未到复习时间”的问题。</p></div>
         <div className="changelog-row"><strong>0.10.5</strong><span>2026-08-13</span><p>修复复习队列与服务端状态不同步时重复提示“尚未到复习时间”；动态复习请求禁止缓存，过期卡片会自动从本轮队列移除。</p></div>

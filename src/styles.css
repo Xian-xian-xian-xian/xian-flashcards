@@ -839,6 +839,49 @@ textarea:focus {
   flex: 1 1 auto;
 }
 
+.card-search-scopes {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  margin: 4px 0 16px;
+}
+
+.card-search-scopes > strong {
+  margin-right: 4px;
+  color: var(--muted);
+  font-size: 13px;
+}
+
+.card-search-scopes label {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-height: 34px;
+  padding: 5px 10px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--surface);
+  color: var(--muted);
+  font-size: 13px;
+  cursor: pointer;
+}
+
+.card-search-scopes label.selected {
+  border-color: var(--primary-strong);
+  background: var(--primary-soft);
+  color: var(--primary-strong);
+}
+
+.card-search-scopes input {
+  width: 15px;
+  height: 15px;
+  min-height: 0;
+  margin: 0;
+  padding: 0;
+  accent-color: var(--primary-strong);
+}
+
 .toolbar-create-card {
   flex: 0 0 auto;
   white-space: nowrap;
