@@ -93,7 +93,7 @@ type BlankAnswerConfig = { version: 1; orderless: boolean; answers: string[][] }
 const maxDeckDepth = 5;
 const sessionCookieName = "flashcards_session";
 const sessionDays = 30;
-const appVersion = "0.10.6";
+const appVersion = "0.10.7";
 const timeZone = "Asia/Shanghai";
 const cookieDomain = normalizeCookieDomain(process.env.COOKIE_DOMAIN);
 const pronunciationCacheDir = process.env.PRONUNCIATION_CACHE_DIR ?? path.resolve(process.cwd(), "runtime/pronunciations");
@@ -417,6 +417,12 @@ function clampStudyTextScale(value: unknown) {
   const scale = Number(value);
   if (!Number.isFinite(scale)) return 1;
   return Math.min(1.35, Math.max(0.5, Math.round(scale * 1000) / 1000));
+}
+
+function clampVolume(value: unknown) {
+  const volume = Number(value);
+  if (!Number.isFinite(volume)) return 100;
+  return Math.min(100, Math.max(0, Math.round(volume)));
 }
 
 function clampStudyPageWidth(value: unknown) {
@@ -7428,6 +7434,8 @@ app.get("/api/settings", (_req, res) => {
     theme: getUserSetting(userId, "theme", "system"),
     notifications: getUserSetting(userId, "notifications", "off"),
     autoSpeak: getUserSetting(userId, "autoSpeak", "off"),
+    speechVolume: clampVolume(getUserSetting(userId, "speechVolume", "100")),
+    soundVolume: clampVolume(getUserSetting(userId, "soundVolume", "100")),
     dailyWordGoal: getDailyGoal(userId),
     studyTextScale: clampStudyTextScale(getUserSetting(userId, "studyTextScale", "1")),
     studyPageWidth: clampStudyPageWidth(getUserSetting(userId, "studyPageWidth", "1")),
@@ -7440,7 +7448,11 @@ app.get("/api/settings", (_req, res) => {
 
 app.put("/api/settings", (req, res) => {
   const userId = currentUserId(res);
-  for (const key of ["theme", "notifications", "autoSpeak", "dailyWordGoal", "studyTextScale", "studyPageWidth", "studyTextAlign", "studyChoiceLayout", "studyLineHeight", "studyFontFamily"]) {
+  for (const key of ["theme", "notifications", "autoSpeak", "speechVolume", "soundVolume", "dailyWordGoal", "studyTextScale", "studyPageWidth", "studyTextAlign", "studyChoiceLayout", "studyLineHeight", "studyFontFamily"]) {
+    if ((key === "speechVolume" || key === "soundVolume") && (typeof req.body[key] === "string" || typeof req.body[key] === "number")) {
+      setUserSetting(userId, key, String(clampVolume(req.body[key])));
+      continue;
+    }
     if (key === "studyTextScale" && (typeof req.body[key] === "string" || typeof req.body[key] === "number")) {
       setUserSetting(userId, key, String(clampStudyTextScale(req.body[key])));
       continue;

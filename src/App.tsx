@@ -86,7 +86,7 @@ declare global {
     katex?: KatexRuntime;
   }
 }
-const version = "0.10.6";
+const version = "0.10.7";
 const logExportPressCount = 6;
 const logExportKey = "a";
 const logExportResetMs = 1800;
@@ -491,7 +491,9 @@ function applyGrindInterrupts(queue: Card[], sessionCards: Card[], interrupts: C
   };
 }
 
-function playAnswerSound(result: "right" | "wrong") {
+function playAnswerSound(result: "right" | "wrong", volume: number) {
+  if (volume <= 0) return;
+  const level = Math.min(100, volume) / 100;
   try {
     const AudioContextClass = window.AudioContext || (window as typeof window & { webkitAudioContext?: typeof AudioContext }).webkitAudioContext;
     if (!AudioContextClass) return;
@@ -499,7 +501,7 @@ function playAnswerSound(result: "right" | "wrong") {
     const master = context.createGain();
     master.connect(context.destination);
     master.gain.setValueAtTime(0.0001, context.currentTime);
-    master.gain.exponentialRampToValueAtTime(result === "right" ? 0.2 : 0.12, context.currentTime + 0.012);
+    master.gain.exponentialRampToValueAtTime((result === "right" ? 0.2 : 0.12) * level, context.currentTime + 0.012);
     master.gain.exponentialRampToValueAtTime(0.0001, context.currentTime + (result === "right" ? 0.58 : 0.18));
 
     const tones = result === "right"
@@ -528,7 +530,7 @@ function playAnswerSound(result: "right" | "wrong") {
         sparkle.type = "triangle";
         sparkle.frequency.setValueAtTime(frequency, context.currentTime + 0.12 + index * 0.075);
         sparkleGain.gain.setValueAtTime(0.0001, context.currentTime + 0.12 + index * 0.075);
-        sparkleGain.gain.exponentialRampToValueAtTime(0.045, context.currentTime + 0.135 + index * 0.075);
+        sparkleGain.gain.exponentialRampToValueAtTime(0.045 * level, context.currentTime + 0.135 + index * 0.075);
         sparkleGain.gain.exponentialRampToValueAtTime(0.0001, context.currentTime + 0.25 + index * 0.075);
         sparkle.connect(sparkleGain).connect(context.destination);
         sparkle.start(context.currentTime + 0.12 + index * 0.075);
@@ -541,7 +543,9 @@ function playAnswerSound(result: "right" | "wrong") {
   }
 }
 
-function playCompletionSound() {
+function playCompletionSound(volume: number) {
+  if (volume <= 0) return;
+  const level = Math.min(100, volume) / 100;
   try {
     const AudioContextClass = window.AudioContext || (window as typeof window & { webkitAudioContext?: typeof AudioContext }).webkitAudioContext;
     if (!AudioContextClass) return;
@@ -549,7 +553,7 @@ function playCompletionSound() {
     const master = context.createGain();
     master.connect(context.destination);
     master.gain.setValueAtTime(0.0001, context.currentTime);
-    master.gain.exponentialRampToValueAtTime(0.18, context.currentTime + 0.02);
+    master.gain.exponentialRampToValueAtTime(0.18 * level, context.currentTime + 0.02);
     master.gain.exponentialRampToValueAtTime(0.0001, context.currentTime + 1.25);
 
     [392, 523.25, 659.25, 783.99, 1046.5].forEach((frequency, index) => {
@@ -571,7 +575,7 @@ function playCompletionSound() {
       sparkle.type = "triangle";
       sparkle.frequency.setValueAtTime(frequency, context.currentTime + 0.45 + index * 0.07);
       gain.gain.setValueAtTime(0.0001, context.currentTime + 0.45 + index * 0.07);
-      gain.gain.exponentialRampToValueAtTime(0.035, context.currentTime + 0.47 + index * 0.07);
+      gain.gain.exponentialRampToValueAtTime(0.035 * level, context.currentTime + 0.47 + index * 0.07);
       gain.gain.exponentialRampToValueAtTime(0.0001, context.currentTime + 0.62 + index * 0.07);
       sparkle.connect(gain).connect(master);
       sparkle.start(context.currentTime + 0.45 + index * 0.07);
@@ -636,6 +640,8 @@ export default function App() {
     theme: "system",
     notifications: "off",
     autoSpeak: "off",
+    speechVolume: 100,
+    soundVolume: 100,
     dailyWordGoal: 20,
     studyTextScale: 1,
     studyPageWidth: 1,
@@ -653,6 +659,10 @@ export default function App() {
   const [conflict, setConflict] = useState<{ id: number; payload: CardPayload; serverCard: Card } | null>(null);
   const speechAudioRef = useRef<HTMLAudioElement | null>(null);
   const speechRequestRef = useRef(0);
+
+  useEffect(() => {
+    if (speechAudioRef.current) speechAudioRef.current.volume = settings.speechVolume / 100;
+  }, [settings.speechVolume]);
 
   const rootDecks = useMemo(() => decks.filter((deck) => deck.depth === 1), [decks]);
   const selectedDeck = decks.find((deck) => deck.id === selectedDeckId) ?? decks[0];
@@ -883,6 +893,7 @@ export default function App() {
     if (speechRequestRef.current !== requestId) return;
     const url = URL.createObjectURL(blob);
     const audio = new Audio(url);
+    audio.volume = settings.speechVolume / 100;
     speechAudioRef.current = audio;
     audio.addEventListener("ended", () => URL.revokeObjectURL(url), { once: true });
     audio.addEventListener("error", () => URL.revokeObjectURL(url), { once: true });
@@ -1175,6 +1186,7 @@ export default function App() {
               setSettings((current) => ({ ...current, studyFontFamily }));
             }}
             autoSpeak={settings.autoSpeak === "on"}
+            soundVolume={settings.soundVolume}
             onAnswer={handleAnswer}
             onPractice={handlePractice}
             onUndoAnswer={async (card, snapshot) => {
@@ -2056,6 +2068,7 @@ function StudyView(props: {
   onStudyLineHeight: (lineHeight: number) => Promise<void>;
   onStudyFontFamily: (fontFamily: Settings["studyFontFamily"]) => Promise<void>;
   autoSpeak: boolean;
+  soundVolume: number;
   onAnswer: (card: Card, rating: ReviewRating) => Promise<ReviewResult>;
   onPractice: (card: Card, rating: ReviewRating) => Promise<PracticeResult>;
   onUndoAnswer: (card: Card, snapshot: ReviewSnapshot) => Promise<void>;
@@ -2141,6 +2154,7 @@ function StudyView(props: {
   const moreToolsRef = useRef<HTMLDivElement | null>(null);
   const pomodoroMetaRef = useRef<HTMLDivElement | null>(null);
   const cardFrameRef = useRef<HTMLElement | null>(null);
+  const ratingRowRef = useRef<HTMLDivElement | null>(null);
   const answerLayoutRef = useRef<HTMLDivElement | null>(null);
   const studyScrollRef = useRef<HTMLDivElement | null>(null);
   const busyRef = useRef(false);
@@ -2295,7 +2309,7 @@ function StudyView(props: {
 
   useEffect(() => {
     if (sessionCards.length > 0 && !card && !completionPlayed) {
-      playCompletionSound();
+      playCompletionSound(props.soundVolume);
       setCompletionPlayed(true);
     }
   }, [card, completionPlayed, sessionCards.length]);
@@ -2320,8 +2334,10 @@ function StudyView(props: {
       const referenceRect = answerLayout?.classList.contains("with-dock") ? answerLayout.getBoundingClientRect() : undefined;
       const inset = 8;
       const rightEdge = referenceRect?.right ?? cardRect.right;
+      const ratingTop = ratingRowRef.current?.getBoundingClientRect().top ?? panelRect.bottom;
+      const visibleCardBottom = Math.min(cardRect.bottom, scrollRect?.bottom ?? cardRect.bottom, ratingTop - 12);
       panel.style.setProperty("--rating-toast-right", `${Math.max(0, panelRect.right - rightEdge + inset)}px`);
-      panel.style.setProperty("--rating-toast-bottom", `${Math.max(0, panelRect.bottom - cardRect.bottom + inset)}px`);
+      panel.style.setProperty("--rating-toast-bottom", `${Math.max(0, panelRect.bottom - visibleCardBottom + inset)}px`);
       panel.style.setProperty("--rating-toast-max-width", `${Math.max(220, (referenceRect?.width ?? cardRect.width) - inset * 2)}px`);
       if (referenceRect && studyScroll && scrollRect) {
         const scrollStyle = window.getComputedStyle(studyScroll);
@@ -2345,6 +2361,7 @@ function StudyView(props: {
     const resizeObserver = typeof ResizeObserver === "undefined" ? null : new ResizeObserver(updateAnchor);
     resizeObserver?.observe(panel);
     resizeObserver?.observe(cardFrame);
+    if (ratingRowRef.current) resizeObserver?.observe(ratingRowRef.current);
     if (answerLayout) resizeObserver?.observe(answerLayout);
     window.addEventListener("resize", updateAnchor);
     document.addEventListener("fullscreenchange", updateAnchor);
@@ -2570,7 +2587,7 @@ function StudyView(props: {
       const answerWeight = studyAnswerWeight({ startedAsNew, alreadySubmitted });
       const result = practice ? await props.onPractice(card, rating) : await props.onAnswer(card, rating);
       const feedback = ratingFeedback(rating, card.stage, result);
-      playAnswerSound(rating === "known" ? "right" : "wrong");
+      playAnswerSound(rating === "known" ? "right" : "wrong", props.soundVolume);
       const nextRatingFeedback = { ...feedback, key: Date.now() };
       setRatingResult(nextRatingFeedback);
       setRatingNotice(nextRatingFeedback);
@@ -2767,7 +2784,7 @@ function StudyView(props: {
     if (!card) return;
     setSelectedChoice([]);
     const result = isCorrectAnswer(card, answer) ? "right" : "wrong";
-    playAnswerSound(result);
+    playAnswerSound(result, props.soundVolume);
     if (result === "right") setCelebrationKey((key) => key + 1);
     setChecked(result);
   }
@@ -2784,7 +2801,7 @@ function StudyView(props: {
     if (!card || checked || excludedChoices.some((item) => answersMatch(item, choice))) return;
     setSelectedChoice([choice]);
     const result = answersMatch(choice, card.back) ? "right" : "wrong";
-    playAnswerSound(result);
+    playAnswerSound(result, props.soundVolume);
     if (result === "right") setCelebrationKey((key) => key + 1);
     setChecked(result);
   }
@@ -2814,7 +2831,7 @@ function StudyView(props: {
   function submitMultipleChoice() {
     if (!card || checked || selectedChoice.length === 0) return;
     const result = choiceAnswerSetMatches(selectedChoice, splitChoiceAnswers(card.back)) ? "right" : "wrong";
-    playAnswerSound(result);
+    playAnswerSound(result, props.soundVolume);
     if (result === "right") setCelebrationKey((key) => key + 1);
     setChecked(result);
   }
@@ -3521,7 +3538,7 @@ function StudyView(props: {
           {!editingStudyCard && showManualRatings && <div className="mobile-swipe-guide">左滑不会 · 右滑掌握 · 下滑模糊</div>}
           {ratingNotice && <RatingNotice feedback={ratingNotice} onClose={() => setRatingNotice(null)} />}
           {!editingStudyCard && showManualRatings && (
-            <div className="rating-row">
+            <div className="rating-row" ref={ratingRowRef}>
               <button className="rating unknown" disabled={Boolean(busy)} onClick={() => rate("unknown")}><XCircle />{busy === "rate-unknown" ? "提交中" : "不认识"}</button>
               <button className="rating fuzzy" disabled={Boolean(busy)} onClick={() => rate("fuzzy")}><RotateCcw />{busy === "rate-fuzzy" ? "提交中" : "模糊"}</button>
               <button className="rating known" disabled={Boolean(busy)} onClick={() => rate("known")}><CheckCircle2 />{busy === "rate-known" ? "提交中" : "认识"}</button>
@@ -3868,6 +3885,8 @@ function SettingsView(props: { settings: Settings; onThemeChange: (theme: ThemeM
     <form className="panel settings-panel" onSubmit={save}>
       <label>主题<select value={draft.theme} onChange={(event) => changeTheme(event.target.value as ThemeMode)}><option value="system">跟随系统</option><option value="light">浅色</option><option value="dark">暗黑</option></select></label>
       <label>自动发音<select value={draft.autoSpeak} onChange={(event) => updateDraft({ autoSpeak: event.target.value as Settings["autoSpeak"] })}><option value="off">关闭</option><option value="on">开启</option></select></label>
+      <label>发音音量<span className="range-row"><input type="range" min="0" max="100" step="1" value={draft.speechVolume} onChange={(event) => updateDraft({ speechVolume: Number(event.target.value) })} /><strong>{draft.speechVolume}%</strong></span></label>
+      <label>音效音量<span className="range-row"><input type="range" min="0" max="100" step="1" value={draft.soundVolume} onChange={(event) => updateDraft({ soundVolume: Number(event.target.value) })} /><strong>{draft.soundVolume}%</strong></span></label>
       <label>每日目标（卡片）<input type="number" min={1} value={draft.dailyWordGoal} onChange={(event) => updateDraft({ dailyWordGoal: Number(event.target.value) })} /></label>
       <div className="settings-actions">
         <button className="primary-button" disabled={props.saving}><Save />{props.saving ? "保存中" : "保存设置"}</button>
@@ -3897,6 +3916,7 @@ function AboutView(props: { syncStatus: SyncStatus | null }) {
       <div className="schedule-box"><h3>同步状态</h3><p>最近同步：{props.syncStatus ? fullDateTime(props.syncStatus.lastSyncAt) : "暂无"} · 数据更新：{props.syncStatus?.dataUpdatedAt ? fullDateTime(props.syncStatus.dataUpdatedAt) : "暂无"}</p></div>
       <div className="schedule-box changelog-box">
         <h3>更新日志</h3>
+        <div className="changelog-row"><strong>0.10.7</strong><span>2026-09-26</span><p>支持分别调节发音和音效音量；修复长卡片回答后的提示遮挡“认识”按钮。</p></div>
         <div className="changelog-row"><strong>0.10.6</strong><span>2026-08-16</span><p>单词卡例句改为纯文本展示；修复新卡首次“不认识”后尚未到 5 分钟复习时间时再次评分出现“尚未到复习时间”的问题。</p></div>
         <div className="changelog-row"><strong>0.10.5</strong><span>2026-08-13</span><p>修复复习队列与服务端状态不同步时重复提示“尚未到复习时间”；动态复习请求禁止缓存，过期卡片会自动从本轮队列移除。</p></div>
         <div className="changelog-row"><strong>0.10.4</strong><span>2026-08-12</span><p>修复退出登录异常和首次任务成就；生产构建新增前端类型检查；复习撤销改为服务端一次性令牌并限制提前作答；跨域请求改为可信来源白名单。</p></div>

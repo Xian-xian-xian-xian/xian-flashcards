@@ -76,6 +76,8 @@ export type Settings = {
   theme: ThemeMode;
   notifications: "on" | "off";
   autoSpeak: "on" | "off";
+  speechVolume: number;
+  soundVolume: number;
   dailyWordGoal: number;
   studyTextScale: number;
   studyPageWidth: number;
