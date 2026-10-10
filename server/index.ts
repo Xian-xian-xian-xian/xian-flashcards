@@ -21,6 +21,7 @@ import { FixedWindowRateLimiter, isAllowedCorsOrigin, normalizeCookieDomain } fr
 import { createHarvestLedger, normalizeHarvestLedger, trustedTomatoWeight, updateHarvestLedger, type HarvestLedger, type TomatoRecord } from "./tomato-harvest.js";
 import { isReviewDue, reviewUndoExpiresAt } from "./review-security.js";
 import { isTaskClaimEventType } from "./game-events.js";
+import { studyPomodoroState } from "./study-pomodoro.js";
 
 const app = express();
 const maxImportBytes = 10 * 1024 * 1024;
@@ -93,7 +94,7 @@ type BlankAnswerConfig = { version: 1; orderless: boolean; answers: string[][] }
 const maxDeckDepth = 5;
 const sessionCookieName = "flashcards_session";
 const sessionDays = 30;
-const appVersion = "0.10.8";
+const appVersion = "0.11.1";
 const timeZone = "Asia/Shanghai";
 const cookieDomain = normalizeCookieDomain(process.env.COOKIE_DOMAIN);
 const pronunciationCacheDir = process.env.PRONUNCIATION_CACHE_DIR ?? path.resolve(process.cwd(), "runtime/pronunciations");
@@ -6631,6 +6632,11 @@ app.get("/api/game/memory-book/state", (_req, res) => {
   }
 });
 
+app.get("/api/tomatoes/active", (_req, res) => {
+  res.setHeader("Cache-Control", "no-store");
+  res.json({ state: studyPomodoroState(readTomatoState(currentUserId(res))) });
+});
+
 app.get("/api/tomatoes/state", (_req, res) => {
   const userId = currentUserId(res);
   const row = get<{ value: string }>("SELECT value FROM user_settings WHERE user_id = ? AND key = ?", [userId, "tomatoes.state.v1"]);
@@ -7096,33 +7102,72 @@ app.post("/api/import/:batchId/undo", (req, res) => {
   }
 });
 
-app.get("/api/reviews/due", (req, res) => {
-  const userId = currentUserId(res);
-  const deckId = req.query.deckId ? Number(req.query.deckId) : undefined;
-  const limit = Number(req.query.limit ?? 50);
-  const kind = String(req.query.kind ?? "all");
+function dueCardsForUser(
+  userId: number,
+  deckId: number | undefined,
+  limit: number,
+  kind: string,
+  after?: string,
+  excludeIds: number[] = []
+) {
   const now = nowIso();
   const deckIds = deckId ? descendantDeckIds(userId, deckId) : [];
-  if (deckId && deckIds.length === 0) {
-    res.json([]);
-    return;
+  if (deckId && deckIds.length === 0) return [];
+  const filters = ["c.user_id = ?", "c.paused = 0", "r.due_at <= ?"];
+  const params: SqlValue[] = [userId, now];
+  if (deckId) {
+    filters.push(`c.deck_id IN (${deckIds.map(() => "?").join(",")})`);
+    params.push(...deckIds);
   }
-  const stageFilter = kind === "review" ? "AND r.stage > 0" : kind === "new" ? "AND r.stage = 0" : "";
-  const where = deckId && deckIds.length
-    ? `WHERE c.user_id = ? AND c.paused = 0 AND c.deck_id IN (${deckIds.map(() => "?").join(",")}) AND r.due_at <= ? ${stageFilter}`
-    : `WHERE c.user_id = ? AND c.paused = 0 AND r.due_at <= ? ${stageFilter}`;
-  const params = deckId && deckIds.length ? [userId, ...deckIds, now, limit] : [userId, now, limit];
-  const cards = all(
+  if (kind === "review") filters.push("r.stage > 0");
+  if (kind === "new") filters.push("r.stage = 0");
+  if (after) {
+    filters.push("r.due_at > ?");
+    params.push(after);
+  }
+  if (excludeIds.length) {
+    filters.push(`c.id NOT IN (${excludeIds.map(() => "?").join(",")})`);
+    params.push(...excludeIds);
+  }
+  params.push(limit);
+  return all(
     `SELECT c.*, d.language, r.stage, r.due_at, r.last_rating, r.known_count, r.fuzzy_count, r.unknown_count
      FROM cards c
      JOIN decks d ON d.id = c.deck_id
      JOIN reviews r ON r.card_id = c.id
-     ${where}
+     WHERE ${filters.join(" AND ")}
      ORDER BY r.due_at ASC
      LIMIT ?`,
     params
   );
-  res.json(cards);
+}
+
+// Scope every query to the authenticated owner. Return only new grind interrupts,
+// not the whole due-card queue, to keep each rating response small on slow links.
+function submissionStudyState(userId: number, context: unknown) {
+  if (!context || typeof context !== "object") return undefined;
+  const value = context as { deckId?: unknown; grindStartedAt?: unknown; excludeIds?: unknown };
+  const deckId = Number(value.deckId);
+  if (!Number.isSafeInteger(deckId) || deckId <= 0) return undefined;
+  const after = typeof value.grindStartedAt === "string" && Number.isFinite(Date.parse(value.grindStartedAt))
+    ? new Date(value.grindStartedAt).toISOString()
+    : undefined;
+  const excludeIds = Array.isArray(value.excludeIds)
+    ? Array.from(new Set(value.excludeIds.filter((id): id is number => Number.isSafeInteger(id) && id > 0))).slice(0, 200)
+    : [];
+  return {
+    remaining: reviewRemainingCounts(userId, deckId),
+    dueReviews: after ? dueCardsForUser(userId, deckId, 100, "review", after, excludeIds) : []
+  };
+}
+
+app.get("/api/reviews/due", (req, res) => {
+  res.json(dueCardsForUser(
+    currentUserId(res),
+    req.query.deckId ? Number(req.query.deckId) : undefined,
+    Number(req.query.limit ?? 50),
+    String(req.query.kind ?? "all")
+  ));
 });
 
 app.get("/api/reviews/remaining", (req, res) => {
@@ -7190,7 +7235,7 @@ app.post("/api/reviews/:cardId/answer", (req, res) => {
       ]
     );
     updateDailyTaskProgress(userId, cardId, rating, Number(current.stage));
-    dailyTaskSummary(userId);
+    const dailyTask = dailyTaskSummary(userId);
     const studyEventId = recordStudyEvent(
       userId,
       current,
@@ -7208,11 +7253,13 @@ app.post("/api/reviews/:cardId/answer", (req, res) => {
       answeredAt,
       answeredAt
     );
-    return { studyEventId, undoToken };
+    return { studyEventId, undoToken, dailyTask };
   });
   res.json({
     ...next,
-    previous: { ...previousReview, ...result, dailyTaskPrevious: previousDailyTask }
+    dailyTask: result.dailyTask,
+    study: submissionStudyState(userId, req.body.studyContext),
+    previous: { ...previousReview, studyEventId: result.studyEventId, undoToken: result.undoToken, dailyTaskPrevious: previousDailyTask }
   });
 });
 
@@ -7237,7 +7284,7 @@ app.post("/api/reviews/:cardId/practice", (req, res) => {
   const answeredAt = nowIso();
   const result = transaction(() => {
     updateDailyPracticeMastery(userId, cardId, rating);
-    dailyTaskSummary(userId);
+    const dailyTask = dailyTaskSummary(userId);
     const studyEventId = recordStudyEvent(userId, card, "review", rating, Number(card.stage), Number(card.stage), answeredAt);
     const undoToken = createReviewUndoState(
       userId,
@@ -7247,12 +7294,14 @@ app.post("/api/reviews/:cardId/practice", (req, res) => {
       String(card.review_updated_at ?? ""),
       answeredAt
     );
-    return { studyEventId, undoToken };
+    return { studyEventId, undoToken, dailyTask };
   });
   res.json({
     stage: Number(card.stage),
     dueAt: String(card.due_at),
-    previous: { ...result, dailyTaskPrevious: previousDailyTask }
+    dailyTask: result.dailyTask,
+    study: submissionStudyState(userId, req.body.studyContext),
+    previous: { studyEventId: result.studyEventId, undoToken: result.undoToken, dailyTaskPrevious: previousDailyTask }
   });
 });
 

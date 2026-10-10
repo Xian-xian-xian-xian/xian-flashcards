@@ -1,4 +1,4 @@
-import type { BlankAnswerConfig, Card, DailyTask, Deck, ImportBatch, ReviewRating, ReviewRemaining, ReviewSnapshot, Settings, Stats, SyncStatus, TomatoState, User } from "./types";
+import type { BlankAnswerConfig, Card, DailyTask, Deck, ImportBatch, PracticeResult, ReviewRating, ReviewRemaining, ReviewResult, ReviewSnapshot, Settings, Stats, StudySubmissionContext, SyncStatus, TomatoState, User } from "./types";
 
 export type CardPayload = {
   card_type?: Card["card_type"];
@@ -90,15 +90,15 @@ export const api = {
     request<Card[]>(`/api/reviews/due?limit=${limit}&kind=${kind}${deckId ? `&deckId=${deckId}` : ""}`),
   reviewRemaining: (deckId?: number) =>
     request<ReviewRemaining>(`/api/reviews/remaining${deckId ? `?deckId=${deckId}` : ""}`),
-  answer: (cardId: number, rating: ReviewRating) =>
-    request<{ stage: number; dueAt: string; previous: ReviewSnapshot }>(`/api/reviews/${cardId}/answer`, {
+  answer: (cardId: number, rating: ReviewRating, studyContext?: StudySubmissionContext) =>
+    request<ReviewResult>(`/api/reviews/${cardId}/answer`, {
       method: "POST",
-      body: JSON.stringify({ rating })
+      body: JSON.stringify({ rating, studyContext })
     }),
-  practice: (cardId: number, rating: ReviewRating) =>
-    request<{ stage: number; dueAt: string; previous: Pick<ReviewSnapshot, "dailyTaskPrevious" | "studyEventId" | "undoToken"> }>(`/api/reviews/${cardId}/practice`, {
+  practice: (cardId: number, rating: ReviewRating, studyContext?: StudySubmissionContext) =>
+    request<PracticeResult>(`/api/reviews/${cardId}/practice`, {
       method: "POST",
-      body: JSON.stringify({ rating })
+      body: JSON.stringify({ rating, studyContext })
     }),
   restoreReview: (cardId: number, snapshot: ReviewSnapshot) =>
     request<{ ok: true }>(`/api/reviews/${cardId}/restore`, { method: "POST", body: JSON.stringify(snapshot) }),
@@ -114,7 +114,7 @@ export const api = {
   saveDailyTaskSettings: (payload: { dailyWordGoal: number }) =>
     request<{ ok: true }>("/api/daily-task/settings", { method: "PUT", body: JSON.stringify(payload) }),
   syncStatus: () => request<SyncStatus>("/api/sync/status"),
-  tomatoState: () => request<{ state: TomatoState | null }>("/api/tomatoes/state"),
+  tomatoState: () => request<{ state: TomatoState | null }>("/api/tomatoes/active"),
   importCards: (form: FormData) =>
     request<{ imported: number; skipped: number; batchId: string; createdAt: string }>("/api/import", { method: "POST", body: form }),
   recentImports: () => request<ImportBatch[]>("/api/import/recent"),

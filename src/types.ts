@@ -1,4 +1,23 @@
 export type ReviewRating = "known" | "fuzzy" | "unknown";
+export type StudySubmissionContext = {
+  deckId: number;
+  grindStartedAt?: string;
+  excludeIds?: number[];
+};
+export type StudySubmissionState = {
+  remaining: ReviewRemaining;
+  dueReviews: Card[];
+};
+export type ReviewResult = {
+  stage: number;
+  dueAt: string;
+  previous: ReviewSnapshot;
+  dailyTask: DailyTask;
+  study?: StudySubmissionState;
+};
+export type PracticeResult = Omit<ReviewResult, "previous"> & {
+  previous: Pick<ReviewSnapshot, "dailyTaskPrevious" | "studyEventId" | "undoToken">;
+};
 export type ThemeMode = "system" | "light" | "dark";
 export type CardType = "basic" | "word" | "choice" | "blank";
 

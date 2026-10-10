@@ -70,13 +70,11 @@ import { choiceAnswerSetMatches, choiceAnswersMatch, choiceOptionKey, dedupeChoi
 import { latexRenderSource, normalizeMarkdownMath } from "./latex";
 import { isPhrasePartOfSpeech, ratingShortcutForKey, removeStudyCardFromQueue, shouldUsePractice, studyAnswerWeight, updateGrindStudyWords } from "./study-session";
 import { resolveStudySwipe } from "./study-gestures";
-import type { Card, CardType, DailyTask, Deck, ImportBatch, ReviewRating, ReviewRemaining, ReviewSnapshot, Settings, Stats, SyncStatus, ThemeMode, TomatoState, User } from "./types";
+import type { Card, CardType, DailyTask, Deck, ImportBatch, PracticeResult, ReviewRating, ReviewRemaining, ReviewResult, ReviewSnapshot, Settings, Stats, StudySubmissionContext, SyncStatus, ThemeMode, TomatoState, User } from "./types";
 
 type View = "home" | "deck" | "create-card" | "study" | "import" | "settings" | "about";
 type SyncState = "idle" | "syncing" | "success" | "error" | "conflict";
 type StudyMode = "review" | "new" | "grind";
-type ReviewResult = { stage: number; dueAt: string; previous: ReviewSnapshot };
-type PracticeResult = { stage: number; dueAt: string; previous: Pick<ReviewSnapshot, "dailyTaskPrevious" | "studyEventId" | "undoToken"> };
 type RatingFeedback = { key: number; rating: ReviewRating; title: string; stageText: string; dueText: string };
 type PronunciationSettings = { ssml: string; prompt: string; customized: boolean; promptCustomized: boolean; maxSsmlLength: number; maxPromptLength: number };
 type KatexRuntime = { renderToString: (value: string, options: { displayMode?: boolean; throwOnError: boolean; trust: boolean; strict: "ignore" }) => string };
@@ -86,7 +84,7 @@ declare global {
     katex?: KatexRuntime;
   }
 }
-const version = "0.10.8";
+const version = "0.11.1";
 const logExportPressCount = 6;
 const logExportKey = "a";
 const logExportResetMs = 1800;
@@ -612,10 +610,6 @@ function playCompletionSound(volume: number) {
   }
 }
 
-function delay(ms: number) {
-  return new Promise((resolve) => window.setTimeout(resolve, ms));
-}
-
 type LocalFontData = {
   family: string;
   fullName: string;
@@ -969,10 +963,10 @@ export default function App() {
     }
   }
 
-  async function handleAnswer(card: Card, rating: ReviewRating) {
+  async function handleAnswer(card: Card, rating: ReviewRating, studyContext?: StudySubmissionContext) {
     try {
-      const result = await api.answer(card.id, rating);
-      setDailyTask(await api.dailyTask());
+      const result = await api.answer(card.id, rating, studyContext);
+      setDailyTask(result.dailyTask);
       return result;
     } catch (error) {
       showToast((error as Error).message, "error");
@@ -980,10 +974,10 @@ export default function App() {
     }
   }
 
-  async function handlePractice(card: Card, rating: ReviewRating) {
+  async function handlePractice(card: Card, rating: ReviewRating, studyContext?: StudySubmissionContext) {
     try {
-      const result = await api.practice(card.id, rating);
-      setDailyTask(await api.dailyTask());
+      const result = await api.practice(card.id, rating, studyContext);
+      setDailyTask(result.dailyTask);
       return result;
     } catch (error) {
       showToast((error as Error).message, "error");
@@ -2108,8 +2102,8 @@ function StudyView(props: {
   onStudyFontFamily: (fontFamily: Settings["studyFontFamily"]) => Promise<void>;
   autoSpeak: boolean;
   soundVolume: number;
-  onAnswer: (card: Card, rating: ReviewRating) => Promise<ReviewResult>;
-  onPractice: (card: Card, rating: ReviewRating) => Promise<PracticeResult>;
+  onAnswer: (card: Card, rating: ReviewRating, context?: StudySubmissionContext) => Promise<ReviewResult>;
+  onPractice: (card: Card, rating: ReviewRating, context?: StudySubmissionContext) => Promise<PracticeResult>;
   onUndoAnswer: (card: Card, snapshot: ReviewSnapshot) => Promise<void>;
   onUndoPractice: (card: Card, snapshot: Pick<ReviewSnapshot, "dailyTaskPrevious" | "studyEventId" | "undoToken">) => Promise<void>;
   onUpdateCard: (id: number, payload: CardPayload) => Promise<Card | null | undefined>;
@@ -2313,20 +2307,22 @@ function StudyView(props: {
 
   useEffect(() => {
     let mounted = true;
+    let syncTimer: number | undefined;
     const loadTomatoState = async () => {
       try {
         const payload = await api.tomatoState();
         if (mounted) setTomatoState(payload.state);
       } catch (error) {
         console.error(error);
+      } finally {
+        if (mounted) syncTimer = window.setTimeout(loadTomatoState, 15_000);
       }
     };
     loadTomatoState();
-    const syncTimer = window.setInterval(loadTomatoState, 15_000);
     const countdownTimer = window.setInterval(() => setPomodoroNow(Date.now()), 1_000);
     return () => {
       mounted = false;
-      window.clearInterval(syncTimer);
+      window.clearTimeout(syncTimer);
       window.clearInterval(countdownTimer);
     };
   }, []);
@@ -2597,13 +2593,6 @@ function StudyView(props: {
     }
   }
 
-  async function dueReviewInterrupts(nextQueue: Card[], excludeIds: number[] = []) {
-    if (studyMode !== "grind" || !props.selectedStudyDeckId) return [];
-    const queuedIds = new Set([...nextQueue.map((item) => item.id), ...excludeIds]);
-    return (await api.dueCards(props.selectedStudyDeckId, 100, "review"))
-      .filter((item) => !queuedIds.has(item.id) && (!grindGroupStartedAt || item.due_at > grindGroupStartedAt));
-  }
-
   async function rate(rating: ReviewRating) {
     if (!card || busyRef.current) return;
     busyRef.current = true;
@@ -2624,11 +2613,19 @@ function StudyView(props: {
         dueAt: card.due_at
       });
       const answerWeight = studyAnswerWeight({ startedAsNew, alreadySubmitted });
-      const result = practice ? await props.onPractice(card, rating) : await props.onAnswer(card, rating);
+      const studyContext = props.selectedStudyDeckId ? {
+        deckId: props.selectedStudyDeckId,
+        ...(studyMode === "grind" ? {
+          grindStartedAt: grindGroupStartedAt,
+          excludeIds: Array.from(new Set([...beforeQueue.map((item) => item.id), ...beforeLongTermSubmittedIds]))
+        } : {})
+      } : undefined;
+      // The saved rating and its updated counters arrive together. Auxiliary
+      // requests and feedback animations must not hold up the next card.
+      const result = practice ? await props.onPractice(card, rating, studyContext) : await props.onAnswer(card, rating, studyContext);
       const feedback = ratingFeedback(rating, card.stage, result);
       playAnswerSound(rating === "known" ? "right" : "wrong", props.soundVolume);
       const nextRatingFeedback = { ...feedback, key: Date.now() };
-      setRatingResult(nextRatingFeedback);
       setRatingNotice(nextRatingFeedback);
       const nextMasteredIds = rating === "known" && !beforeMasteredIds.includes(card.id)
         ? [...beforeMasteredIds, card.id]
@@ -2642,14 +2639,14 @@ function StudyView(props: {
       let finalLongTermSubmittedIds = nextLongTermSubmittedIds;
       let grindMoreAvailable = false;
       if (studyMode === "grind") {
-        const interrupts = await dueReviewInterrupts(nextQueue, finalLongTermSubmittedIds);
+        const interrupts = result.study?.dueReviews ?? [];
         if (interrupts.length > 0) {
           const adjusted = applyGrindInterrupts(nextQueue, nextSessionCards, interrupts, grindGroupSize);
           nextQueue = adjusted.queue;
           nextSessionCards = adjusted.sessionCards;
         }
         if (nextQueue.length === 0) {
-          const latestRemaining = await api.reviewRemaining(props.selectedStudyDeckId ?? undefined);
+          const latestRemaining = result.study?.remaining ?? remaining;
           if (latestRemaining.reviewRemaining > 0 || latestRemaining.newRemaining > 0) {
             setGrindMessage("本组完成，可以继续下一组或休息一下。");
             grindMoreAvailable = true;
@@ -2675,9 +2672,6 @@ function StudyView(props: {
         checked,
         selectedChoice
       }]);
-      await delay(720);
-      setCardMotion("leaving");
-      await delay(140);
       setSessionCards(nextSessionCards);
       setQueue(nextQueue);
       setMasteredIds(finalMasteredIds);
@@ -2695,7 +2689,7 @@ function StudyView(props: {
       setRatingResult(null);
       setCardRevision((value) => value + 1);
       setCardMotion("entering");
-      await loadRemaining();
+      if (result.study) setRemaining(result.study.remaining);
     } catch (error) {
       if ((error as ConflictError).status === 409) {
         const reconciled = removeStudyCardFromQueue(beforeSessionCards, beforeQueue, card.id);
@@ -2710,10 +2704,11 @@ function StudyView(props: {
         setExcludedChoices([]);
         setRatingResult(null);
         setCardRevision((value) => value + 1);
-        await loadRemaining();
+        void loadRemaining().catch((error) => console.error(error));
         return;
       }
-      throw error;
+      // The parent shows the submission error. Keep this card available without
+      // producing an unhandled rejection from a button or keyboard handler.
     } finally {
       busyRef.current = false;
       setBusy("");
@@ -3955,6 +3950,7 @@ function AboutView(props: { syncStatus: SyncStatus | null }) {
       <div className="schedule-box"><h3>同步状态</h3><p>最近同步：{props.syncStatus ? fullDateTime(props.syncStatus.lastSyncAt) : "暂无"} · 数据更新：{props.syncStatus?.dataUpdatedAt ? fullDateTime(props.syncStatus.dataUpdatedAt) : "暂无"}</p></div>
       <div className="schedule-box changelog-box">
         <h3>更新日志</h3>
+        <div className="changelog-row"><strong>0.11.1</strong><span>2026-10-10</span><p>修复评分后长时间显示“提交中”：评分与进度一次同步，保存成功立即切卡；学习页只同步当前番茄钟，不再反复下载全部历史数据，慢网下避免重叠轮询。</p></div>
         <div className="changelog-row"><strong>0.10.8</strong><span>2026-09-26</span><p>卡片搜索新增可多选的搜索范围，默认搜索正面和反面，并可单独选择解析、例句、助记、备注、音标和选项。</p></div>
         <div className="changelog-row"><strong>0.10.7</strong><span>2026-09-26</span><p>支持分别调节发音和音效音量；修复长卡片回答后的提示遮挡“认识”按钮。</p></div>
         <div className="changelog-row"><strong>0.10.6</strong><span>2026-08-16</span><p>单词卡例句改为纯文本展示；修复新卡首次“不认识”后尚未到 5 分钟复习时间时再次评分出现“尚未到复习时间”的问题。</p></div>
