@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { buildDoubaoRequestBody, buildDoubaoTtsPrompt, buildPlainTextSsml, buildWordPronunciation, detectBritishRhoticConflict, doubaoTtsPromptCandidates, isValidCmu, legacyDoubaoTtsPrompt, normalizeCustomSsml, normalizeDoubaoPrompt, normalizeIpa, normalizeWord, parseDoubaoAudioChunks } from "./doubao-tts.js";
+import { buildDoubaoRequestBody, buildDoubaoTtsPrompt, buildPlainTextSsml, buildWordPronunciation, detectBritishRhoticConflict, doubaoTtsPromptCandidates, expandDoubaoEnglishAbbreviations, isValidCmu, legacyDoubaoTtsPrompt, normalizeCustomSsml, normalizeDoubaoPrompt, normalizeIpa, normalizeWord, parseDoubaoAudioChunks } from "./doubao-tts.js";
 
 describe("单词发音构建", () => {
   it("规范化 IPA 与单词格式", () => { expect(normalizeIpa(" [pə'fɔ:mə(r)] ")).toBe("pəˈfɔːmə(r)"); expect(normalizeWord(" Performer ")).toBe("performer"); });
@@ -15,6 +15,25 @@ describe("单词发音构建", () => {
     expect(detectBritishRhoticConflict("əˈraʊnd", "AH0 R AW1 N D").hasConflict).toBe(false);
   });
   it("纯文本 SSML 保持 XML 转义", () => { expect(buildPlainTextSsml("rock & roll")).toBe("<speak>\n  rock &amp; roll\n</speak>"); });
+  it("将句型中的 sb. 和 sth. 展开，避免豆包成功结束却返回空音频", () => {
+    const word = "It is feasible for sb. to do sth.";
+    const spoken = "It is feasible for somebody to do something";
+    expect(buildPlainTextSsml(word)).toBe(`<speak>\n  ${spoken}\n</speak>`);
+    const body = buildDoubaoRequestBody(word, `<speak>\n  ${word}\n</speak>`, "按音标朗读");
+    expect(body.req_params).toMatchObject({ text: spoken, ssml: `<speak>\n  ${spoken}\n</speak>` });
+    expect(JSON.parse(body.req_params.additions).context_texts).toEqual(["按音标朗读"]);
+  });
+  it("兼容无句点、大写和所有格缩写，保留普通单词及域名", () => {
+    expect(expandDoubaoEnglishAbbreviations("SB. gives sth to sb.'s friend; (STH.)!")).toBe("somebody gives something to somebody's friend; (something)!");
+    const text = "absb. sthx sb.com sth.org x-sb foo_sb";
+    expect(expandDoubaoEnglishAbbreviations(text)).toBe(text);
+  });
+  it("展开已保存 XML 的文本时保留 SSML 标签、属性和实体", () => {
+    const ssml = '<speak><phoneme alphabet="cmu" ph="S AH1 M">sb.</phoneme> &amp; <sub alias="sth.">sth.</sub></speak>';
+    expect(buildDoubaoRequestBody("sb. & sth.", ssml, "提示词").req_params.ssml).toBe('<speak><phoneme alphabet="cmu" ph="S AH1 M">somebody</phoneme> &amp; <sub alias="sth.">something</sub></speak>');
+    expect(buildDoubaoRequestBody("sth.", '<speak><sub alias="sb. > sth.">sth.</sub></speak>', "提示词").req_params.ssml).toBe('<speak><sub alias="sb. > sth.">something</sub></speak>');
+    expect(() => buildDoubaoRequestBody("sb.", `<speak>${"a".repeat(131)} sb.</speak>`, "提示词")).toThrow("缩写展开后");
+  });
   it("校验超级用户提交的完整 XML", () => {
     const ssml = `<speak>\n  <phoneme alphabet="cmu" ph="T AY1 T AH0 N">tighten</phoneme>\n</speak>`;
     expect(normalizeCustomSsml(`  ${ssml}  `)).toBe(ssml);

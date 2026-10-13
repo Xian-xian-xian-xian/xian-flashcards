@@ -22,7 +22,12 @@ export function normalizeIpa(input: string) {
 }
 export function escapeXml(value: string) { return value.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;").replace(/'/g, "&apos;"); }
 export function buildCmuSsml(word: string, cmu: string) { return `<speak>\n  <phoneme alphabet="cmu" ph="${escapeXml(cmu)}">${escapeXml(word)}</phoneme>\n</speak>`; }
-export function buildPlainTextSsml(word: string) { return `<speak>\n  ${escapeXml(word)}\n</speak>`; }
+export function expandDoubaoEnglishAbbreviations(text: string) {
+  // Dictionary placeholders can make Doubao finish successfully without any audio.
+  return text.replace(/(?<![\p{L}\p{N}_.-])(sb|sth)\.?(?![\p{L}\p{N}_.-])/giu,
+    (_match, abbreviation: string) => abbreviation.toLowerCase() === "sb" ? "somebody" : "something");
+}
+export function buildPlainTextSsml(word: string) { return `<speak>\n  ${escapeXml(expandDoubaoEnglishAbbreviations(word))}\n</speak>`; }
 export function buildDoubaoTtsPrompt(phonetic: string) {
   return `请使用标准、自然、非卷舌的英式英语词典发音，只朗读给定的单词一次。单独朗读词条时，不要读出词尾可选的连接音或侵入音 /r/，按照音标“${phonetic.trim()}”朗读，语气中性，发音清晰，不要解释。`;
 }
@@ -49,11 +54,15 @@ export function normalizeDoubaoPrompt(value: unknown) {
 }
 
 export function buildDoubaoRequestBody(fallback: string, ssml: string, prompt: string) {
+  // Also handle previously saved XML; preserve tags and pronunciation attributes.
+  const spokenSsml = ssml.replace(/(<(?:[^>"']|"[^"]*"|'[^']*')*>)|([^<]+)/g,
+    (part, tag: string | undefined) => tag ?? expandDoubaoEnglishAbbreviations(part));
+  if (spokenSsml.length > maxDoubaoSsmlLength) throw new Error(`缩写展开后的豆包 XML 不能超过 ${maxDoubaoSsmlLength} 个字符`);
   return {
     user: { uid: "flashcards" },
     req_params: {
-      text: fallback,
-      ssml,
+      text: expandDoubaoEnglishAbbreviations(fallback),
+      ssml: spokenSsml,
       speaker: doubaoTtsVoice,
       audio_params: { format: "mp3", sample_rate: 24000 },
       additions: JSON.stringify({
