@@ -1328,22 +1328,31 @@ export default function App() {
   }
 }
 
-function LoginView(props: { canRegister: boolean; onAuthed: (user: User) => void }) {
-  const [mode, setMode] = useState<"login" | "register">(props.canRegister ? "register" : "login");
+export function LoginView(props: { canRegister: boolean; onAuthed: (user: User) => void }) {
+  const [mode, setMode] = useState<"login" | "register">("login");
   const [username, setUsername] = useState("");
   const [password, setPassword] = useState("");
+  const [inviteCode, setInviteCode] = useState("");
+  const [submitting, setSubmitting] = useState(false);
+  const submittingRef = useRef(false);
   const [error, setError] = useState("");
 
   async function submit(event: FormEvent) {
     event.preventDefault();
+    if (submittingRef.current) return;
+    submittingRef.current = true;
+    setSubmitting(true);
     setError("");
     try {
       const result = mode === "register"
-        ? await api.register({ username, password })
+        ? await api.register({ username: username.trim(), password, inviteCode: inviteCode.trim() })
         : await api.login({ username, password });
       props.onAuthed(result.user);
     } catch (nextError) {
       setError((nextError as Error).message);
+    } finally {
+      submittingRef.current = false;
+      setSubmitting(false);
     }
   }
 
@@ -1354,17 +1363,18 @@ function LoginView(props: { canRegister: boolean; onAuthed: (user: User) => void
           <span className="brand-mark">闪</span>
           <span>闪记</span>
         </div>
-        <p className="eyebrow">{mode === "register" ? "首次设置管理员账号" : "登录后访问你的卡片"}</p>
+        <p className="eyebrow">{mode === "register" ? "填写邀请码，创建你的专属账号" : "登录后访问你的卡片"}</p>
         <h1>{mode === "register" ? "创建账号" : "登录"}</h1>
         <form className="auth-form" onSubmit={submit}>
-          <label>用户名<input value={username} onChange={(event) => setUsername(event.target.value)} autoComplete="username" minLength={3} /></label>
-          <label>密码<input value={password} onChange={(event) => setPassword(event.target.value)} type="password" autoComplete={mode === "register" ? "new-password" : "current-password"} minLength={8} /></label>
-          {error && <p className="auth-error">{error}</p>}
-          <button className="primary-button"><UserIcon />{mode === "register" ? "创建并登录" : "登录"}</button>
+          <label>用户名<input name="username" value={username} onChange={(event) => setUsername(event.target.value)} autoComplete="username" minLength={mode === "register" ? 3 : undefined} required /></label>
+          <label>密码<input name="password" value={password} onChange={(event) => setPassword(event.target.value)} type="password" autoComplete={mode === "register" ? "new-password" : "current-password"} minLength={mode === "register" ? 8 : undefined} required /></label>
+          {mode === "register" && <label>邀请码<input name="inviteCode" value={inviteCode} onChange={(event) => setInviteCode(event.target.value)} autoComplete="off" autoCapitalize="none" spellCheck={false} maxLength={256} placeholder="向邀请你的人获取" required /></label>}
+          {error && <p className="auth-error" role="alert">{error}</p>}
+          <button className="primary-button" disabled={submitting}><UserIcon />{submitting ? "提交中…" : mode === "register" ? "创建并登录" : "登录"}</button>
         </form>
         {props.canRegister && (
-          <button className="text-button" type="button" onClick={() => setMode(mode === "register" ? "login" : "register")}>
-            {mode === "register" ? "已有账号，去登录" : "首次使用，创建账号"}
+          <button className="text-button" type="button" disabled={submitting} onClick={() => { setMode(mode === "register" ? "login" : "register"); setError(""); setInviteCode(""); }}>
+            {mode === "register" ? "已有账号，去登录" : "有邀请码，创建账号"}
           </button>
         )}
       </section>

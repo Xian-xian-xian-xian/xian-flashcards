@@ -103,13 +103,17 @@ data/flashcards.sqlite
 
 ## 8. 登录与用户隔离
 
-首次部署新版后，打开站点会先进入登录页。第一个注册的账号会自动接管旧版未绑定用户的数据；之后每个账号只能访问、修改和删除自己的卡组、卡片、复习记录和设置。为了避免公网用户随便注册，创建第一个账号后，后续注册会默认关闭。
+打开站点会先进入登录页。所有新账号（包括首次初始化）都必须填写有效邀请码，已有账号照常登录。每个账号只能访问、修改和删除自己的卡组、卡片、复习记录和设置；首个账号仍会接管旧版未绑定用户的数据。
 
-如果你要临时开放注册给其他人创建账号，可以启动时加上：
+在服务器的 `.env` 中配置 `REGISTRATION_INVITE_CODE`，登录页才会出现“有邀请码，创建账号”。邀请码区分大小写，可重复使用；只向受邀者私下提供，不要提交到 Git 或写入网页。建议生成至少 16 位随机邀请码。修改后重启服务生效。
 
 ```bash
-ALLOW_REGISTRATION=true PORT=4174 HOST=0.0.0.0 pm2 start pnpm --name flashcards -- start:remote
+REGISTRATION_INVITE_CODE=替换为随机邀请码
 ```
+
+未配置或清空 `REGISTRATION_INVITE_CODE` 时关闭注册，即使旧的 `ALLOW_REGISTRATION=true` 仍在环境中也不能绕过邀请码。更换邀请码后，旧邀请码立即失效，已有账号不受影响。服务器仍限制每个来源 IP 每小时最多 5 次注册尝试。
+
+番茄基地及番茄经营的共用登录页源文件为 `deploy/tomatoes-login.html`，发布脚本会同步到 `/srv/beyour/tomatoes/login/index.html`；闪记卡使用应用内登录页，两者调用同一套注册接口。
 
 线上是 HTTPS 访问，启动时应启用安全 Cookie 和跨子域名 Cookie：
 

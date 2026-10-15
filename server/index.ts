@@ -22,6 +22,7 @@ import { createHarvestLedger, normalizeHarvestLedger, trustedTomatoWeight, updat
 import { isReviewDue, reviewUndoExpiresAt } from "./review-security.js";
 import { isTaskClaimEventType } from "./game-events.js";
 import { studyPomodoroState } from "./study-pomodoro.js";
+import { registrationEnabled, validRegistrationInvite } from "./registration.js";
 
 const app = express();
 const maxImportBytes = 10 * 1024 * 1024;
@@ -5180,11 +5181,10 @@ app.get("/api/study-records/export", requireUser, (req, res) => {
 
 app.get("/api/auth/status", (req, res) => {
   const user = userFromRequest(req);
-  const hasUsers = Boolean(get<{ count: number }>("SELECT COUNT(*) AS count FROM users")?.count);
   res.json({
     authenticated: Boolean(user),
     user: user ? publicAuthUser(user) : null,
-    canRegister: !hasUsers || process.env.ALLOW_REGISTRATION === "true"
+    canRegister: registrationEnabled(process.env.REGISTRATION_INVITE_CODE)
   });
 });
 
@@ -5198,15 +5198,20 @@ app.get("/api/auth/gate", (req, res) => {
 });
 
 app.post("/api/auth/register", requestRateLimit(registrationRateLimiter, "注册请求过于频繁，请稍后再试"), (req, res) => {
+  if (!registrationEnabled(process.env.REGISTRATION_INVITE_CODE)) {
+    res.status(403).json({ error: "注册暂未开放，请联系管理员" });
+    return;
+  }
+  if (!validRegistrationInvite(req.body?.inviteCode, process.env.REGISTRATION_INVITE_CODE)) {
+    res.status(403).json({ error: "请输入有效的邀请码" });
+    return;
+  }
   try {
     const username = requireText(req.body.username, "username");
     const password = requireText(req.body.password, "password");
     if (username.length < 3) throw new Error("用户名至少 3 个字符");
     if (password.length < 8) throw new Error("密码至少 8 个字符");
     const userCount = Number(get<{ count: number }>("SELECT COUNT(*) AS count FROM users")?.count ?? 0);
-    if (userCount > 0 && process.env.ALLOW_REGISTRATION !== "true") {
-      throw new Error("注册已关闭，请联系管理员");
-    }
     const createdAt = nowIso();
     run("INSERT INTO users (username, password_hash, created_at, updated_at) VALUES (?, ?, ?, ?)", [
       username,

@@ -63,7 +63,7 @@ export const api = {
   authStatus: () => request<{ authenticated: boolean; user: User | null; canRegister: boolean }>("/api/auth/status"),
   login: (payload: { username: string; password: string }) =>
     request<{ user: User }>("/api/auth/login", { method: "POST", body: JSON.stringify(payload) }),
-  register: (payload: { username: string; password: string }) =>
+  register: (payload: { username: string; password: string; inviteCode: string }) =>
     request<{ user: User }>("/api/auth/register", { method: "POST", body: JSON.stringify(payload) }),
   logout: () => request<{ ok: true }>("/api/auth/logout", { method: "POST" }),
   decks: () => request<Deck[]>("/api/decks"),

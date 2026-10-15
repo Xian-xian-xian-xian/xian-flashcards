@@ -89,6 +89,10 @@ verify_health() {
   return 1
 }
 
+deploy_shared_login() {
+  remote "set -e; login_dir='/srv/beyour/tomatoes/login'; if [ -d \"\$login_dir\" ]; then cp \"\$login_dir/index.html\" \"\$login_dir/index.html.previous\"; install -m 644 '$REMOTE_DIR/deploy/tomatoes-login.html' \"\$login_dir/index.html\"; fi"
+}
+
 trap close_master EXIT
 
 step "open ssh control connection" open_master
@@ -96,5 +100,6 @@ step "backup sqlite database" remote "set -e; ts=\$(date +%Y%m%d%H%M%S); if [ -f
 step "upload committed files" upload_committed_files
 step "install dependencies" remote "cd '$REMOTE_DIR'; pnpm install"
 step "build production assets" remote "cd '$REMOTE_DIR'; pnpm build"
+step "update shared login page" deploy_shared_login
 step "restart pm2" remote "cd '$REMOTE_DIR'; pm2 restart flashcards --update-env; pm2 save"
 step "verify health" verify_health

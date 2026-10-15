@@ -1,0 +1,230 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>登录番茄基地</title>
+    <style>
+      :root {
+        color-scheme: light dark;
+        font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+        background: #fff7ed;
+        color: #3b2416;
+      }
+
+      body {
+        min-height: 100vh;
+        margin: 0;
+        display: grid;
+        place-items: center;
+        background:
+          radial-gradient(circle at 20% 10%, rgba(255, 183, 77, 0.35), transparent 32rem),
+          linear-gradient(135deg, #fff7ed 0%, #fef3c7 48%, #fde68a 100%);
+      }
+
+      main {
+        width: min(92vw, 380px);
+        padding: 32px;
+        border: 1px solid rgba(146, 64, 14, 0.18);
+        border-radius: 8px;
+        background: rgba(255, 251, 235, 0.92);
+        box-shadow: 0 24px 70px rgba(120, 53, 15, 0.18);
+      }
+
+      h1 {
+        margin: 0 0 8px;
+        font-size: 28px;
+        letter-spacing: 0;
+      }
+
+      p {
+        margin: 0 0 24px;
+        color: #7c2d12;
+        line-height: 1.6;
+      }
+
+      label {
+        display: grid;
+        gap: 8px;
+        margin-bottom: 16px;
+        font-size: 14px;
+        font-weight: 500;
+      }
+
+      input {
+        height: 44px;
+        border: 1px solid rgba(146, 64, 14, 0.28);
+        border-radius: 6px;
+        padding: 0 12px;
+        font: inherit;
+        background: #fff;
+        color: #3b2416;
+      }
+
+      button {
+        width: 100%;
+        height: 46px;
+        border: 0;
+        border-radius: 6px;
+        background: #ea580c;
+        color: #fff;
+        font: inherit;
+        font-weight: 600;
+        cursor: pointer;
+      }
+
+      button:disabled {
+        cursor: wait;
+        opacity: 0.72;
+      }
+
+      [hidden] { display: none !important; }
+
+      .switch-mode {
+        margin-top: 12px;
+        background: transparent;
+        color: #9a3412;
+      }
+
+      main { box-sizing: border-box; }
+
+      .error {
+        min-height: 22px;
+        margin: 12px 0 0;
+        color: #b91c1c;
+        font-weight: 500;
+      }
+
+      .site-icp {
+        position: fixed;
+        right: 16px;
+        bottom: 14px;
+        left: 16px;
+        color: #7c2d12;
+        text-align: center;
+        font-size: 13px;
+        font-weight: 500;
+      }
+
+      .site-icp a {
+        color: inherit;
+        text-decoration: none;
+      }
+
+      .site-icp a:hover {
+        text-decoration: underline;
+      }
+    </style>
+  </head>
+  <body>
+    <main>
+      <h1 id="heading">登录番茄基地</h1>
+      <p id="description">番茄基地、闪记卡和番茄经营共用一个账号。</p>
+      <form id="loginForm">
+        <label>
+          用户名
+          <input id="username" name="username" autocomplete="username" required>
+        </label>
+        <label>
+          密码
+          <input id="password" name="password" type="password" autocomplete="current-password" required>
+        </label>
+        <label id="inviteField" hidden>
+          邀请码
+          <input id="inviteCode" name="inviteCode" autocomplete="off" autocapitalize="none" spellcheck="false" maxlength="256" placeholder="向邀请你的人获取" disabled>
+        </label>
+        <button id="submitBtn" type="submit">登录</button>
+        <p class="error" id="errorText" role="alert"></p>
+      </form>
+      <button id="switchMode" class="switch-mode" type="button" hidden>有邀请码，创建账号</button>
+    </main>
+    <footer class="site-icp">
+      <a href="https://beian.miit.gov.cn/" target="_blank" rel="noopener noreferrer">苏ICP备2026045295号-1</a>
+    </footer>
+
+    <script>
+      const form = document.querySelector("#loginForm");
+      const submitBtn = document.querySelector("#submitBtn");
+      const errorText = document.querySelector("#errorText");
+      const switchMode = document.querySelector("#switchMode");
+      const inviteField = document.querySelector("#inviteField");
+      const inviteCode = document.querySelector("#inviteCode");
+      const password = document.querySelector("#password");
+      const username = document.querySelector("#username");
+      const heading = document.querySelector("#heading");
+      const description = document.querySelector("#description");
+      const params = new URLSearchParams(window.location.search);
+      const next = params.get("next") || "/";
+      let mode = "login";
+      let submitting = false;
+
+      function safeNext(value) {
+        if (!value.startsWith("/") || value.startsWith("//") || /[\\\x00-\x20]/.test(value)) return "/";
+        return value;
+      }
+
+      function renderMode() {
+        const registering = mode === "register";
+        heading.textContent = registering ? "邀请码注册" : "登录番茄基地";
+        document.title = heading.textContent;
+        description.textContent = registering
+          ? "填写邀请码，创建你的专属账号。三个网站共用一个账号。"
+          : "番茄基地、闪记卡和番茄经营共用一个账号。";
+        inviteField.hidden = !registering;
+        inviteCode.disabled = !registering;
+        inviteCode.required = registering;
+        password.autocomplete = registering ? "new-password" : "current-password";
+        password.minLength = registering ? 8 : 0;
+        username.minLength = registering ? 3 : 0;
+        submitBtn.textContent = submitting ? "提交中…" : registering ? "创建并登录" : "登录";
+        switchMode.textContent = registering ? "已有账号，去登录" : "有邀请码，创建账号";
+      }
+
+      fetch("/api/auth/status", { credentials: "include", cache: "no-store" })
+        .then((response) => response.ok ? response.json() : Promise.reject())
+        .then((status) => { switchMode.hidden = status.canRegister !== true; })
+        .catch(() => {});
+
+      switchMode.addEventListener("click", () => {
+        if (submitting) return;
+        mode = mode === "login" ? "register" : "login";
+        inviteCode.value = "";
+        errorText.textContent = "";
+        renderMode();
+      });
+
+      form.addEventListener("submit", async (event) => {
+        event.preventDefault();
+        if (submitting) return;
+        submitting = true;
+        errorText.textContent = "";
+        submitBtn.disabled = true;
+        switchMode.disabled = true;
+        renderMode();
+
+        try {
+          const payload = { username: username.value.trim(), password: password.value };
+          if (mode === "register") payload.inviteCode = inviteCode.value.trim();
+          const response = await fetch(`/api/auth/${mode}`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            credentials: "include",
+            body: JSON.stringify(payload)
+          });
+          if (!response.ok) {
+            const result = await response.json().catch(() => ({}));
+            throw new Error(result.error || (mode === "register" ? "注册失败" : "登录失败"));
+          }
+          window.location.assign(safeNext(next));
+        } catch (error) {
+          errorText.textContent = error.message || "暂时无法提交，请重试";
+        } finally {
+          submitting = false;
+          submitBtn.disabled = false;
+          switchMode.disabled = false;
+          renderMode();
+        }
+      });
+    </script>
+  </body>
+</html>
