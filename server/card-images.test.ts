@@ -45,4 +45,13 @@ describe("card image storage", () => {
     oversized.set([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]);
     await expect(storeCardImage(rootDir, 1, oversized)).rejects.toThrow("10 MB");
   });
+
+  it("enforces per-account storage quotas without preventing another account's upload", async () => {
+    const root = await fs.promises.mkdtemp(path.join(os.tmpdir(), "flashcard-quota-"));
+    temporaryDirectories.push(root);
+    const image = Buffer.from([0xff, 0xd8, 0xff, 0xe0, 0]);
+    await storeCardImage(root, 1, image, 7);
+    await expect(storeCardImage(root, 1, image, 7)).rejects.toThrow("图片空间");
+    await expect(storeCardImage(root, 2, image, 7)).resolves.toHaveProperty("extension", "jpg");
+  });
 });

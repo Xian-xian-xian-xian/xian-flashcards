@@ -3,6 +3,8 @@ import fs from "node:fs";
 import path from "node:path";
 
 export const maxCardImageBytes = 10 * 1024 * 1024;
+export const maxUserImageBytes = 256 * 1024 * 1024;
+const reservedBytes = new Map<number, number>();
 
 export type CardImageType = {
   extension: "png" | "jpg" | "webp" | "gif";
@@ -45,7 +47,7 @@ export function cardImagePath(rootDir: string, userId: number, filename: string)
   return path.join(rootDir, String(userId), filename);
 }
 
-export async function storeCardImage(rootDir: string, userId: number, buffer: Buffer) {
+export async function storeCardImage(rootDir: string, userId: number, buffer: Buffer, quotaBytes = maxUserImageBytes) {
   if (buffer.length > maxCardImageBytes) throw new Error("图片不能超过 10 MB");
   const type = detectCardImageType(buffer);
   if (!type) throw new Error("仅支持 PNG、JPEG、WebP 或 GIF 图片");
@@ -54,13 +56,21 @@ export async function storeCardImage(rootDir: string, userId: number, buffer: Bu
   const finalPath = cardImagePath(rootDir, userId, filename);
   if (!finalPath) throw new Error("无法生成图片文件名");
   const temporaryPath = path.join(userDir, `.${filename}.tmp`);
-  await fs.promises.mkdir(userDir, { recursive: true });
+  reservedBytes.set(userId, (reservedBytes.get(userId) ?? 0) + buffer.length);
   try {
+    await fs.promises.mkdir(userDir, { recursive: true, mode: 0o700 });
+    const names = (await fs.promises.readdir(userDir)).filter((name) => cardImageFilenamePattern.test(name));
+    const sizes = await Promise.all(names.map((name) => fs.promises.stat(path.join(userDir, name)).then((stat) => stat.size)));
+    if (names.length >= 5_000 || sizes.reduce((sum, size) => sum + size, 0) + (reservedBytes.get(userId) ?? 0) > quotaBytes) throw new Error("图片空间已达到上限（每个账号 256 MB），请联系管理员");
     await fs.promises.writeFile(temporaryPath, buffer, { flag: "wx" });
     await fs.promises.rename(temporaryPath, finalPath);
   } catch (error) {
     await fs.promises.rm(temporaryPath, { force: true }).catch(() => undefined);
     throw error;
+  } finally {
+    const remaining = (reservedBytes.get(userId) ?? 0) - buffer.length;
+    if (remaining > 0) reservedBytes.set(userId, remaining);
+    else reservedBytes.delete(userId);
   }
   return { filename, ...type };
 }

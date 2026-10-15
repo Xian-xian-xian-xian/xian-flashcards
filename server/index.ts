@@ -6,8 +6,6 @@ import fs from "node:fs";
 import crypto from "node:crypto";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import { parse } from "csv-parse/sync";
-import * as XLSX from "xlsx";
 import type { SqlValue } from "sql.js";
 import { all, get, getUserSetting, initDb, lastTableId, nowIso, run, setUserSetting, transaction } from "./db.js";
 import { isSuperuserUsername, publicAuthUser, type AuthUser } from "./auth.js";
@@ -17,20 +15,29 @@ import { normalizeImportRows } from "./import-utils.js";
 import { buildDailyStudyMarkdown, isAllowedStudyExportDate, type StudyEventKind, type StudyExportEvent } from "./study-export.js";
 import { buildDoubaoRequestBody, buildDoubaoTtsPrompt, buildPlainTextSsml, doubaoTtsEndpoint, doubaoTtsPromptCandidates, doubaoTtsResourceId, doubaoTtsVoice, maxDoubaoPromptLength, maxDoubaoSsmlLength, normalizeCustomSsml, normalizeDoubaoPrompt, parseDoubaoAudioChunks } from "./doubao-tts.js";
 import { currentWeekMakeupDates, dailyStreak, isDailyTaskComplete, isDateKey, isoWeekIdForDateKey, taskProgressCount, withoutTaskCardIds } from "./daily-checkin.js";
-import { FixedWindowRateLimiter, isAllowedCorsOrigin, normalizeCookieDomain } from "./http-security.js";
+import { boundedInteger, FixedWindowRateLimiter, TokenBucketRateLimiter, isAllowedCorsOrigin, normalizeCookieDomain } from "./http-security.js";
 import { createHarvestLedger, normalizeHarvestLedger, trustedTomatoWeight, updateHarvestLedger, type HarvestLedger, type TomatoRecord } from "./tomato-harvest.js";
 import { isReviewDue, reviewUndoExpiresAt } from "./review-security.js";
 import { isTaskClaimEventType } from "./game-events.js";
 import { studyPomodoroState } from "./study-pomodoro.js";
 import { registrationEnabled, validRegistrationInvite } from "./registration.js";
+import { assessTomatoStateWrite, validateTomatoState } from "./tomato-state.js";
+import { saveTomatoHistory } from "./tomato-history.js";
+import { parseImportSafely } from "./import-process.js";
 
 const app = express();
+app.disable("x-powered-by");
+const apiRequestLimiter = new TokenBucketRateLimiter({ capacity: 80, refillPerSecond: 15 });
+const userWriteLimiter = new TokenBucketRateLimiter({ capacity: 30, refillPerSecond: 2 });
+const uploadBodyLimiter = new TokenBucketRateLimiter({ capacity: 16, refillPerSecond: 2 });
+const importRateLimiter = new FixedWindowRateLimiter({ limit: 12, windowMs: 60 * 60 * 1000 });
+const imageRateLimiter = new FixedWindowRateLimiter({ limit: 120, windowMs: 60 * 60 * 1000 });
 const maxImportBytes = 10 * 1024 * 1024;
 const importUpload = multer({
   storage: multer.memoryStorage(),
   limits: { fileSize: maxImportBytes, files: 1, fields: 4, parts: 5, fieldSize: maxImportBytes }
 });
-const cardImageUpload = multer({ storage: multer.memoryStorage(), limits: { fileSize: maxCardImageBytes, files: 1 } });
+const cardImageUpload = multer({ storage: multer.memoryStorage(), limits: { fileSize: maxCardImageBytes, files: 1, fields: 0, parts: 1, fieldNameSize: 100 } });
 const port = Number(process.env.PORT ?? 4174);
 const host = process.env.HOST ?? "0.0.0.0";
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -39,6 +46,21 @@ const templateDir = path.resolve(process.cwd(), "模版");
 const cardImagesDir = process.env.CARD_IMAGES_DIR ?? path.resolve(process.cwd(), "data/card-images");
 
 app.set("trust proxy", "loopback");
+app.use("/api", requestRateLimit(apiRequestLimiter, "请求过于频繁，请稍后再试"));
+app.use("/api", (req, res, next) => {
+  res.setHeader("Cache-Control", "no-store");
+  res.setHeader("X-Content-Type-Options", "nosniff");
+  res.setHeader("Referrer-Policy", "strict-origin-when-cross-origin");
+  if (!["GET", "HEAD", "OPTIONS"].includes(req.method)) {
+    const multipart = ["/import", "/card-images"].includes(req.path) && req.is("multipart/form-data");
+    const json = /^application\/json(?:\s*;|$)/i.test(req.get("Content-Type") ?? "");
+    if (!json && !multipart) {
+      res.status(415).json({ error: "请使用 JSON 或受支持的文件上传格式" });
+      return;
+    }
+  }
+  next();
+});
 const corsOriginOptions = { nodeEnv: process.env.NODE_ENV, configuredOrigins: process.env.CORS_ORIGINS };
 app.use((req, res, next) => {
   if (!isAllowedCorsOrigin(req.headers.origin, corsOriginOptions)) {
@@ -51,7 +73,24 @@ app.use(cors({
   origin: (origin, callback) => callback(null, isAllowedCorsOrigin(origin, corsOriginOptions)),
   credentials: true
 }));
+app.use("/api", (req, res, next) => {
+  if (!["GET", "HEAD", "OPTIONS"].includes(req.method) && !["/auth/login", "/auth/register", "/auth/logout"].includes(req.path)) {
+    const user = userFromRequest(req);
+    if (!user) { res.status(401).json({ error: "请先登录" }); return; }
+    if (!enforceRateLimit(res, uploadBodyLimiter.consume(String(user.id)), "提交过于频繁，请稍后再试")) return;
+  }
+  next();
+});
+app.use("/api/auth", express.json({ limit: "8kb" }));
 app.use(express.json({ limit: "10mb" }));
+app.use("/api", (req, res, next) => {
+  if (req.body === null || (req.body !== undefined && (typeof req.body !== "object" || Array.isArray(req.body)))) {
+    res.status(400).json({ error: "请求内容必须是 JSON 对象" });
+    return;
+  }
+  req.body ??= {};
+  next();
+});
 app.use("/api/reviews", (_req, res, next) => {
   res.setHeader("Cache-Control", "no-store");
   next();
@@ -166,6 +205,7 @@ console.error = (...args: unknown[]) => {
 
 function requireText(value: unknown, name: string) {
   if (typeof value !== "string" || !value.trim()) throw new Error(`${name}不能为空`);
+  if (value.length > 128 * 1024) throw new Error(`${name}内容过长`);
   return value.trim();
 }
 
@@ -554,22 +594,27 @@ async function synthesizeWithDoubao(phoneme: string, fallback: string, ssmlOverr
     finalSsmlMode: ssmlOverride ? "custom" : "plain-text"
   });
   if (ssml.length > maxDoubaoSsmlLength) throw new Error(`单词生成的 SSML 超过 ${maxDoubaoSsmlLength} 个字符`);
-  const response = await fetch(doubaoTtsEndpoint, {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-      "X-Api-Key": doubaoTtsApiKey,
-      "X-Api-Resource-Id": doubaoTtsResourceId,
-      "X-Api-Request-Id": crypto.randomUUID(),
-      "X-Control-Require-Usage-Tokens-Return": "*"
-    },
-    body: JSON.stringify(buildDoubaoRequestBody(fallback, ssml, prompt))
-  });
-  if (!response.ok) {
-    const body = await response.text().catch(() => "");
-    throw new Error(`豆包语音合成失败：${response.status}${body ? ` ${body.slice(0, 300)}` : ""}`);
-  }
-  return parseDoubaoAudioChunks(await response.text());
+  if (activeTtsRequests >= 4 || !globalTtsLimiter.consume("global").allowed) throw new Error("语音服务繁忙，请稍后再试");
+  activeTtsRequests++;
+  try {
+    const response = await fetch(doubaoTtsEndpoint, {
+      signal: AbortSignal.timeout(20_000),
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "X-Api-Key": doubaoTtsApiKey,
+        "X-Api-Resource-Id": doubaoTtsResourceId,
+        "X-Api-Request-Id": crypto.randomUUID(),
+        "X-Control-Require-Usage-Tokens-Return": "*"
+      },
+      body: JSON.stringify(buildDoubaoRequestBody(fallback, ssml, prompt))
+    });
+    if (!response.ok) {
+      const body = await response.text().catch(() => "");
+      throw new Error(`豆包语音合成失败：${response.status}${body ? ` ${body.slice(0, 300)}` : ""}`);
+    }
+    return parseDoubaoAudioChunks(await response.text());
+  } finally { activeTtsRequests--; }
 }
 
 function parseCookies(header: string | undefined) {
@@ -580,7 +625,8 @@ function parseCookies(header: string | undefined) {
       .filter(Boolean)
       .map((part) => {
         const [name, ...value] = part.split("=");
-        return [decodeURIComponent(name), decodeURIComponent(value.join("="))];
+        try { return [decodeURIComponent(name), decodeURIComponent(value.join("="))]; }
+        catch { return ["", ""]; }
       })
   );
 }
@@ -601,6 +647,8 @@ function verifyPassword(password: string, stored: string) {
 
 const loginRateLimiter = new FixedWindowRateLimiter({ limit: 20, windowMs: 15 * 60 * 1000 });
 const registrationRateLimiter = new FixedWindowRateLimiter({ limit: 5, windowMs: 60 * 60 * 1000 });
+const globalTtsLimiter = new FixedWindowRateLimiter({ limit: 500, windowMs: 60 * 60 * 1000 });
+let activeTtsRequests = 0;
 const ttsSynthesisRateLimiter = new FixedWindowRateLimiter({ limit: 120, windowMs: 60 * 60 * 1000 });
 
 function enforceRateLimit(res: express.Response, result: ReturnType<FixedWindowRateLimiter["consume"]>, message: string) {
@@ -612,7 +660,7 @@ function enforceRateLimit(res: express.Response, result: ReturnType<FixedWindowR
   return false;
 }
 
-function requestRateLimit(limiter: FixedWindowRateLimiter, message: string) {
+function requestRateLimit(limiter: Pick<FixedWindowRateLimiter, "consume">, message: string) {
   return (req: express.Request, res: express.Response, next: express.NextFunction) => {
     if (enforceRateLimit(res, limiter.consume(req.ip || req.socket.remoteAddress || "unknown"), message)) next();
   };
@@ -632,7 +680,11 @@ function createSession(res: express.Response, userId: number) {
   const id = crypto.randomBytes(32).toString("hex");
   const createdAt = nowIso();
   const expiresAt = new Date(Date.now() + sessionDays * 24 * 60 * 60 * 1000).toISOString();
-  run("INSERT INTO sessions (id, user_id, expires_at, created_at) VALUES (?, ?, ?, ?)", [id, userId, expiresAt, createdAt]);
+  transaction(() => {
+    run("DELETE FROM sessions WHERE expires_at <= ?", [createdAt]);
+    run("INSERT INTO sessions (id, user_id, expires_at, created_at) VALUES (?, ?, ?, ?)", [id, userId, expiresAt, createdAt]);
+    run("DELETE FROM sessions WHERE user_id = ? AND id NOT IN (SELECT id FROM sessions WHERE user_id = ? ORDER BY created_at DESC LIMIT 20)", [userId, userId]);
+  });
   res.cookie(sessionCookieName, id, {
     ...sessionCookieOptions(),
     maxAge: sessionDays * 24 * 60 * 60 * 1000
@@ -662,6 +714,7 @@ function requireUser(req: express.Request, res: express.Response, next: express.
     return;
   }
   res.locals.user = user;
+  if (!["GET", "HEAD", "OPTIONS"].includes(req.method) && !enforceRateLimit(res, userWriteLimiter.consume(String(user.id)), "保存过于频繁，请稍后再试")) return;
   normalizeExistingCards(Number(user.id));
   next();
 }
@@ -669,7 +722,7 @@ function requireUser(req: express.Request, res: express.Response, next: express.
 function requireSuperuser(_req: express.Request, res: express.Response, next: express.NextFunction) {
   const user = res.locals.user as AuthUser;
   if (!isSuperuserUsername(user?.username)) {
-    res.status(403).json({ error: "仅超级用户可以修改豆包语音设置" });
+    res.status(403).json({ error: "仅管理员可以访问此功能" });
     return;
   }
   next();
@@ -4637,6 +4690,19 @@ function deleteStudyEvent(userId: number, eventId: unknown) {
   if (Number.isInteger(id) && id > 0) run("DELETE FROM study_events WHERE id = ? AND user_id = ?", [id, userId]);
 }
 
+function checkCardBudget(userId: number, inputs: CardInput[], replacingId?: number) {
+  const incoming = inputs.reduce((bytes, input) => {
+    const size = Buffer.byteLength(JSON.stringify(input));
+    if (size > 256 * 1024) throw Object.assign(new Error("单张卡片内容不能超过 256 KB"), { status: 413 });
+    return bytes + size;
+  }, 0);
+  const bytesExpression = "length(CAST(COALESCE(front,'') || COALESCE(back,'') || COALESCE(phonetic,'') || COALESCE(example,'') || COALESCE(mnemonic,'') || COALESCE(note,'') || COALESCE(choices,'') AS BLOB))";
+  const own = get<{ count: number; bytes: number }>(`SELECT COUNT(*) AS count, COALESCE(SUM(${bytesExpression}),0) AS bytes FROM cards WHERE user_id = ? AND id <> ?`, [userId, replacingId ?? -1]);
+  const total = get<{ bytes: number }>(`SELECT COALESCE(SUM(${bytesExpression}),0) AS bytes FROM cards WHERE id <> ?`, [replacingId ?? -1]);
+  if (Number(own?.count ?? 0) + inputs.length > 10_000 || Number(own?.bytes ?? 0) + incoming > 32 * 1024 * 1024) throw Object.assign(new Error("账号卡片空间已达到上限（10000 张或 32 MB），请联系管理员"), { status: 413 });
+  if (Number(total?.bytes ?? 0) + incoming > 64 * 1024 * 1024) throw Object.assign(new Error("网站卡片空间接近上限，请联系管理员扩容"), { status: 413 });
+}
+
 function createCard(userId: number, deckId: number, input: CardInput) {
   const deck = get<{ id: number }>("SELECT id FROM decks WHERE id = ? AND user_id = ?", [deckId, userId]);
   if (!deck) throw new Error("卡组不存在");
@@ -5137,7 +5203,7 @@ app.get("/api/health", (_req, res) => {
   res.json({ ok: true, now: nowIso(), version: appVersion });
 });
 
-app.get("/api/logs/recent", requireUser, (req, res) => {
+app.get("/api/logs/recent", requireUser, requireSuperuser, (req, res) => {
   const minutes = Math.min(60, Math.max(1, Number(req.query.minutes ?? 10) || 10));
   const cutoff = Date.now() - minutes * 60 * 1000;
   pruneRecentLogs();
@@ -5210,7 +5276,9 @@ app.post("/api/auth/register", requestRateLimit(registrationRateLimiter, "注册
     const username = requireText(req.body.username, "username");
     const password = requireText(req.body.password, "password");
     if (username.length < 3) throw new Error("用户名至少 3 个字符");
+    if (username.length > 64) throw new Error("用户名不能超过 64 个字符");
     if (password.length < 8) throw new Error("密码至少 8 个字符");
+    if (password.length > 256) throw new Error("密码不能超过 256 个字符");
     const userCount = Number(get<{ count: number }>("SELECT COUNT(*) AS count FROM users")?.count ?? 0);
     const createdAt = nowIso();
     run("INSERT INTO users (username, password_hash, created_at, updated_at) VALUES (?, ?, ?, ?)", [
@@ -5231,6 +5299,10 @@ app.post("/api/auth/register", requestRateLimit(registrationRateLimiter, "注册
 app.post("/api/auth/login", requestRateLimit(loginRateLimiter, "登录尝试过于频繁，请稍后再试"), (req, res) => {
   const username = String(req.body.username ?? "").trim();
   const password = String(req.body.password ?? "");
+  if (username.length > 64 || password.length > 256) {
+    res.status(400).json({ error: "用户名或密码长度超出限制" });
+    return;
+  }
   const user = get<{ id: number; username: string; password_hash: string }>("SELECT * FROM users WHERE username = ?", [username]);
   if (!user || !verifyPassword(password, user.password_hash)) {
     res.status(401).json({ error: "用户名或密码不正确" });
@@ -5250,6 +5322,7 @@ app.post("/api/auth/logout", (req, res) => {
 app.use("/api", requireUser);
 
 app.post("/api/card-images", (req, res) => {
+  if (!enforceRateLimit(res, imageRateLimiter.consume(String(currentUserId(res))), "图片上传过于频繁，请稍后再试")) return;
   cardImageUpload.single("file")(req, res, async (uploadError) => {
     if (uploadError) {
       const message = uploadError instanceof multer.MulterError && uploadError.code === "LIMIT_FILE_SIZE"
@@ -6645,22 +6718,37 @@ app.get("/api/tomatoes/active", (_req, res) => {
 app.get("/api/tomatoes/state", (_req, res) => {
   const userId = currentUserId(res);
   const row = get<{ value: string }>("SELECT value FROM user_settings WHERE user_id = ? AND key = ?", [userId, "tomatoes.state.v1"]);
-  res.json({ state: row?.value ? JSON.parse(row.value) : null });
+  const version = get<{ revision: number; updated_at: string }>("SELECT revision, updated_at FROM tomato_state_revisions WHERE user_id = ?", [userId]);
+  res.json({ state: row?.value ? JSON.parse(row.value) : null, revision: Number(version?.revision ?? 0), updatedAt: version?.updated_at ?? null });
 });
 
 app.put("/api/tomatoes/state", (req, res) => {
   const userId = currentUserId(res);
-  if (!req.body || typeof req.body.state !== "object" || Array.isArray(req.body.state)) {
-    res.status(400).json({ error: "state must be an object" });
+  const invalidState = validateTomatoState(req.body?.state);
+  if (invalidState) {
+    res.status(400).json({ error: invalidState });
     return;
   }
   const previousState = readTomatoState(userId);
-  const ledger = updateHarvestLedger(ensureHarvestLedger(userId), previousState, req.body.state);
+  const revision = Number(get<{ revision: number }>("SELECT revision FROM tomato_state_revisions WHERE user_id = ?", [userId])?.revision ?? 0);
+  const assessment = assessTomatoStateWrite(revision, req.body.baseRevision, previousState, req.body.state, req.body.allowRecordReplacement === true);
+  if (!assessment.ok) {
+    if (assessment.reason === "record_regression") {
+      res.status(422).json({ error: "record_regression_blocked", message: "检测到记录异常批量减少，已阻止覆盖。请刷新后重试，或通过已确认的覆盖导入/清空操作提交。", revision });
+    } else {
+      res.status(409).json({ error: "state_revision_conflict", message: "云端已有更新，已阻止旧页面覆盖。", state: previousState, revision });
+    }
+    return;
+  }
+  saveTomatoHistory(userId, revision, previousState);
+  const updatedAt = nowIso();
   transaction(() => {
+    const ledger = updateHarvestLedger(ensureHarvestLedger(userId), previousState, req.body.state);
     setUserSetting(userId, "tomatoes.state.v1", JSON.stringify(req.body.state));
     setUserSetting(userId, harvestLedgerKey, JSON.stringify(ledger));
+    run("INSERT INTO tomato_state_revisions (user_id, revision, updated_at) VALUES (?, ?, ?) ON CONFLICT(user_id) DO UPDATE SET revision = excluded.revision, updated_at = excluded.updated_at", [userId, revision + 1, updatedAt]);
   });
-  res.json({ ok: true, updatedAt: nowIso() });
+  res.json({ ok: true, revision: revision + 1, updatedAt });
 });
 
 app.get("/api/templates/:name", (req, res) => {
@@ -6868,10 +6956,12 @@ app.delete("/api/decks/:id", (req, res) => {
     `SELECT id FROM cards WHERE user_id = ? AND deck_id IN (${placeholders})`,
     [userId, ...ids]
   ).map((row) => Number(row.id));
-  run(`DELETE FROM reviews WHERE card_id IN (SELECT id FROM cards WHERE user_id = ? AND deck_id IN (${placeholders}))`, [userId, ...ids]);
-  run(`DELETE FROM cards WHERE user_id = ? AND deck_id IN (${placeholders})`, [userId, ...ids]);
-  run(`DELETE FROM decks WHERE user_id = ? AND id IN (${placeholders})`, [userId, ...ids]);
-  removeCardsFromTodayTaskQueues(userId, cardIds);
+  transaction(() => {
+    run(`DELETE FROM reviews WHERE card_id IN (SELECT id FROM cards WHERE user_id = ? AND deck_id IN (${placeholders}))`, [userId, ...ids]);
+    run(`DELETE FROM cards WHERE user_id = ? AND deck_id IN (${placeholders})`, [userId, ...ids]);
+    run(`DELETE FROM decks WHERE user_id = ? AND id IN (${placeholders})`, [userId, ...ids]);
+    removeCardsFromTodayTaskQueues(userId, cardIds);
+  });
   res.json({ ok: true });
 });
 
@@ -6892,7 +6982,8 @@ app.get("/api/decks/:id/cards", (req, res) => {
 
 app.post("/api/decks/:id/cards", (req, res) => {
   try {
-    res.status(201).json({ id: createCard(currentUserId(res), Number(req.params.id), req.body) });
+    checkCardBudget(currentUserId(res), [req.body]);
+    res.status(201).json({ id: transaction(() => createCard(currentUserId(res), Number(req.params.id), req.body)) });
   } catch (error) {
     res.status(400).json({ error: (error as Error).message });
   }
@@ -6907,11 +6998,14 @@ app.patch("/api/cards/:id", (req, res) => {
     return;
   }
   const baseUpdatedAt = typeof req.body.baseUpdatedAt === "string" ? req.body.baseUpdatedAt : "";
-  if (!req.body.force && baseUpdatedAt && new Date(baseUpdatedAt).getTime() < new Date(String(current.updated_at)).getTime()) {
+  const editsContent = ["card_type", "front", "back", "phonetic", "example", "mnemonic", "note", "choices"].some((key) => key in req.body);
+  if (req.body.force !== true && (editsContent || baseUpdatedAt) && baseUpdatedAt !== String(current.updated_at)) {
     res.status(409).json({ error: "这张卡片已在其他设备更新", serverCard: current });
     return;
   }
   const cardType = req.body.card_type === undefined ? null : normalizeCardType(req.body.card_type);
+  checkCardBudget(userId, [{ ...current, ...req.body } as CardInput], cardId);
+  const nextCardUpdatedAt = new Date(Math.max(Date.now(), new Date(String(current.updated_at)).getTime() + 1)).toISOString();
   const effectiveType = cardType ?? normalizeCardType(current.card_type);
   const effectiveFront = typeof req.body.front === "string" && req.body.front.trim() ? req.body.front.trim() : String(current.front ?? "");
   const effectiveBack = typeof req.body.back === "string" && req.body.back.trim() ? req.body.back.trim() : String(current.back ?? "");
@@ -6953,7 +7047,7 @@ app.patch("/api/cards/:id", (req, res) => {
         ? Number(req.body.favorite)
         : null,
       paused,
-      nowIso(),
+      nextCardUpdatedAt,
       cardId,
       userId
     ]
@@ -6965,9 +7059,11 @@ app.patch("/api/cards/:id", (req, res) => {
 app.delete("/api/cards/:id", (req, res) => {
   const userId = currentUserId(res);
   const cardId = Number(req.params.id);
-  run("DELETE FROM reviews WHERE card_id IN (SELECT id FROM cards WHERE id = ? AND user_id = ?)", [cardId, userId]);
-  run("DELETE FROM cards WHERE id = ? AND user_id = ?", [cardId, userId]);
-  removeCardFromTodayTaskQueues(userId, cardId);
+  transaction(() => {
+    run("DELETE FROM reviews WHERE card_id IN (SELECT id FROM cards WHERE id = ? AND user_id = ?)", [cardId, userId]);
+    run("DELETE FROM cards WHERE id = ? AND user_id = ?", [cardId, userId]);
+    removeCardFromTodayTaskQueues(userId, cardId);
+  });
   res.json({ ok: true });
 });
 
@@ -6988,9 +7084,11 @@ app.post("/api/cards/batch", (req, res) => {
     const ownedPlaceholders = ownedCards.map(() => "?").join(",");
 
     if (action === "delete") {
-      run(`DELETE FROM reviews WHERE card_id IN (${ownedPlaceholders})`, ownedCards);
-      run(`DELETE FROM cards WHERE user_id = ? AND id IN (${ownedPlaceholders})`, [userId, ...ownedCards]);
-      removeCardsFromTodayTaskQueues(userId, ownedCards);
+      transaction(() => {
+        run(`DELETE FROM reviews WHERE card_id IN (${ownedPlaceholders})`, ownedCards);
+        run(`DELETE FROM cards WHERE user_id = ? AND id IN (${ownedPlaceholders})`, [userId, ...ownedCards]);
+        removeCardsFromTodayTaskQueues(userId, ownedCards);
+      });
       res.json({ ok: true, affected: ownedCards.length });
       return;
     }
@@ -7014,7 +7112,8 @@ app.post("/api/cards/batch", (req, res) => {
 });
 
 app.post("/api/import", (req, res) => {
-  importUpload.single("file")(req, res, (uploadError) => {
+  if (!enforceRateLimit(res, importRateLimiter.consume(String(currentUserId(res))), "导入过于频繁，请稍后再试")) return;
+  importUpload.single("file")(req, res, async (uploadError) => {
     if (uploadError) {
       const tooLarge = uploadError instanceof multer.MulterError
         && ["LIMIT_FILE_SIZE", "LIMIT_FIELD_VALUE"].includes(uploadError.code);
@@ -7029,35 +7128,11 @@ app.post("/api/import", (req, res) => {
       const deck = get<{ id: number }>("SELECT id FROM decks WHERE id = ? AND user_id = ?", [deckId, userId]);
       if (!deck) throw new Error("卡组不存在");
       const text = req.body.text as string | undefined;
-      let rows: Record<string, unknown>[] = [];
-
-      let source = "粘贴表格";
-      if (req.file) {
-        source = req.file.originalname || "上传文件";
-        const filename = req.file.originalname.toLowerCase();
-        if (filename.endsWith(".xlsx") || filename.endsWith(".xls")) {
-          const workbook = XLSX.read(req.file.buffer);
-          const sheet = workbook.Sheets[workbook.SheetNames[0]];
-          rows = XLSX.utils.sheet_to_json(sheet, { defval: "" });
-        } else {
-          rows = parse(req.file.buffer, {
-            columns: true,
-            skip_empty_lines: true,
-            bom: true,
-            relax_column_count: true
-          });
-        }
-      } else if (text) {
-        rows = parse(text, {
-          columns: true,
-          skip_empty_lines: true,
-          bom: true,
-          delimiter: text.includes("\t") ? "\t" : ",",
-          relax_column_count: true
-        });
-      }
+      const source = req.file?.originalname || "粘贴表格";
+      const rows = await parseImportSafely({ buffer: req.file?.buffer, filename: req.file?.originalname, text });
 
       const cards = normalizeImportRows(rows);
+      checkCardBudget(userId, cards);
       const batch = transaction(() => {
         const cardIds = cards.map((card) => createCard(userId, deckId, card));
         return createImportBatch(userId, deckId, cards.length, rows.length - cards.length, source, cardIds);
@@ -7071,7 +7146,7 @@ app.post("/api/import", (req, res) => {
 
 app.get("/api/import/recent", (req, res) => {
   const userId = currentUserId(res);
-  const limit = Number(req.query.limit ?? 5);
+  const limit = boundedInteger(req.query.limit, 5, 1, 20);
   res.json(importBatchRows(userId, limit));
 });
 
@@ -7086,21 +7161,23 @@ app.post("/api/import/:batchId/undo", (req, res) => {
     if (batch.undone_at) throw new Error("这次导入已经撤销过");
     const cardIds = parseImportBatchCardIds(batch.card_ids);
     let deleted = 0;
-    if (cardIds.length > 0) {
-      const placeholders = cardIds.map(() => "?").join(",");
-      const ownedCardIds = all<{ id: number }>(
-        `SELECT id FROM cards WHERE user_id = ? AND id IN (${placeholders})`,
-        [userId, ...cardIds]
-      ).map((row) => Number(row.id));
-      if (ownedCardIds.length > 0) {
-        deleted = ownedCardIds.length;
-        const ownedPlaceholders = ownedCardIds.map(() => "?").join(",");
-        run(`DELETE FROM reviews WHERE card_id IN (${ownedPlaceholders})`, ownedCardIds);
-        run(`DELETE FROM cards WHERE user_id = ? AND id IN (${ownedPlaceholders})`, [userId, ...ownedCardIds]);
-        removeCardsFromTodayTaskQueues(userId, ownedCardIds);
+    transaction(() => {
+      if (cardIds.length > 0) {
+        const placeholders = cardIds.map(() => "?").join(",");
+        const ownedCardIds = all<{ id: number }>(
+          `SELECT id FROM cards WHERE user_id = ? AND id IN (${placeholders})`,
+          [userId, ...cardIds]
+        ).map((row) => Number(row.id));
+        if (ownedCardIds.length > 0) {
+          deleted = ownedCardIds.length;
+          const ownedPlaceholders = ownedCardIds.map(() => "?").join(",");
+          run(`DELETE FROM reviews WHERE card_id IN (${ownedPlaceholders})`, ownedCardIds);
+          run(`DELETE FROM cards WHERE user_id = ? AND id IN (${ownedPlaceholders})`, [userId, ...ownedCardIds]);
+          removeCardsFromTodayTaskQueues(userId, ownedCardIds);
+        }
       }
-    }
-    run("UPDATE import_batches SET undone_at = ? WHERE id = ? AND user_id = ?", [nowIso(), batch.id, userId]);
+      run("UPDATE import_batches SET undone_at = ? WHERE id = ? AND user_id = ?", [nowIso(), batch.id, userId]);
+    });
     res.json({ ok: true, deleted });
   } catch (error) {
     res.status(400).json({ error: (error as Error).message });
@@ -7170,7 +7247,7 @@ app.get("/api/reviews/due", (req, res) => {
   res.json(dueCardsForUser(
     currentUserId(res),
     req.query.deckId ? Number(req.query.deckId) : undefined,
-    Number(req.query.limit ?? 50),
+    boundedInteger(req.query.limit, 50, 1, 200),
     String(req.query.kind ?? "all")
   ));
 });
@@ -7537,8 +7614,19 @@ app.put("/api/settings", (req, res) => {
   res.json({ ok: true });
 });
 
+app.use("/api", (_req, res) => { res.status(404).json({ error: "接口不存在" }); });
+
+app.use((error: Error & { status?: number; type?: string }, _req: express.Request, res: express.Response, _next: express.NextFunction) => {
+  if (res.headersSent) return _next(error);
+  if (error.type === "entity.too.large") { res.status(413).json({ error: "请求内容过大" }); return; }
+  if (error.status === 413) { res.status(413).json({ error: error.message }); return; }
+  if (error instanceof SyntaxError || error.status === 400) { res.status(400).json({ error: "请求格式无效" }); return; }
+  console.error("API request failed", error.message);
+  res.status(500).json({ error: "暂时无法完成操作，数据未确认保存，请稍后重试" });
+});
+
 if (process.env.NODE_ENV === "production") {
-  app.use(express.static(publicDir));
+  app.use(express.static(publicDir, { dotfiles: "deny" }));
   app.get("*", (_req, res) => {
     res.sendFile(path.join(publicDir, "index.html"));
   });

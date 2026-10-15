@@ -52,6 +52,26 @@ export class FixedWindowRateLimiter {
   }
 }
 
+export class TokenBucketRateLimiter {
+  private readonly entries = new Map<string, { tokens: number; updatedAt: number }>();
+  constructor(private readonly options: { capacity: number; refillPerSecond: number }) {}
+  consume(key: string, now = Date.now()): RateLimitResult {
+    const entry = this.entries.get(key) ?? { tokens: this.options.capacity, updatedAt: now };
+    entry.tokens = Math.min(this.options.capacity, entry.tokens + Math.max(0, now - entry.updatedAt) / 1000 * this.options.refillPerSecond);
+    entry.updatedAt = now;
+    const allowed = entry.tokens >= 1;
+    if (allowed) entry.tokens -= 1;
+    if (!this.entries.has(key) && this.entries.size >= 10_000) this.entries.delete(this.entries.keys().next().value!);
+    this.entries.set(key, entry);
+    return { allowed, limit: this.options.capacity, remaining: Math.floor(entry.tokens), retryAfterSeconds: Math.max(1, Math.ceil((1 - entry.tokens) / this.options.refillPerSecond)) };
+  }
+}
+
+export function boundedInteger(value: unknown, fallback: number, min: number, max: number) {
+  const number = Number(value);
+  return Number.isFinite(number) ? Math.min(max, Math.max(min, Math.floor(number))) : fallback;
+}
+
 export function normalizeCookieDomain(value: string | undefined) {
   const domain = value?.trim();
   if (!domain) return undefined;

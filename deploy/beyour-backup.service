@@ -1,0 +1,16 @@
+[Unit]
+Description=Verify and back up BeYour learning data
+
+[Service]
+Type=oneshot
+User=ecs-user
+Group=ecs-user
+UMask=0077
+Nice=15
+IOSchedulingClass=idle
+ExecStart=/usr/bin/python3 /srv/beyour/flashcards/scripts/backup-data.py --source /srv/beyour/flashcards/data --destination /srv/beyour/backups --keep 168
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectHome=true
+ProtectSystem=strict
+ReadWritePaths=/srv/beyour/backups

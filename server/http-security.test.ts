@@ -1,7 +1,19 @@
 import { describe, expect, it } from "vitest";
-import { FixedWindowRateLimiter, isAllowedCorsOrigin, normalizeCookieDomain } from "./http-security.js";
+import { boundedInteger, FixedWindowRateLimiter, TokenBucketRateLimiter, isAllowedCorsOrigin, normalizeCookieDomain } from "./http-security.js";
 
 describe("HTTP security helpers", () => {
+  it("limits bursts independently and replenishes requests gradually", () => {
+    const limiter = new TokenBucketRateLimiter({ capacity: 2, refillPerSecond: 1 });
+    expect(limiter.consume("a", 0).allowed).toBe(true);
+    expect(limiter.consume("a", 0).allowed).toBe(true);
+    expect(limiter.consume("a", 100).allowed).toBe(false);
+    expect(limiter.consume("b", 100).allowed).toBe(true);
+    expect(limiter.consume("a", 1_000).allowed).toBe(true);
+    expect(limiter.consume("a", 1_100).allowed).toBe(false);
+    expect(boundedInteger("NaN", 50, 1, 200)).toBe(50);
+    expect(boundedInteger(-1, 50, 1, 200)).toBe(1);
+    expect(boundedInteger(1e10, 50, 1, 200)).toBe(200);
+  });
   it("enforces a fixed request window and resets after expiry", () => {
     const limiter = new FixedWindowRateLimiter({ limit: 2, windowMs: 1_000 });
     expect(limiter.consume("user", 0)).toMatchObject({ allowed: true, remaining: 1 });

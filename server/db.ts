@@ -1,6 +1,7 @@
 import fs from "node:fs";
 import path from "node:path";
 import initSqlJs, { type Database, type SqlValue } from "sql.js";
+import { atomicWriteFile } from "./atomic-file.js";
 
 const dataDir = process.env.FLASHCARDS_DATA_DIR ?? path.resolve(process.cwd(), "data");
 const dbPath = path.join(dataDir, "flashcards.sqlite");
@@ -9,16 +10,31 @@ fs.mkdirSync(dataDir, { recursive: true });
 let db: Database;
 let transactionActive = false;
 let transactionDirty = false;
+let sqlModule: Awaited<ReturnType<typeof initSqlJs>>;
+let lastPersisted: Uint8Array | undefined;
 
 function persist() {
-  fs.writeFileSync(dbPath, Buffer.from(db.export()));
+  try {
+    const bytes = db.export();
+    atomicWriteFile(dbPath, bytes);
+    lastPersisted = bytes;
+  } catch (error) {
+    // A rejected save must not survive in memory and leak into a later save.
+    if (lastPersisted) {
+      db.close();
+      db = new sqlModule.Database(lastPersisted);
+    }
+    throw error;
+  }
 }
 
 export async function initDb() {
   const SQL = await initSqlJs({
     locateFile: (file: string) => path.resolve(process.cwd(), "node_modules/sql.js/dist", file)
   });
-  db = fs.existsSync(dbPath) ? new SQL.Database(fs.readFileSync(dbPath)) : new SQL.Database();
+  sqlModule = SQL;
+  lastPersisted = fs.existsSync(dbPath) ? fs.readFileSync(dbPath) : undefined;
+  db = lastPersisted ? new SQL.Database(lastPersisted) : new SQL.Database();
 
   exec(`
     CREATE TABLE IF NOT EXISTS decks (
@@ -180,6 +196,13 @@ export async function initDb() {
       FOREIGN KEY(user_id) REFERENCES users(id) ON DELETE CASCADE
     );
 
+    CREATE TABLE IF NOT EXISTS tomato_state_revisions (
+      user_id INTEGER PRIMARY KEY,
+      revision INTEGER NOT NULL DEFAULT 0,
+      updated_at TEXT NOT NULL,
+      FOREIGN KEY(user_id) REFERENCES users(id) ON DELETE CASCADE
+    );
+
     CREATE TABLE IF NOT EXISTS pronunciation_ssml_overrides (
       cache_key TEXT PRIMARY KEY,
       word TEXT NOT NULL,
@@ -260,6 +283,11 @@ export async function initDb() {
   if (!pronunciationOverrideColumns.includes("prompt")) {
     exec("ALTER TABLE pronunciation_ssml_overrides ADD COLUMN prompt TEXT DEFAULT ''");
   }
+  exec(`
+    CREATE INDEX IF NOT EXISTS idx_cards_user_deck ON cards(user_id, deck_id);
+    CREATE INDEX IF NOT EXISTS idx_decks_user_parent ON decks(user_id, parent_id);
+    CREATE INDEX IF NOT EXISTS idx_sessions_expiry ON sessions(expires_at);
+  `);
   persist();
 }
 
