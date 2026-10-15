@@ -90,6 +90,7 @@ verify_health() {
 }
 
 deploy_shared_login() {
+  remote "set -e; site_dir='/srv/beyour/tomatoes/current'; if [ -d \"\$site_dir\" ]; then cp \"\$site_dir/index.html\" \"\$site_dir/index.html.previous\"; install -m 644 '$REMOTE_DIR/deploy/tomatoes-index.html' \"\$site_dir/index.html.next\"; mv \"\$site_dir/index.html.next\" \"\$site_dir/index.html\"; fi"
   remote "set -e; login_dir='/srv/beyour/tomatoes/login'; if [ -d \"\$login_dir\" ]; then cp \"\$login_dir/index.html\" \"\$login_dir/index.html.previous\"; install -m 644 '$REMOTE_DIR/deploy/tomatoes-login.html' \"\$login_dir/index.html\"; fi"
   remote "set -e; site_dir='/srv/beyour/tomatoes/current'; if [ -d \"\$site_dir\" ]; then cp \"\$site_dir/script.js\" \"\$site_dir/script.js.previous\"; install -m 644 '$REMOTE_DIR/deploy/tomatoes-script.js' \"\$site_dir/script.js.next\"; mv \"\$site_dir/script.js.next\" \"\$site_dir/script.js\"; fi"
 }

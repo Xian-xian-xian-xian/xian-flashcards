@@ -1,0 +1,498 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>番茄基地 | 专注学习看板</title>
+    <link rel="stylesheet" href="style.css">
+  </head>
+  <body>
+    <div class="sun-glow" aria-hidden="true"></div>
+    <header class="topbar">
+      <div class="brand">
+        <span class="tomato-mark" aria-hidden="true">🍅</span>
+        <div>
+          <h1 id="siteTitle">番茄基地</h1>
+          <p>先开始 25 分钟，慢慢把今天变得踏实。</p>
+        </div>
+      </div>
+      <div class="top-actions">
+        <div class="nearest-goal-pill">
+          <strong id="nearestGoalSummary">暂无未来倒数日目标</strong>
+        </div>
+        <div class="user-pill">
+          <strong id="currentUserLabel">未登录</strong>
+        </div>
+        <button class="ghost-btn sync-btn" id="syncNowBtn" type="button">同步</button>
+        <span class="date-pill" id="todayLabel"></span>
+        <button class="ghost-btn" id="themeToggle" type="button" aria-label="切换深浅模式">🌙 深色</button>
+        <button class="ghost-btn fullscreen-btn" id="fullscreenBtn" type="button" aria-label="进入全屏专注">⛶ 全屏专注</button>
+      </div>
+    </header>
+
+    <main class="dashboard">
+      <section class="above-fold">
+        <section class="card tasks-card">
+          <div class="section-head compact">
+            <div>
+              <p class="eyebrow">Next Steps</p>
+              <h2>To Do Lists</h2>
+            </div>
+            <button class="secondary-btn" id="addTaskBtn" type="button">+ 新增 To Do</button>
+          </div>
+          <div class="task-wrap">
+            <div class="task-list" id="tasksBody"></div>
+            <div class="empty-state" id="tasksEmpty">清单还空着，写下一件准备推进的小事吧。</div>
+          </div>
+        </section>
+
+        <section class="card timer-card">
+          <div class="section-head compact">
+            <div>
+              <p class="eyebrow">Focus Timer</p>
+              <h2>核心番茄钟</h2>
+            </div>
+            <button class="duration-badge" id="durationBadge" type="button" aria-haspopup="dialog" aria-controls="durationModal" title="设置番茄时长">25 min</button>
+          </div>
+
+          <div class="timer-face">
+            <div class="timer-display" id="timerDisplay">25:00</div>
+            <p class="timer-status" id="timerStatus">准备好时，从一个小目标开始。</p>
+          </div>
+
+          <div class="timer-bottom">
+            <form id="checkInForm" class="stack-form is-hidden">
+              <label>
+                选择已有 To Do
+                <select id="taskGoalSelect" name="taskGoalSelect"></select>
+              </label>
+              <label>
+                当前任务目标
+                <input id="taskGoalInput" name="taskGoal" type="text" placeholder="开始后，写下此刻要完成的事" required>
+              </label>
+              <div class="two-fields">
+                <label>
+                  当前身体电量
+                  <input id="startBatteryInput" name="startBattery" type="number" min="0" max="10" step="0.1" placeholder="6.9" required>
+                </label>
+                <label>
+                  当前心情值
+                  <input id="startMoodInput" name="startMood" type="number" min="0" max="10" step="0.1" placeholder="7.2" required>
+                </label>
+              </div>
+            </form>
+
+            <form id="breakForm" class="break-form is-hidden">
+              <label>
+                休息倒计时（分钟）
+                <input id="breakMinutesInput" type="number" min="1" max="120" step="1" value="5" required>
+              </label>
+              <button class="secondary-btn" type="submit">修改休息时间</button>
+            </form>
+
+            <form id="startForm" class="stack-form">
+              <button class="primary-btn full" id="startBtn" type="submit">开始 25 分钟专注</button>
+            </form>
+
+            <div class="timer-action-row is-hidden" id="timerActionRow">
+              <button class="secondary-btn" id="saveCheckInBtn" form="checkInForm" type="submit">保存当前状态</button>
+              <div class="timer-controls is-hidden" id="timerControls">
+                <button class="primary-btn" id="pauseBtn" type="button">暂停</button>
+                <button class="secondary-btn is-hidden" id="reviewBtn" type="button">填写回顾</button>
+                <button class="danger-btn" id="earlyFinishBtn" type="button">提前结束</button>
+                <button class="danger-btn" id="resetBtn" type="button">重置</button>
+              </div>
+            </div>
+          </div>
+        </section>
+
+        <aside class="focus-side">
+          <section class="card target-card">
+            <div class="section-head compact">
+              <div>
+                <p class="eyebrow">Daily Goal</p>
+                <h2>今日目标番茄数</h2>
+              </div>
+              <form id="todayTargetForm" class="compact-form">
+                <input id="todayTargetInput" type="number" min="0.1" step="0.1" aria-label="今日目标有效番茄数量">
+                <button class="tiny-btn" type="submit">设置</button>
+              </form>
+            </div>
+            <div class="target-summary">
+              <strong id="targetText">今日目标：8 个🍅</strong>
+              <span id="targetProgressText">今日已完成：0 个有效🍅 · 实际记录：0 个🍅</span>
+            </div>
+            <div class="progress-track"><span id="targetProgressBar"></span></div>
+            <p class="encourage" id="targetEncourage">今天还没有番茄，先开始一颗吧。</p>
+          </section>
+
+          <section class="card stats-card">
+            <div class="section-head compact">
+              <div>
+                <p class="eyebrow">Harvest</p>
+                <h2>番茄统计</h2>
+              </div>
+            </div>
+            <div class="stats-grid" id="statsGrid"></div>
+          </section>
+        </aside>
+      </section>
+
+      <section class="below-fold">
+        <div class="below-column below-left">
+          <section class="card table-card">
+            <div class="section-head">
+              <div>
+                <p class="eyebrow">Date Log</p>
+                <h2 id="recordsTitle">今日番茄记录</h2>
+              </div>
+              <div class="records-actions">
+                <input id="recordsDateInput" type="date" aria-label="选择番茄记录日期">
+                <button class="ghost-btn" id="exportCsvBtn" type="button">导出当前日期 CSV</button>
+              </div>
+            </div>
+            <div class="table-wrap log-wrap">
+              <table class="data-table">
+                <thead>
+                  <tr>
+                    <th>Date</th>
+                    <th>No.</th>
+                    <th>Start</th>
+                    <th>End</th>
+                    <th>Content</th>
+                    <th>State</th>
+                    <th>Remark</th>
+                    <th>操作</th>
+                  </tr>
+                </thead>
+                <tbody id="recordsBody"></tbody>
+              </table>
+              <div class="empty-state" id="recordsEmpty">今天还没有番茄，先开始一颗吧。</div>
+            </div>
+          </section>
+
+          <section class="card data-card">
+            <div class="section-head compact">
+              <div>
+                <p class="eyebrow">Backup & Settings</p>
+                <h2>数据与通知设置</h2>
+              </div>
+            </div>
+            <div class="notification-setting">
+              <div>
+                <strong>结束桌面通知</strong>
+                <p>番茄结束后发送系统通知，提示你回来记录。</p>
+              </div>
+              <button class="ghost-btn" id="notificationBtn" type="button">开启结束通知</button>
+            </div>
+            <p class="helper-text">所有数据仅保存在当前浏览器的 localStorage 中。建议定期导出备份。</p>
+            <div class="data-actions">
+              <button class="secondary-btn" id="exportJsonBtn" type="button">导出 JSON</button>
+              <label class="secondary-btn upload-btn">
+                覆盖导入 JSON
+                <input id="importJsonInput" type="file" accept="application/json,.json">
+              </label>
+              <button class="danger-btn" id="clearDataBtn" type="button">清空全部数据</button>
+            </div>
+          </section>
+        </div>
+
+        <div class="below-column below-right">
+          <section class="card countdown-card">
+            <div class="section-head compact">
+              <div>
+                <p class="eyebrow">Countdown</p>
+                <h2>长期倒计时</h2>
+              </div>
+              <div class="mini-actions">
+                <button class="tiny-btn" id="newQuoteBtn" type="button">换一句</button>
+                <button class="tiny-btn" id="addLongGoalBtn" type="button">+ 目标</button>
+              </div>
+            </div>
+            <p class="gentle-quote" id="gentleQuote"></p>
+            <div class="countdown-list" id="longGoalsList"></div>
+            <div class="empty-state small" id="longGoalsEmpty">放入一个远方日期，让今天更有方向。</div>
+          </section>
+
+          <section class="card copy-card">
+            <div class="section-head compact">
+              <div>
+                <p class="eyebrow">Clipboard</p>
+                <h2>最近复制内容</h2>
+              </div>
+            </div>
+            <form class="copy-format" id="copyFormatForm">
+              <div class="copy-format-row">
+                <label>
+                  分隔符
+                  <input id="copyDelimiterInput" type="text" aria-label="复制内容分隔符">
+                </label>
+                <label>
+                  GO / BACK
+                  <select id="copyKeywordCaseSelect" aria-label="GO BACK 大小写">
+                    <option value="upper">大写</option>
+                    <option value="lower">小写</option>
+                  </select>
+                </label>
+              </div>
+              <div class="copy-field-options" aria-label="复制内容显示项">
+                <label class="checkbox-row"><input type="checkbox" data-copy-field="marker">编号和类型</label>
+                <label class="checkbox-row"><input type="checkbox" data-copy-field="content">任务内容</label>
+                <label class="checkbox-row"><input type="checkbox" data-copy-field="energyMood">电量心情</label>
+                <label class="checkbox-row"><input type="checkbox" data-copy-field="status">状态备注</label>
+                <label class="checkbox-row"><input type="checkbox" data-copy-field="total">今日合计</label>
+              </div>
+            </form>
+            <div class="latest-copy is-hidden" id="latestCopyPanel">
+              <p id="latestCopyText"></p>
+              <button class="tiny-btn" id="copyLatestBtn" type="button">一键复制</button>
+            </div>
+            <div class="copy-history" id="clipboardHistory"></div>
+            <div class="empty-state small" id="clipboardEmpty">开始番茄后，这里会保存 GO / BACK 文本。</div>
+          </section>
+        </div>
+      </section>
+    </main>
+
+    <section class="fullscreen-view" id="fullscreenView" aria-hidden="true" aria-labelledby="fullscreenTitle" inert>
+      <div class="fullscreen-shell">
+        <header class="fullscreen-head">
+          <div class="fullscreen-brand">
+            <span class="fullscreen-tomato" aria-hidden="true">🍅</span>
+            <div>
+              <p class="eyebrow">Focus Mode</p>
+              <h2 id="fullscreenTitle">核心番茄钟</h2>
+            </div>
+          </div>
+          <div class="fullscreen-meta">
+            <span class="fullscreen-date" id="fullscreenDate"></span>
+            <span class="fullscreen-clock" id="fullscreenClock" aria-live="polite"></span>
+            <span class="fullscreen-tomato-count" id="fullscreenTomatoCount" aria-label="今日番茄数量">今日 0 个🍅</span>
+            <button class="ghost-btn" id="fullscreenExitBtn" type="button">退出全屏</button>
+          </div>
+        </header>
+
+        <div class="fullscreen-main">
+          <section class="fullscreen-timer" aria-labelledby="fullscreenTimerHeading">
+            <h3 class="sr-only" id="fullscreenTimerHeading">专注倒计时</h3>
+            <div class="fullscreen-timer-display" id="fullscreenTimerDisplay" aria-live="polite">25:00</div>
+            <p class="fullscreen-timer-status" id="fullscreenTimerStatus">准备好时，从一个小目标开始。</p>
+          </section>
+        </div>
+
+        <div class="fullscreen-controls">
+          <form id="fullscreenCheckInForm" class="fullscreen-checkin is-hidden">
+            <div class="fullscreen-checkin-head">
+              <div>
+                <p class="eyebrow">Check In</p>
+                <h3>保存当前状态</h3>
+              </div>
+              <span>开始后补充三项信息，计时不会暂停。</span>
+            </div>
+            <div class="fullscreen-checkin-grid">
+              <label>
+                选择已有 To Do
+                <select id="fullscreenTaskGoalSelect" name="fullscreenTaskGoalSelect"></select>
+              </label>
+              <label>
+                当前任务目标
+                <input id="fullscreenTaskGoalInput" name="fullscreenTaskGoal" type="text" placeholder="此刻要完成的事" required>
+              </label>
+              <label>
+                当前身体电量
+                <input id="fullscreenStartBatteryInput" name="fullscreenStartBattery" type="number" min="0" max="10" step="0.1" placeholder="6.9" required>
+              </label>
+              <label>
+                当前心情值
+                <input id="fullscreenStartMoodInput" name="fullscreenStartMood" type="number" min="0" max="10" step="0.1" placeholder="7.2" required>
+              </label>
+            </div>
+            <button class="primary-btn" id="fullscreenSaveCheckInBtn" type="submit">保存当前状态</button>
+          </form>
+
+          <form id="fullscreenBreakForm" class="fullscreen-break is-hidden">
+            <label>
+              休息倒计时（分钟）
+              <input id="fullscreenBreakMinutesInput" type="number" min="1" max="120" step="1" value="5" required>
+            </label>
+            <button class="secondary-btn" type="submit">修改休息时间</button>
+          </form>
+
+          <form id="fullscreenStartForm" class="fullscreen-start-form">
+            <button class="primary-btn" id="fullscreenStartBtn" type="submit">开始 25 分钟专注</button>
+          </form>
+
+          <div class="fullscreen-action-row is-hidden" id="fullscreenActionRow">
+            <button class="secondary-btn is-hidden" id="fullscreenPauseBtn" type="button">暂停</button>
+            <button class="secondary-btn is-hidden" id="fullscreenReviewBtn" type="button">填写回顾</button>
+            <button class="danger-btn is-hidden" id="fullscreenEarlyFinishBtn" type="button">提前结束</button>
+            <button class="ghost-btn is-hidden" id="fullscreenResetBtn" type="button">重置</button>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <div class="modal-backdrop is-hidden" id="finishModal" role="dialog" aria-modal="true" aria-labelledby="finishModalTitle">
+      <form class="modal-card" id="finishForm">
+        <div class="modal-head">
+          <div>
+            <p class="eyebrow">Finish</p>
+            <h2 id="finishModalTitle">收下这个番茄</h2>
+          </div>
+          <button class="icon-btn" data-close-modal="finishModal" type="button" aria-label="关闭">×</button>
+        </div>
+        <p class="modal-tip" id="finishModalTip">最后 2 分钟可以提交回顾并立即复制 BACK 内容，专注倒计时仍会继续。</p>
+        <label>
+          任务完成情况
+          <input id="completionInput" name="completionContent" type="text" placeholder="Study Words U8L2 19%" required>
+        </label>
+        <label>
+          完成百分比
+          <input id="completionPercentInput" name="completionPercent" type="number" min="0" max="100" step="1" placeholder="30" required>
+        </label>
+        <div class="two-fields">
+          <label>
+            结束后身体电量
+            <input id="endBatteryInput" name="endBattery" type="number" min="0" max="10" step="0.1" required>
+          </label>
+          <label>
+            结束后心情值
+            <input id="endMoodInput" name="endMood" type="number" min="0" max="10" step="0.1" required>
+          </label>
+        </div>
+        <div class="two-fields">
+          <label>
+            番茄状况
+            <select id="tomatoStatusInput" name="tomatoStatus" required></select>
+          </label>
+          <label>
+            关联 To Do
+            <select id="relatedTaskInput" name="relatedTaskId"></select>
+          </label>
+        </div>
+        <label>
+          备注
+          <textarea id="finishRemarkInput" name="remark" placeholder="状态很好 / 中途看手机"></textarea>
+        </label>
+        <fieldset class="continuation-fields">
+          <legend>连续专注（选填）</legend>
+          <p>两项都填写后，本次休息结束会自动开始下一颗番茄；都留空则维持普通流程。</p>
+          <div class="two-fields">
+            <label>
+              本次休息时间（分钟）
+              <input id="continuationBreakMinutesInput" name="continuationBreakMinutes" type="number" min="1" max="120" step="1" placeholder="5">
+            </label>
+            <label>
+              下个番茄时间（分钟）
+              <input id="nextPomodoroMinutesInput" name="nextPomodoroMinutes" type="number" min="1" max="180" step="1" placeholder="25">
+            </label>
+          </div>
+        </fieldset>
+        <div class="modal-actions">
+          <button class="secondary-btn" data-close-modal="finishModal" type="button">稍后填写</button>
+          <button class="primary-btn" id="finishSubmitBtn" type="submit">提交回顾</button>
+        </div>
+      </form>
+    </div>
+
+    <div class="modal-backdrop is-hidden" id="durationModal" role="dialog" aria-modal="true" aria-labelledby="durationModalTitle">
+      <form class="modal-card small-modal" id="durationForm">
+        <div class="modal-head">
+          <div>
+            <p class="eyebrow">Timer Length</p>
+            <h2 id="durationModalTitle">设置番茄时长</h2>
+          </div>
+          <button class="icon-btn" data-close-modal="durationModal" type="button" aria-label="关闭">×</button>
+        </div>
+        <p class="modal-tip" id="durationModalTip">设置下一次手动番茄的默认专注时长。</p>
+        <label>
+          番茄时长（分钟）
+          <input id="pomodoroMinutesInput" name="pomodoroMinutes" type="number" min="1" max="180" step="1" required>
+        </label>
+        <div class="modal-actions">
+          <button class="secondary-btn" data-close-modal="durationModal" type="button">取消</button>
+          <button class="primary-btn" type="submit">保存时长</button>
+        </div>
+      </form>
+    </div>
+
+    <div class="modal-backdrop is-hidden" id="recordModal" role="dialog" aria-modal="true" aria-labelledby="recordModalTitle">
+      <form class="modal-card" id="recordForm">
+        <div class="modal-head">
+          <h2 id="recordModalTitle">编辑番茄记录</h2>
+          <button class="icon-btn" data-close-modal="recordModal" type="button" aria-label="关闭">×</button>
+        </div>
+        <input id="editRecordId" type="hidden">
+        <label>
+          任务完成情况
+          <input id="editCompletionInput" type="text" required>
+        </label>
+        <label>完成百分比<input id="editCompletionPercentInput" type="number" min="0" max="100" step="1" required></label>
+        <div class="two-fields">
+          <label>开始时间<input id="editStartTimeInput" type="time" required></label>
+          <label>结束时间<input id="editEndTimeInput" type="time" required></label>
+        </div>
+        <div class="two-fields">
+          <label>开始身体电量<input id="editStartBatteryInput" type="number" min="0" max="10" step="0.1" required></label>
+          <label>结束身体电量<input id="editEndBatteryInput" type="number" min="0" max="10" step="0.1" required></label>
+        </div>
+        <div class="two-fields">
+          <label>开始心情值<input id="editStartMoodInput" type="number" min="0" max="10" step="0.1" required></label>
+          <label>结束心情值<input id="editEndMoodInput" type="number" min="0" max="10" step="0.1" required></label>
+        </div>
+        <div class="two-fields">
+          <label>番茄状况<select id="editTomatoStatusInput" required></select></label>
+          <label>关联 To Do<select id="editRelatedTaskInput"></select></label>
+        </div>
+        <label>备注<textarea id="editRemarkInput"></textarea></label>
+        <div class="modal-actions">
+          <button class="secondary-btn" data-close-modal="recordModal" type="button">取消</button>
+          <button class="primary-btn" type="submit">保存修改</button>
+        </div>
+      </form>
+    </div>
+
+    <div class="modal-backdrop is-hidden" id="taskModal" role="dialog" aria-modal="true" aria-labelledby="taskModalTitle">
+      <form class="modal-card small-modal" id="taskForm">
+        <div class="modal-head">
+          <h2 id="taskModalTitle">新增 To Do</h2>
+          <button class="icon-btn" data-close-modal="taskModal" type="button" aria-label="关闭">×</button>
+        </div>
+        <input id="taskIdInput" type="hidden">
+        <label>To Do 名称<input id="recentTaskNameInput" type="text" placeholder="Study Words U8L1" required></label>
+        <div class="two-fields">
+          <label>预估番茄数量<input id="estimatedTomatoesInput" type="number" min="0.1" step="0.1" required></label>
+          <label>当前完成百分比<input id="progressPercentInput" type="number" min="0" max="100" step="1" value="0" required></label>
+        </div>
+        <label>备注<textarea id="recentTaskRemarkInput"></textarea></label>
+        <div class="modal-actions">
+          <button class="secondary-btn" data-close-modal="taskModal" type="button">取消</button>
+          <button class="primary-btn" type="submit">保存 To Do</button>
+        </div>
+      </form>
+    </div>
+
+    <div class="modal-backdrop is-hidden" id="longGoalModal" role="dialog" aria-modal="true" aria-labelledby="longGoalModalTitle">
+      <form class="modal-card small-modal" id="longGoalForm">
+        <div class="modal-head">
+          <h2 id="longGoalModalTitle">新增长期目标</h2>
+          <button class="icon-btn" data-close-modal="longGoalModal" type="button" aria-label="关闭">×</button>
+        </div>
+        <input id="longGoalIdInput" type="hidden">
+        <label>目标名称<input id="longGoalNameInput" type="text" placeholder="CET-4 Exam" required></label>
+        <label>目标日期<input id="longGoalDateInput" type="date" required></label>
+        <label>备注<textarea id="longGoalRemarkInput"></textarea></label>
+        <div class="modal-actions">
+          <button class="secondary-btn" data-close-modal="longGoalModal" type="button">取消</button>
+          <button class="primary-btn" type="submit">保存目标</button>
+        </div>
+      </form>
+    </div>
+
+    <div class="toast-stack" id="toastStack" aria-live="polite"></div>
+    <footer class="site-icp">
+      <a href="https://beian.miit.gov.cn/" target="_blank" rel="noopener noreferrer">苏ICP备2026045295号-1</a>
+    </footer>
+    <script src="script.js?v=20260922-safe-sync"></script>
+  </body>
+</html>

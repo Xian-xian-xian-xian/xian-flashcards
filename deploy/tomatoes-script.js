@@ -64,6 +64,7 @@
   const $ = (id) => document.getElementById(id);
 
   const elements = {
+    siteTitle: $("siteTitle"),
     todayLabel: $("todayLabel"),
     nearestGoalSummary: $("nearestGoalSummary"),
     currentUserLabel: $("currentUserLabel"),
@@ -402,19 +403,26 @@
     }));
   }
 
+  function renderSiteIdentity(username) {
+    const title = username ? `${username}的番茄基地` : "番茄基地";
+    if (elements.siteTitle) elements.siteTitle.textContent = title;
+    document.title = `${title} | 专注学习看板`;
+    if (elements.currentUserLabel) elements.currentUserLabel.textContent = username ? `用户：${username}` : "未登录";
+  }
+
   async function hydrateAuthStatus() {
     const response = await fetch(AUTH_STATUS_ENDPOINT, { credentials: "include", cache: "no-store" });
     if (!response.ok) throw new Error("auth status unavailable");
     const status = await response.json();
     const username = status.user?.username || null;
-    if (elements.currentUserLabel) elements.currentUserLabel.textContent = username ? `用户：${username}` : "未登录";
+    renderSiteIdentity(username);
     return username;
   }
 
   function requireLogin() {
     remoteStateReady = false;
     localStorage.setItem(STORAGE_KEY, JSON.stringify(appState));
-    if (elements.currentUserLabel) elements.currentUserLabel.textContent = "未登录";
+    renderSiteIdentity(null);
     window.location.assign(`/tomatoes-login/?next=${encodeURIComponent(window.location.pathname + window.location.search)}`);
   }
 
