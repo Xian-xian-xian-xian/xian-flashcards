@@ -715,7 +715,10 @@ function requireUser(req: express.Request, res: express.Response, next: express.
   }
   res.locals.user = user;
   if (!["GET", "HEAD", "OPTIONS"].includes(req.method) && !enforceRateLimit(res, userWriteLimiter.consume(String(user.id)), "保存过于频繁，请稍后再试")) return;
-  normalizeExistingCards(Number(user.id));
+  if (!normalizedUsers.has(Number(user.id))) {
+    try { transaction(() => normalizeExistingCards(Number(user.id))); }
+    catch (error) { normalizedUsers.delete(Number(user.id)); throw error; }
+  }
   next();
 }
 
